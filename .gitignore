@@ -40,3 +40,7 @@ Casks/.brew/
 __pycache__/
 *.pyc
 .venv/
+
+# Internal design handoff bundles (Claude Design exports + chat transcripts).
+# Useful as a local reference but not appropriate for the public repo.
+design-source/

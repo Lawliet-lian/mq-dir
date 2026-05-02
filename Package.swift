@@ -17,7 +17,7 @@ let package = Package(
     targets: [
         .target(
             name: "mqdirCore",
-            path: "Sources/Core"
+            path: "Sources/mqdirCore"
         ),
         .testTarget(
             name: "mqdirCoreTests",

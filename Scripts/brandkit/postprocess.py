@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent  # Scripts/brandkit/postprocess.py → repo root
 SRC = Path(__file__).resolve().parent / "output" / "app_icon_master.png"
 DST = ROOT / "Resources" / "Assets.xcassets" / "AppIcon.appiconset"
 
