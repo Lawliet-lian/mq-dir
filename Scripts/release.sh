@@ -68,8 +68,11 @@ command -v gh         >/dev/null || err "Missing gh (brew install gh)"
 [[ -n "${SIGN_BIN}" && -x "${SIGN_BIN}" ]] \
     || err "Missing Sparkle sign-update under ${SPARKLE_BIN_DIR} — run Scripts/sparkle-setup.sh"
 
-if [[ -n "$(git status --porcelain)" ]]; then
-    err "Working tree is dirty — commit or stash before releasing."
+# Reject staged or unstaged changes to *tracked* files. Untracked
+# scratch directories (e.g. .claude/) don't block a release because
+# they don't end up in the version bump commit.
+if ! git diff-index --quiet HEAD -- || ! git diff --cached --quiet; then
+    err "Working tree has uncommitted changes to tracked files — commit or stash before releasing."
 fi
 
 # 2. Bump version in project.yml. Both MARKETING_VERSION (Xcode setting)

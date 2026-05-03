@@ -34,6 +34,9 @@ Casks/.brew/
 .omc/
 .omx/
 
+# Claude Code session state — local only, never committed.
+.claude/
+
 # Vercel local link state (project + org IDs)
 .vercel/
 
