@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/"
+     version="2.0">
+  <channel>
+    <title>mq-dir Releases</title>
+    <link>https://github.com/h5nam/mq-dir</link>
+    <description>Most recent changes to mq-dir, served as a Sparkle appcast.</description>
+    <language>en</language>
+    <!-- Scripts/release.sh injects new <item> entries directly above this comment. -->
+  </channel>
+</rss>

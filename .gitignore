@@ -3,6 +3,7 @@ build/
 DerivedData/
 .build/
 .build-app/
+.build-tools/
 .swiftpm/
 Packages/
 Pods/

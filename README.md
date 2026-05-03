@@ -93,6 +93,28 @@ If a v1.x release ever proposes opt-in crash reporting, it will land behind a co
 
 PRs welcome. Contributions are accepted via [DCO](https://developercertificate.org/) — every commit needs a `Signed-off-by:` line. **No CLA.** See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow, [`SECURITY.md`](SECURITY.md) for vulnerability disclosure, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
+## Releasing (maintainers only)
+
+mq-dir auto-updates via [Sparkle](https://sparkle-project.org/). Cutting a release is two commands once the one-time setup is in place:
+
+```bash
+# One-time per maintainer machine
+Scripts/sparkle-setup.sh
+# → downloads sign_update + generate_keys, creates an EdDSA key pair under
+#   ~/.config/mq-dir-release/, prints the public key. Paste that into
+#   project.yml under `SUPublicEDKey:` and commit.
+
+# Per release
+Scripts/release.sh 0.1.0-alpha.9
+# → bumps project.yml, builds + notarizes + DMGs + EdDSA-signs, appends
+#   the new <item> to docs/appcast.xml, bumps Casks/mq-dir.rb, tags +
+#   pushes, and creates the GitHub release with the DMG attached.
+```
+
+Prerequisites the maintainer needs once: an Apple Developer account on team `WKV6T7K33K`, a notarytool keychain profile named `mq-dir-notary` (`xcrun notarytool store-credentials …`), `create-dmg` (`brew install create-dmg`), and the `gh` CLI authenticated (`gh auth login`). GitHub Pages must be enabled on the repo with **Source: Deploy from a branch / main / `/docs`** so `https://h5nam.github.io/mq-dir/appcast.xml` resolves.
+
+End users do nothing — the running app polls the appcast every 24 hours and the sidebar grows an "Update Available" button when a newer release is published.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
