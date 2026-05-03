@@ -2,7 +2,7 @@
 
 > The native macOS file manager for AI multi-taskers. Up to four independent panes for parallel projects and agents — persistent state, native polish, no compromise.
 
-[![status](https://img.shields.io/badge/status-pre--alpha-orange)](#status)
+[![status](https://img.shields.io/badge/status-alpha-orange)](#status)
 [![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)](#requirements)
 [![swift](https://img.shields.io/badge/swift-5.10-orange)](https://swift.org)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -19,26 +19,30 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 
 ## Features
 
-**Working today (alpha.8)**
+**Working today (alpha.9)**
 
-- 🟦 **1, 2, or 4-pane layouts** — focused-pane routing, independent folder per pane.
-- 💾 **Per-pane state persistence** — folder, sort, hidden-files toggle, column widths, and selection survive relaunch and `kill -9`. Bookmarks are sandbox-ready.
-- 🗂 **VS Code-style sidebar** — Favorites, Locations, Tags. One-click navigation routed to the focused pane.
-- 🔎 **Per-pane recursive search** — debounced, case-insensitive substring match across the current folder's subtree.
-- 📁 **Standard browsing** — column sorts, hidden-files toggle, parent navigation, back/forward stacks, Reveal in Finder, drag-and-drop file moves.
+- 🟦 **1 / 2H / 2V / 4-pane layouts** — focused-pane routing, independent folder per pane.
+- ↹ **Per-pane tabs** — Safari-style strip with X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], drag-to-reorder, right-click Close Other / Close to Right / Duplicate, last-tab safety placeholder.
+- 🌳 **VS Code-style tree view** — per-tab toggle, lazy child loading, ⌘-click on a folder opens it as a new tab in the same pane.
+- 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). Quick Look for images, PDF, code, video, audio, office docs; MarkdownUI for `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries.
+- ⭐ **User-editable Favorites sidebar** — drag folders in, right-click Remove or Rename, drag to reorder, ⌘D adds the focused pane's folder. Real Finder folder icons, stale-path styling.
+- 📁 **Projects (workspaces)** — named snapshots of (layout + pane tabs + focus). + button creates one, click switches, right-click Rename / Delete, drag to reorder. Switching auto-saves the outgoing project.
+- 💾 **State persistence** — every pane / tab / favorite / project survives relaunch, force-quit, and even schema upgrades (legacy `state.json` shapes auto-migrate).
+- 🔎 **Per-pane recursive search** — debounced, case-insensitive substring match across the current folder's subtree. ⌘F.
+- 🔄 **In-app auto-update** — Sparkle 2 polls the appcast every 24 h; when a new release is out, the sidebar grows an "Update Available" button that runs the standard install/relaunch flow.
 - 🎨 **Native macOS look** — SwiftUI + AppKit, system theme tokens, hand-finished app icon.
 
 **Coming next**
 
-- ↹ Per-pane tabs and 3-pane layout (M2 wrap-up).
-- 👀 Spacebar QuickLook + inline image / video / audio / PDF preview (M3).
-- ⌨️ Keyboard shortcuts, settings UI, polished sidebar favorites (M6).
+- 3-pane layout option.
+- Spacebar floating Quick Look (Finder-style).
+- Keyboard shortcut customization, settings UI.
 
 See [Roadmap](#roadmap) for the full picture.
 
 ## Status
 
-**Pre-alpha.** The app builds and runs, the working set above is stable enough for daily-driving by the maintainer, but there are no signed releases yet. Expect rough edges. Track progress in [`CHANGELOG.md`](CHANGELOG.md).
+**Alpha.** v0.1.0-alpha.9 is a Developer ID-signed, Apple-notarized release. The working set above is stable enough for daily-driving by the maintainer; expect rough edges around ergonomics and edge cases. Track per-release detail in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Requirements
 
@@ -48,10 +52,14 @@ See [Roadmap](#roadmap) for the full picture.
 
 ## Install
 
-No signed binaries yet — build from source while the project is pre-alpha.
+### From the signed DMG (recommended)
+
+Grab the latest `.dmg` from [Releases](https://github.com/h5nam/mq-dir/releases) and drag `mq-dir.app` into `/Applications`. Notarized + stapled, so Gatekeeper opens it without a right-click trick. The running app then auto-updates via Sparkle on its 24-hour cadence (or whenever you click the sidebar's "Update Available" button).
+
+### From source
 
 ```bash
-git clone https://github.com/<owner>/mq-dir.git
+git clone https://github.com/h5nam/mq-dir.git
 cd mq-dir
 Scripts/bootstrap.sh   # installs XcodeGen and the xcodes CLI
 open mq-dir.xcodeproj
@@ -65,15 +73,13 @@ open mq-dir.xcodeproj
 swift test
 ```
 
-Signed and notarized release builds, plus a maintainer Homebrew tap, are scaffolded for M5 — see the [roadmap](#roadmap).
-
 ## Privacy
 
 **No telemetry. No crash reporting. No analytics. Ever, in v1.**
 
-mq-dir is local-only. It reads your filesystem to show it back to you and writes its own state to `~/Library/Application Support/com.mqdir.app/`. No network calls. No phone-home. No "anonymous usage stats."
+mq-dir is local-only for everything except the auto-update check. It reads your filesystem to show it back to you and writes its own state to `~/Library/Application Support/com.mqdir.app/`. The single network egress is Sparkle fetching `https://h5nam.github.io/mq-dir/appcast.xml` once a day to look for a newer release; nothing else phones home.
 
-If a v1.x release ever proposes opt-in crash reporting, it will land behind a config toggle defaulting to off, with the source clearly visible. Until then, the network code path simply does not exist.
+If a v1.x release ever proposes opt-in crash reporting, it will land behind a config toggle defaulting to off, with the source clearly visible.
 
 ## Roadmap
 
@@ -81,11 +87,11 @@ If a v1.x release ever proposes opt-in crash reporting, it will land behind a co
 |---|---|---|
 | **M0** | App shell, OSS docs, CI, signing scaffold | ✅ done |
 | **M1** | Single-pane MVP — folder browsing, sorting, persistent per-folder state | ✅ done |
-| **M2** | Multi-pane — 1/2/(3)/4-pane layouts, per-pane tabs, session restore | 🟡 in progress (layouts + persistence done; tabs and 3-pane pending) |
-| **M3** | Embedded preview — QuickLook, inline image/video/audio/PDF | ⬜️ planned |
-| **M4** | Sidebar tree — VS Code-style folder tree, lazy-loaded | 🟡 partial (sidebar shipped; tree expansion pending) |
-| **M5** | Release infra — signed/notarized builds, Homebrew tap, nightly | ⬜️ scaffolded |
-| **M6** | UX polish — keyboard shortcuts, in-pane search refinements, drag/drop, settings | 🟡 partial |
+| **M2** | Multi-pane — 1/2/4-pane layouts, per-pane tabs, session restore | ✅ done (3-pane pending) |
+| **M3** | Embedded preview — Quick Look + MarkdownUI for `.md` | ✅ done (Spacebar floating QL pending) |
+| **M4** | Sidebar — favorites, projects, tree view per tab | ✅ done |
+| **M5** | Release infra — signed/notarized builds, EdDSA-signed Sparkle updates, Homebrew cask | ✅ done |
+| **M6** | UX polish — keyboard shortcuts, search, drag/drop, settings | 🟡 partial (shortcuts + search + drag/drop in; settings UI pending) |
 
 **Out of scope for v1:** cloud sync, archive previews, file editing, plugins, iPadOS/iOS port, localization beyond English.
 
@@ -95,25 +101,32 @@ PRs welcome. Contributions are accepted via [DCO](https://developercertificate.o
 
 ## Releasing (maintainers only)
 
-mq-dir auto-updates via [Sparkle](https://sparkle-project.org/). Cutting a release is two commands once the one-time setup is in place:
-
 ```bash
-# One-time per maintainer machine
-Scripts/sparkle-setup.sh
-# → downloads sign_update + generate_keys, creates an EdDSA key pair under
-#   ~/.config/mq-dir-release/, prints the public key. Paste that into
-#   project.yml under `SUPublicEDKey:` and commit.
-
-# Per release
-Scripts/release.sh 0.1.0-alpha.9
-# → bumps project.yml, builds + notarizes + DMGs + EdDSA-signs, appends
-#   the new <item> to docs/appcast.xml, bumps Casks/mq-dir.rb, tags +
-#   pushes, and creates the GitHub release with the DMG attached.
+Scripts/release.sh 0.1.0-alpha.10
 ```
 
-Prerequisites the maintainer needs once: an Apple Developer account on team `WKV6T7K33K`, a notarytool keychain profile named `mq-dir-notary` (`xcrun notarytool store-credentials …`), `create-dmg` (`brew install create-dmg`), and the `gh` CLI authenticated (`gh auth login`). GitHub Pages must be enabled on the repo with **Source: Deploy from a branch / main / `/docs`** so `https://h5nam.github.io/mq-dir/appcast.xml` resolves.
+That's it. The script bumps the version, builds Release with Developer ID, re-signs every nested binary inside-out (Sparkle's helpers don't auto-inherit signing), notarizes via the stored `mq-dir-notary` keychain profile + staples, builds and EdDSA-signs the DMG, appends a fresh `<item>` to `docs/appcast.xml`, bumps `Casks/mq-dir.rb`, tags + pushes, and creates the GitHub release.
 
-End users do nothing — the running app polls the appcast every 24 hours and the sidebar grows an "Update Available" button when a newer release is published.
+**One-time setup** (per maintainer machine):
+
+```bash
+Scripts/sparkle-setup.sh
+# → downloads Sparkle binary tools, generates the EdDSA key pair in your
+#   macOS keychain, prints the public half. Already embedded in
+#   project.yml's SUPublicEDKey for this project; only needed if a
+#   future maintainer rotates the key.
+
+xcrun notarytool store-credentials mq-dir-notary \
+    --apple-id <your-apple-id> --team-id WKV6T7K33K \
+    --password <app-specific-password>
+
+brew install create-dmg
+gh auth login
+```
+
+Plus give codesign access to the Developer ID private key once: Keychain Access → login → My Certificates → expand `Developer ID Application: …` → right-click the private key → Get Info → Access Control → **Allow all applications to access this item**. Without this, every release prompts for your Mac password ~10 times during the inside-out re-sign.
+
+GitHub Pages is already enabled on `main` / `/docs` so the appcast at `https://h5nam.github.io/mq-dir/appcast.xml` updates within a minute of every push.
 
 ## License
 
