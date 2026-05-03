@@ -227,12 +227,42 @@ struct BrowserPaneView: View {
     /// edge of the pane header so it's discoverable per-tab without taking
     /// space from the breadcrumb.
     private var viewModeToggle: some View {
-        HStack(spacing: 0) {
-            viewModeButton(.list, symbol: "list.bullet", help: "List View")
-            viewModeButton(.tree, symbol: "rectangle.split.3x1", help: "Tree View")
+        HStack(spacing: 4) {
+            HStack(spacing: 0) {
+                viewModeButton(.list, symbol: "list.bullet", help: "List View")
+                viewModeButton(.tree, symbol: "rectangle.split.3x1", help: "Tree View")
+            }
+            .padding(1)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
+
+            previewToggleButton
         }
-        .padding(1)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    /// Eye-icon toggle for the right-side preview panel. Distinct from
+    /// the view-mode segmented control because it's a binary on/off,
+    /// orthogonal to list-vs-tree.
+    private var previewToggleButton: some View {
+        Button {
+            viewModel.previewVisible.toggle()
+        } label: {
+            Image(systemName: viewModel.previewVisible
+                  ? "sidebar.right"
+                  : "sidebar.squares.right")
+                .font(.system(size: 9))
+                .foregroundStyle(viewModel.previewVisible
+                                 ? Theme.Color.label
+                                 : Theme.Color.labelSecondary)
+                .frame(width: 22, height: 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(viewModel.previewVisible
+                              ? Color.white.opacity(0.10)
+                              : Color.white.opacity(0.04))
+                )
+        }
+        .buttonStyle(.plain)
+        .help("Preview Pane (⌘⇧P)")
     }
 
     private func viewModeButton(_ mode: PaneViewMode, symbol: String, help: String) -> some View {
@@ -373,7 +403,25 @@ struct BrowserPaneView: View {
             emptyState
         } else if let errorMessage = viewModel.errorMessage {
             errorState(errorMessage)
-        } else if viewModel.viewMode == .tree {
+        } else if viewModel.previewVisible {
+            // Preview panel takes the right ~40%; user can drag the
+            // split handle to retune. List/tree mode applies on the left.
+            HSplitView {
+                primaryFileView
+                    .frame(minWidth: 220, idealWidth: 380)
+                PreviewPanel(viewModel: viewModel)
+                    .frame(minWidth: 200, idealWidth: 280)
+            }
+        } else {
+            primaryFileView
+        }
+    }
+
+    /// Just the file list/tree, factored out so it can render either
+    /// standalone or as the left half of the preview split.
+    @ViewBuilder
+    private var primaryFileView: some View {
+        if viewModel.viewMode == .tree {
             TreeFileListView(
                 viewModel: viewModel,
                 isFocused: isFocused,

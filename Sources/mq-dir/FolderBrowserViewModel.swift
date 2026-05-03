@@ -44,6 +44,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Per-tab view mode. Switching to `.tree` triggers a lazy enumeration
     /// of the root, then of any folder the user expands.
     @Published var viewMode: PaneViewMode = .list
+    /// Whether the right-side preview panel is shown for this tab.
+    @Published var previewVisible: Bool = false
     /// Set of expanded directory paths in tree mode. Stored as paths so
     /// it survives serialization without bookmark plumbing — losing access
     /// to a path just collapses that node, never breaks the view.
@@ -101,6 +103,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         self.pendingRestoredSelection = state.selectedURLPaths
         self.viewMode = state.viewMode
         self.expandedPaths = Set(state.expandedPaths)
+        self.previewVisible = state.previewVisible
 
         if let bookmark = state.folderBookmark,
            let resolved = PersistenceService.resolveBookmark(bookmark) {
@@ -139,7 +142,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             columnWidths: columnWidths,
             selectedURLPaths: selectedURLs.map(\.path),
             viewMode: viewMode,
-            expandedPaths: Array(expandedPaths)
+            expandedPaths: Array(expandedPaths),
+            previewVisible: previewVisible
         )
     }
 

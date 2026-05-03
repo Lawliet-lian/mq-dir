@@ -525,6 +525,9 @@ private struct NavigationNotifications: ViewModifier {
                     sidebar.add(url: url)
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirTogglePreviewRequested)) { _ in
+                focusedPane.previewVisible.toggle()
+            }
     }
 }
 

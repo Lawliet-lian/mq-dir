@@ -19,6 +19,10 @@ struct TabState: Codable, Equatable, Sendable {
     /// raw paths (not bookmarks) because they're positional cues — losing
     /// access to a folder just means it renders collapsed, not broken.
     var expandedPaths: [String]
+    /// Whether the right-side preview panel is visible for this tab.
+    /// Defaults off so existing tabs don't grow a new chrome surface
+    /// behind the user's back on upgrade.
+    var previewVisible: Bool
 
     init(
         folderBookmark: Data? = nil,
@@ -28,7 +32,8 @@ struct TabState: Codable, Equatable, Sendable {
         columnWidths: PaneColumnWidths = PaneColumnWidths(),
         selectedURLPaths: [String] = [],
         viewMode: PaneViewMode = .list,
-        expandedPaths: [String] = []
+        expandedPaths: [String] = [],
+        previewVisible: Bool = false
     ) {
         self.folderBookmark = folderBookmark
         self.sortKey = sortKey
@@ -38,14 +43,16 @@ struct TabState: Codable, Equatable, Sendable {
         self.selectedURLPaths = selectedURLPaths
         self.viewMode = viewMode
         self.expandedPaths = expandedPaths
+        self.previewVisible = previewVisible
     }
 
     /// Default the new fields when reading a `state.json` written before
-    /// the tree view existed. Without this the auto-synthesized decoder
-    /// would refuse to load any old file.
+    /// the tree view / preview pane existed. Without this the auto-synthesized
+    /// decoder would refuse to load any old file.
     private enum CodingKeys: String, CodingKey {
         case folderBookmark, sortKey, sortAscending, includeHidden,
-             columnWidths, selectedURLPaths, viewMode, expandedPaths
+             columnWidths, selectedURLPaths, viewMode, expandedPaths,
+             previewVisible
     }
 
     init(from decoder: Decoder) throws {
@@ -58,7 +65,8 @@ struct TabState: Codable, Equatable, Sendable {
             columnWidths: (try c.decodeIfPresent(PaneColumnWidths.self, forKey: .columnWidths)) ?? PaneColumnWidths(),
             selectedURLPaths: (try c.decodeIfPresent([String].self, forKey: .selectedURLPaths)) ?? [],
             viewMode: (try c.decodeIfPresent(PaneViewMode.self, forKey: .viewMode)) ?? .list,
-            expandedPaths: (try c.decodeIfPresent([String].self, forKey: .expandedPaths)) ?? []
+            expandedPaths: (try c.decodeIfPresent([String].self, forKey: .expandedPaths)) ?? [],
+            previewVisible: (try c.decodeIfPresent(Bool.self, forKey: .previewVisible)) ?? false
         )
     }
 }

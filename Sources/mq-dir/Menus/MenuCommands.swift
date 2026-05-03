@@ -27,6 +27,8 @@ struct MenuCommands: Commands {
         CommandGroup(after: .textEditing) {
             Button("Find") { post(.mqdirFocusSearchRequested) }
                 .keyboardShortcut("f", modifiers: .command)
+            Button("Show Preview") { post(.mqdirTogglePreviewRequested) }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .toolbar) {

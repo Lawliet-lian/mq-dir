@@ -17,6 +17,11 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
     SWIFT_STRICT_CONCURRENCY: complete
 
+packages:
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: 2.4.0
+
 targets:
   mq-dir:
     type: application
@@ -27,6 +32,9 @@ targets:
       - path: Resources
         excludes:
           - "Entitlements/**"
+    dependencies:
+      - package: MarkdownUI
+        product: MarkdownUI
     info:
       path: Sources/mq-dir/Info.plist
       properties:

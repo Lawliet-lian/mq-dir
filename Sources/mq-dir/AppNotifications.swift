@@ -31,6 +31,10 @@ extension Notification.Name {
     /// new view to live next to the source rather than across panes.
     static let mqdirOpenURLInNewTabRequested =
         Notification.Name("mqdir.openURLInNewTabRequested")
+    /// Toggle the right-side preview panel for the focused pane's active
+    /// tab. Bound to ⌘⇧P, matching Finder's "Show/Hide Preview" hotkey.
+    static let mqdirTogglePreviewRequested =
+        Notification.Name("mqdir.togglePreviewRequested")
     static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
     /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
     /// so the active window can flush a synchronous save before exit.
