@@ -38,8 +38,6 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 - Spacebar floating Quick Look (Finder-style).
 - Keyboard shortcut customization, settings UI.
 
-See [Roadmap](#roadmap) for the full picture.
-
 ## Status
 
 **Alpha.** v0.1.0-alpha.9 is a Developer ID-signed, Apple-notarized release. The working set above is stable enough for daily-driving by the maintainer; expect rough edges around ergonomics and edge cases. Track per-release detail in [`CHANGELOG.md`](CHANGELOG.md).
@@ -81,19 +79,9 @@ mq-dir is local-only for everything except the auto-update check. It reads your 
 
 If a v1.x release ever proposes opt-in crash reporting, it will land behind a config toggle defaulting to off, with the source clearly visible.
 
-## Roadmap
+## Out of scope for v1
 
-| Milestone | Focus | Status |
-|---|---|---|
-| **M0** | App shell, OSS docs, CI, signing scaffold | ✅ done |
-| **M1** | Single-pane MVP — folder browsing, sorting, persistent per-folder state | ✅ done |
-| **M2** | Multi-pane — 1/2/4-pane layouts, per-pane tabs, session restore | ✅ done (3-pane pending) |
-| **M3** | Embedded preview — Quick Look + MarkdownUI for `.md` | ✅ done (Spacebar floating QL pending) |
-| **M4** | Sidebar — favorites, projects, tree view per tab | ✅ done |
-| **M5** | Release infra — signed/notarized builds, EdDSA-signed Sparkle updates, Homebrew cask | ✅ done |
-| **M6** | UX polish — keyboard shortcuts, search, drag/drop, settings | 🟡 partial (shortcuts + search + drag/drop in; settings UI pending) |
-
-**Out of scope for v1:** cloud sync, archive previews, file editing, plugins, iPadOS/iOS port, localization beyond English.
+Cloud sync, archive previews, file editing, plugins, iPadOS/iOS port, localization beyond English.
 
 ## Contributing
 
