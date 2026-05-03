@@ -55,7 +55,9 @@ struct BrowserPaneView: View {
         VStack(spacing: 0) {
             tabBar
             paneHeader
-            columnHeader
+            if viewModel.viewMode == .list {
+                columnHeader
+            }
             content
         }
         .background(Theme.Color.paneBg)
@@ -210,6 +212,7 @@ struct BrowserPaneView: View {
                     .foregroundStyle(Theme.Color.labelTertiary)
             }
             Spacer(minLength: 0)
+            viewModeToggle
         }
         .font(.system(size: 10))
         .padding(.horizontal, 10)
@@ -217,6 +220,40 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separatorFaint).frame(height: 0.5)
         }
+    }
+
+    /// Tiny segmented control: list-bullet / chevron-right.dotted to toggle
+    /// between flat columns and the VS Code-style tree. Lives on the right
+    /// edge of the pane header so it's discoverable per-tab without taking
+    /// space from the breadcrumb.
+    private var viewModeToggle: some View {
+        HStack(spacing: 0) {
+            viewModeButton(.list, symbol: "list.bullet", help: "List View")
+            viewModeButton(.tree, symbol: "rectangle.split.3x1", help: "Tree View")
+        }
+        .padding(1)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func viewModeButton(_ mode: PaneViewMode, symbol: String, help: String) -> some View {
+        Button {
+            viewModel.viewMode = mode
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 9))
+                .foregroundStyle(viewModel.viewMode == mode
+                                 ? Theme.Color.label
+                                 : Theme.Color.labelSecondary)
+                .frame(width: 22, height: 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(viewModel.viewMode == mode
+                              ? Color.white.opacity(0.10)
+                              : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private var itemCountLabel: String {
@@ -336,6 +373,12 @@ struct BrowserPaneView: View {
             emptyState
         } else if let errorMessage = viewModel.errorMessage {
             errorState(errorMessage)
+        } else if viewModel.viewMode == .tree {
+            TreeFileListView(
+                viewModel: viewModel,
+                isFocused: isFocused,
+                onFocus: onFocus
+            )
         } else {
             fileList
         }

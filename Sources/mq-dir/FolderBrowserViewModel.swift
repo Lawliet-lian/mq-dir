@@ -41,6 +41,19 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     @Published private(set) var sortKey: FileEntrySortKey = .name
     @Published private(set) var sortAscending = true
     @Published var columnWidths = PaneColumnWidths()
+    /// Per-tab view mode. Switching to `.tree` triggers a lazy enumeration
+    /// of the root, then of any folder the user expands.
+    @Published var viewMode: PaneViewMode = .list
+    /// Set of expanded directory paths in tree mode. Stored as paths so
+    /// it survives serialization without bookmark plumbing — losing access
+    /// to a path just collapses that node, never breaks the view.
+    @Published var expandedPaths: Set<String> = []
+    /// Cached children per directory path for tree mode. Populated on
+    /// expand, evicted on `reload()`. Doesn't bloat memory in normal use
+    /// because the user only expands what they actively browse. The
+    /// setter is open so `TreeFileListView` can mirror the root entries
+    /// into the cache without a dedicated method on the VM.
+    @Published var treeChildren: [String: [FileEntry]] = [:]
     @Published private(set) var backStack: [URL] = []
     @Published private(set) var forwardStack: [URL] = []
     @Published private(set) var selectionAnchor: FileEntry.ID?
@@ -86,6 +99,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         self.includeHidden = state.includeHidden
         self.columnWidths = state.columnWidths
         self.pendingRestoredSelection = state.selectedURLPaths
+        self.viewMode = state.viewMode
+        self.expandedPaths = Set(state.expandedPaths)
 
         if let bookmark = state.folderBookmark,
            let resolved = PersistenceService.resolveBookmark(bookmark) {
@@ -97,6 +112,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             }
             self.folderURL = resolved
             reload()
+            // Pre-warm any expanded subtrees so the tree view doesn't
+            // spend its first render flickering placeholders.
+            for path in expandedPaths {
+                loadChildren(for: URL(fileURLWithPath: path))
+            }
         }
     }
 
@@ -117,8 +137,56 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             sortAscending: sortAscending,
             includeHidden: includeHidden,
             columnWidths: columnWidths,
-            selectedURLPaths: selectedURLs.map(\.path)
+            selectedURLPaths: selectedURLs.map(\.path),
+            viewMode: viewMode,
+            expandedPaths: Array(expandedPaths)
         )
+    }
+
+    // MARK: Tree mode
+
+    /// Toggle expansion for a directory in tree mode. Lazy-loads children
+    /// on first expand; collapsing keeps the cached children so re-expand
+    /// is instant. Cache invalidates only on `reload()`.
+    func toggleExpanded(_ url: URL) {
+        let path = url.path
+        if expandedPaths.contains(path) {
+            expandedPaths.remove(path)
+        } else {
+            expandedPaths.insert(path)
+            if treeChildren[path] == nil {
+                loadChildren(for: url)
+            }
+        }
+    }
+
+    func isExpanded(_ url: URL) -> Bool {
+        expandedPaths.contains(url.path)
+    }
+
+    /// Synchronous child enumeration. The tree typically lazy-loads only
+    /// the folders the user touches, so blocking the main actor briefly
+    /// here is fine; the call is bounded by one directory's worth of
+    /// entries. If a folder ever proves slow we can move this to a Task.
+    private func loadChildren(for url: URL) {
+        guard let entries = try? FileSystemService()
+            .enumerateDirectory(at: url, includingHidden: includeHidden)
+        else { return }
+        treeChildren[url.path] = FileEntrySorter.sorted(
+            entries, by: sortKey, ascending: sortAscending
+        )
+    }
+
+    /// Discard cached subtree contents so a fresh `reload()` of the root
+    /// also refreshes any expanded children. Re-issues child loads for the
+    /// folders that were expanded, which keeps their state visible without
+    /// requiring the user to toggle them again.
+    func refreshTreeChildren() {
+        let stillExpanded = expandedPaths
+        treeChildren.removeAll()
+        for path in stillExpanded {
+            loadChildren(for: URL(fileURLWithPath: path))
+        }
     }
 
     var selectedEntry: FileEntry? {
@@ -309,6 +377,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                     }
                 }
                 isLoading = false
+                // Re-fetch any expanded subtrees so the tree view reflects
+                // the same on-disk state the flat list just refreshed against.
+                refreshTreeChildren()
             } catch {
                 guard !Task.isCancelled else {
                     return
@@ -331,6 +402,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
 
         entries = FileEntrySorter.sorted(entries, by: sortKey, ascending: sortAscending)
+        // Apply the same sort across every cached tree subtree so the
+        // hierarchy stays internally consistent.
+        treeChildren = treeChildren.mapValues {
+            FileEntrySorter.sorted($0, by: sortKey, ascending: sortAscending)
+        }
     }
 
     func openSelected() {

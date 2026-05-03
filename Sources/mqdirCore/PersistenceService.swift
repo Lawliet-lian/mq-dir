@@ -13,6 +13,12 @@ struct TabState: Codable, Equatable, Sendable {
     var includeHidden: Bool
     var columnWidths: PaneColumnWidths
     var selectedURLPaths: [String]
+    /// `.list` flat columns vs `.tree` VS Code-style nested view.
+    var viewMode: PaneViewMode
+    /// Filesystem paths the tree view should render expanded. Stored as
+    /// raw paths (not bookmarks) because they're positional cues — losing
+    /// access to a folder just means it renders collapsed, not broken.
+    var expandedPaths: [String]
 
     init(
         folderBookmark: Data? = nil,
@@ -20,7 +26,9 @@ struct TabState: Codable, Equatable, Sendable {
         sortAscending: Bool = true,
         includeHidden: Bool = false,
         columnWidths: PaneColumnWidths = PaneColumnWidths(),
-        selectedURLPaths: [String] = []
+        selectedURLPaths: [String] = [],
+        viewMode: PaneViewMode = .list,
+        expandedPaths: [String] = []
     ) {
         self.folderBookmark = folderBookmark
         self.sortKey = sortKey
@@ -28,6 +36,30 @@ struct TabState: Codable, Equatable, Sendable {
         self.includeHidden = includeHidden
         self.columnWidths = columnWidths
         self.selectedURLPaths = selectedURLPaths
+        self.viewMode = viewMode
+        self.expandedPaths = expandedPaths
+    }
+
+    /// Default the new fields when reading a `state.json` written before
+    /// the tree view existed. Without this the auto-synthesized decoder
+    /// would refuse to load any old file.
+    private enum CodingKeys: String, CodingKey {
+        case folderBookmark, sortKey, sortAscending, includeHidden,
+             columnWidths, selectedURLPaths, viewMode, expandedPaths
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            folderBookmark: try c.decodeIfPresent(Data.self, forKey: .folderBookmark),
+            sortKey: (try c.decodeIfPresent(FileEntrySortKey.self, forKey: .sortKey)) ?? .name,
+            sortAscending: (try c.decodeIfPresent(Bool.self, forKey: .sortAscending)) ?? true,
+            includeHidden: (try c.decodeIfPresent(Bool.self, forKey: .includeHidden)) ?? false,
+            columnWidths: (try c.decodeIfPresent(PaneColumnWidths.self, forKey: .columnWidths)) ?? PaneColumnWidths(),
+            selectedURLPaths: (try c.decodeIfPresent([String].self, forKey: .selectedURLPaths)) ?? [],
+            viewMode: (try c.decodeIfPresent(PaneViewMode.self, forKey: .viewMode)) ?? .list,
+            expandedPaths: (try c.decodeIfPresent([String].self, forKey: .expandedPaths)) ?? []
+        )
     }
 }
 
