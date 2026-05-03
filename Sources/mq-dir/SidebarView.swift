@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @ObservedObject var viewModel: SidebarViewModel
     @ObservedObject var workspace: WorkspaceManager
+    @ObservedObject var updateManager: UpdateManager
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
 
@@ -36,17 +37,51 @@ struct SidebarView: View {
     @State private var draggingProjectID: UUID?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                favoritesSection
-                    .padding(.bottom, 8)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    favoritesSection
+                        .padding(.bottom, 8)
 
-                projectsSection
+                    projectsSection
+                }
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Bottom-left update affordance — only renders when Sparkle's
+            // background check has surfaced an available update.
+            if updateManager.updateAvailable {
+                updateAvailableButton
+            }
         }
         .background(Theme.Color.sidebarBg)
+    }
+
+    /// Tinted bar that lives at the bottom of the sidebar when an update
+    /// is waiting. Click → Sparkle's standard "install update" dialog.
+    private var updateAvailableButton: some View {
+        Button {
+            updateManager.checkForUpdatesAndShowUI()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.Color.accent)
+                Text("Update Available")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.Color.label)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Color.accent.opacity(0.12))
+            .overlay(alignment: .top) {
+                Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Install the available update")
     }
 
     // MARK: Favorites

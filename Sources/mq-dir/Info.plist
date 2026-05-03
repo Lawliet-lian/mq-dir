@@ -36,5 +36,13 @@
 	<string>mq-dir needs access to your network volumes to browse files there.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
 	<string>mq-dir needs access to your removable volumes to browse files there.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://h5nam.github.io/mq-dir/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string></string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

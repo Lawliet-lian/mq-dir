@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MainWindowView: View {
     @ObservedObject var workspace: WorkspaceManager
+    @ObservedObject var updateManager: UpdateManager
 
     @StateObject private var pane0: PaneTabsViewModel
     @StateObject private var pane1: PaneTabsViewModel
@@ -26,8 +27,9 @@ struct MainWindowView: View {
     /// reload pane state in place.
     private let projectID: UUID
 
-    init(workspace: WorkspaceManager) {
+    init(workspace: WorkspaceManager, updateManager: UpdateManager) {
         self.workspace = workspace
+        self.updateManager = updateManager
         let project = workspace.activeProject
         self.projectID = project.id
         let state = project.state
@@ -80,7 +82,12 @@ struct MainWindowView: View {
 
     private var windowChrome: some View {
         HSplitView {
-            SidebarView(viewModel: sidebar, workspace: workspace, selectedURL: $sidebarSelection) { url in
+            SidebarView(
+                viewModel: sidebar,
+                workspace: workspace,
+                updateManager: updateManager,
+                selectedURL: $sidebarSelection
+            ) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
                 focusedPane.openFolder(url)
             }
@@ -590,6 +597,6 @@ private struct GlobalNotifications: ViewModifier {
 }
 
 #Preview {
-    MainWindowView(workspace: WorkspaceManager())
+    MainWindowView(workspace: WorkspaceManager(), updateManager: UpdateManager())
         .frame(width: 1100, height: 700)
 }

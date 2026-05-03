@@ -5,6 +5,7 @@ import SwiftUI
 struct mqdirApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var workspace = WorkspaceManager()
+    @StateObject private var updateManager = UpdateManager()
 
     init() {
         // Forward NSApplication's willTerminate to our internal notification
@@ -28,7 +29,7 @@ struct mqdirApp: App {
             // instance reads its initial state from the project we're
             // moving to. Without this, swapping the active project would
             // leave the old pane VMs alive holding stale folder state.
-            MainWindowView(workspace: workspace)
+            MainWindowView(workspace: workspace, updateManager: updateManager)
                 .id(workspace.workspace.activeProjectID)
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(.dark)
