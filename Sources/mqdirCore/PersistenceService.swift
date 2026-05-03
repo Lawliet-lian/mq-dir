@@ -327,11 +327,22 @@ struct PersistenceService: @unchecked Sendable {
 
     /// Writes the state atomically. Throws so the caller (typically a
     /// debounced save) can log a failure without crashing.
+    ///
+    /// Lock the file down to owner-only after writing — the JSON contains
+    /// security-scoped bookmarks (and, in App Store mode, what amount to
+    /// authentication tokens for each remembered folder), so the default
+    /// umask (often 0644) is too permissive for a multi-user box.
+    /// Permission failures are non-fatal: the write succeeded, the file
+    /// is just slightly more readable than ideal.
     func saveState(_ state: WorkspaceState) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(state)
         try data.write(to: stateURL, options: [.atomic])
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: stateURL.path
+        )
     }
 
     /// On-disk location of the state file (exposed for diagnostics/tests).
