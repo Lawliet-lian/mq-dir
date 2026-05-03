@@ -41,7 +41,7 @@
 	<key>SUFeedURL</key>
 	<string>https://h5nam.github.io/mq-dir/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string></string>
+	<string>IY4tnuP6Qv2cFSouGhddHVrD015Ffz6KsycibEJVJxw=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 </dict>

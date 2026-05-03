@@ -61,7 +61,7 @@ targets:
         # will refuse to *install* updates (the safe default), but the
         # check / UI flow exercises end-to-end.
         SUFeedURL: https://h5nam.github.io/mq-dir/appcast.xml
-        SUPublicEDKey: ""
+        SUPublicEDKey: "IY4tnuP6Qv2cFSouGhddHVrD015Ffz6KsycibEJVJxw="
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 86400
     entitlements:
