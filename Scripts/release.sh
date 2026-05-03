@@ -90,13 +90,20 @@ xcodegen generate >/dev/null
 step "Building Release configuration"
 mkdir -p "${BUILD_DIR}" "${DIST}"
 rm -rf "${DERIVED}"
+# Force Developer ID signing for release. project.yml leaves the base
+# CODE_SIGN_STYLE on Automatic so contributors don't need a paid team
+# for dev builds; the override here is the *only* place we ask for the
+# notarize-eligible identity.
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
     -project "${APP_NAME}.xcodeproj" \
     -scheme "${APP_NAME}" \
     -configuration Release \
     -derivedDataPath "${DERIVED}" \
     -destination 'platform=macOS' \
-    build >/dev/null
+    CODE_SIGN_STYLE=Manual \
+    CODE_SIGN_IDENTITY="Developer ID Application" \
+    DEVELOPMENT_TEAM="${TEAM_ID}" \
+    build
 [[ -d "${APP_PATH}" ]] || err "Release build did not produce ${APP_PATH}"
 
 # 4. Notarize via stored keychain profile, then staple so the bundle
