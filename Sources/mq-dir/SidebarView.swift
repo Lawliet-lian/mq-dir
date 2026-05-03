@@ -380,7 +380,7 @@ struct SidebarView: View {
 
             if cmux.workspaces.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(cmux.lastError ?? "Press Sync to fetch cmux workspaces.")
+                    Text(cmuxEmptyStateMessage)
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.Color.labelTertiary)
                     if cmux.lastSyncDate == nil && cmux.lastError == nil {
@@ -436,6 +436,16 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .disabled(cmux.isSyncing)
         .help("Sync cmux workspaces")
+    }
+
+    /// Picks the right one-liner for an empty workspaces list. Three
+    /// distinct states the previous version collapsed to one message:
+    /// (1) sync errored, (2) sync ran but cmux genuinely has no
+    /// workspaces, (3) we haven't synced yet.
+    private var cmuxEmptyStateMessage: String {
+        if let err = cmux.lastError { return err }
+        if cmux.lastSyncDate != nil { return "No cmux workspaces yet." }
+        return "Press Sync to fetch cmux workspaces."
     }
 
     private func cmuxRow(_ ws: CmuxWorkspace) -> some View {
