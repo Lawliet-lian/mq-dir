@@ -44,7 +44,21 @@ struct CmuxClient: Sendable {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = ["rpc", "workspace.list", "{}"]
+
+        // If the user runs cmux in Password mode (Settings → Automation),
+        // they set CMUX_SOCKET_PASSWORD via `launchctl setenv` so it
+        // reaches GUI-launched apps too. Pass it explicitly via --password
+        // because cmux's auth fallback to the env var only fires when the
+        // var is also visible to the cmux server's process — easier to
+        // forward it on the CLI ourselves than to debug that.
+        var args: [String] = []
+        if let pw = ProcessInfo.processInfo.environment["CMUX_SOCKET_PASSWORD"],
+           !pw.isEmpty
+        {
+            args += ["--password", pw]
+        }
+        args += ["rpc", "workspace.list", "{}"]
+        process.arguments = args
 
         let stdout = Pipe()
         let stderr = Pipe()

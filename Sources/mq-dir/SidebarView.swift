@@ -380,13 +380,19 @@ struct SidebarView: View {
 
             if cmux.workspaces.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(cmux.lastError ?? "Press ⟳ to sync cmux workspaces")
+                    Text(cmux.lastError ?? "Press Sync to fetch cmux workspaces.")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.Color.labelTertiary)
                     if cmux.lastSyncDate == nil && cmux.lastError == nil {
                         // First-run prerequisite hint — easy to miss otherwise,
                         // because cmux ships with the restrictive socket mode.
-                        Text("Requires cmux → Settings → Automation → Socket Control Mode = Allow All.")
+                        // Mention both unlock paths so the user can pick the
+                        // tradeoff they're comfortable with.
+                        Text("Quick: cmux → Settings → Automation → Socket Control Mode = Allow All.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.Color.labelTertiary)
+                            .opacity(0.75)
+                        Text("Stricter: set Socket Control Mode = Password, then run\n`launchctl setenv CMUX_SOCKET_PASSWORD <pw>` and relaunch mq-dir.")
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.Color.labelTertiary)
                             .opacity(0.75)
