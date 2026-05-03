@@ -117,12 +117,30 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 step "Re-signing nested code with Developer ID + hardened runtime + timestamp"
 SIGN_IDENTITY="Developer ID Application: Honam Kang (${TEAM_ID})"
 ENTITLEMENTS="${REPO_ROOT}/Resources/Entitlements/mq-dir.entitlements"
+
+# Pass 1: every Mach-O binary in the bundle (Sparkle ships standalone
+# helper executables like `Autoupdate` with no extension that the
+# bundle-pattern pass below can't see). Skip the main app's executable —
+# the final bundle sign will cover it.
+while IFS= read -r exec; do
+    if [[ "$exec" == "${APP_PATH}/Contents/MacOS/"* ]]; then continue; fi
+    if file --brief --mime-type "$exec" 2>/dev/null | grep -q application/x-mach-binary; then
+        codesign --force --options runtime --timestamp \
+            --sign "${SIGN_IDENTITY}" "${exec}" >/dev/null
+    fi
+done < <(find "${APP_PATH}" -type f)
+
+# Pass 2: every nested bundle (framework/app/xpc/dylib), bottom-up so
+# containers get signed after their contents.
 while IFS= read -r item; do
     codesign --force --options runtime --timestamp \
         --sign "${SIGN_IDENTITY}" "${item}" >/dev/null
 done < <(find "${APP_PATH}" -depth \( \
     -name "*.framework" -o -name "*.dylib" -o -name "*.app" -o -name "*.xpc" \
     \) ! -path "${APP_PATH}")
+
+# Pass 3: re-sign the main app bundle with the empty entitlements file
+# (no get-task-allow) and the secure timestamp.
 codesign --force --options runtime --timestamp \
     --sign "${SIGN_IDENTITY}" \
     --entitlements "${ENTITLEMENTS}" \
