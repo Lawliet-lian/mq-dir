@@ -1,42 +1,63 @@
 # mq-dir
 
-> Quad-pane macOS file manager. Q-Dir heritage, Finder-class polish, opinionated state persistence.
+> The native macOS file manager for AI multi-taskers. Up to four independent panes for parallel projects and agents — persistent state, native polish, no compromise.
 
-![status: pre-alpha (M1 in progress)](https://img.shields.io/badge/status-pre--alpha%20M1-orange)
+[![status](https://img.shields.io/badge/status-pre--alpha-orange)](#status)
+[![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)](#requirements)
+[![swift](https://img.shields.io/badge/swift-5.10-orange)](https://swift.org)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+🌐 [mqdir.com](https://mqdir.com) · 📓 [Changelog](CHANGELOG.md) · 🛠 [Contributing](CONTRIBUTING.md)
 
 ![mq-dir hero](.github/assets/readme_hero.png)
 
-## Why mq-dir?
+## Why
 
-- **Finder loses your view-mode-per-folder.** mq-dir remembers — list vs. icon, sort, scroll position, column widths, all per folder, all surviving force-quit.
-- **Multi-pane is a lifestyle.** 1, 2, 3, or 4 panes in a 2×2 grid (Q-Dir heritage), each with its own tabs and history.
-- **Embedded media preview without Spotlight gymnastics.** Spacebar QuickLook in M1; inline image / video / audio / PDF preview in M3.
-- **Persistence that just works.** Sort, scroll, column widths, expanded sidebar nodes — all restored on relaunch. Survives `kill -9`.
+A modern coding session is half source, half artifacts: generated images, recorded demos, PDFs, screenshots from QA, exported transcripts, downloaded models, design specs. None of it lives where your code does — and Finder wasn't built for that volume or for the way agents now produce work in parallel.
 
-## Status: M1 in progress
+mq-dir gives you up to four independent panes side by side. One per project, one per agent, one for the artifact dump. Each pane keeps its own folder, sort, scroll position, and column widths — and remembers them across launches and force-quits.
 
-This is **pre-alpha**. M0 is complete. M1 has started with a folder picker and read-only file list. A lightweight 1/2/4-pane shell is already present so the app opens with the expected Q-Dir shape, but persistence, QuickLook, NSTableView column autosave, and the full M1 acceptance criteria are still in progress.
+## Features
 
-The roadmap below summarises where the project is headed.
+**Working today (alpha.8)**
 
-## Build from source
+- 🟦 **1, 2, or 4-pane layouts** — focused-pane routing, independent folder per pane.
+- 💾 **Per-pane state persistence** — folder, sort, hidden-files toggle, column widths, and selection survive relaunch and `kill -9`. Bookmarks are sandbox-ready.
+- 🗂 **VS Code-style sidebar** — Favorites, Locations, Tags. One-click navigation routed to the focused pane.
+- 🔎 **Per-pane recursive search** — debounced, case-insensitive substring match across the current folder's subtree.
+- 📁 **Standard browsing** — column sorts, hidden-files toggle, parent navigation, back/forward stacks, Reveal in Finder, drag-and-drop file moves.
+- 🎨 **Native macOS look** — SwiftUI + AppKit, system theme tokens, hand-finished app icon.
 
-**Quickstart** (requires macOS 14+ and [Homebrew](https://brew.sh)):
+**Coming next**
+
+- ↹ Per-pane tabs and 3-pane layout (M2 wrap-up).
+- 👀 Spacebar QuickLook + inline image / video / audio / PDF preview (M3).
+- ⌨️ Keyboard shortcuts, settings UI, polished sidebar favorites (M6).
+
+See [Roadmap](#roadmap) for the full picture.
+
+## Status
+
+**Pre-alpha.** The app builds and runs, the working set above is stable enough for daily-driving by the maintainer, but there are no signed releases yet. Expect rough edges. Track progress in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Requirements
+
+- macOS 14 (Sonoma) or later
+- Apple Silicon or Intel
+- For building: Xcode 15+, [Homebrew](https://brew.sh)
+
+## Install
+
+No signed binaries yet — build from source while the project is pre-alpha.
 
 ```bash
-Scripts/bootstrap.sh
+git clone https://github.com/<owner>/mq-dir.git
+cd mq-dir
+Scripts/bootstrap.sh   # installs XcodeGen and the xcodes CLI
 open mq-dir.xcodeproj
 ```
 
-`bootstrap.sh` installs XcodeGen + the `xcodes` CLI, then generates the Xcode project from `project.yml`.
-
-**Manual:**
-
-```bash
-brew install xcodegen
-xcodegen generate
-open mq-dir.xcodeproj
-```
+`bootstrap.sh` generates `mq-dir.xcodeproj` from `project.yml` (XcodeGen is the source of truth — the `.xcodeproj` is not checked in).
 
 **Tests-only** (no Xcode required, just the Swift toolchain):
 
@@ -44,7 +65,7 @@ open mq-dir.xcodeproj
 swift test
 ```
 
-> **Note on the Xcode project.** This repo uses **XcodeGen** (`project.yml` is the source of truth) — the `mq-dir.xcodeproj` directory is generated, not checked in. The original plan called for a checked-in Xcode project; that decision was reversed in the M0 implementation pass because hand-written `project.pbxproj` is unverifiable in environments without the full Xcode IDE. Tracked in `CHANGELOG.md`.
+Signed and notarized release builds, plus a maintainer Homebrew tap, are scaffolded for M5 — see the [roadmap](#roadmap).
 
 ## Privacy
 
@@ -54,22 +75,28 @@ mq-dir is local-only. It reads your filesystem to show it back to you and writes
 
 If a v1.x release ever proposes opt-in crash reporting, it will land behind a config toggle defaulting to off, with the source clearly visible. Until then, the network code path simply does not exist.
 
+## Roadmap
+
+| Milestone | Focus | Status |
+|---|---|---|
+| **M0** | App shell, OSS docs, CI, signing scaffold | ✅ done |
+| **M1** | Single-pane MVP — folder browsing, sorting, persistent per-folder state | ✅ done |
+| **M2** | Multi-pane — 1/2/(3)/4-pane layouts, per-pane tabs, session restore | 🟡 in progress (layouts + persistence done; tabs and 3-pane pending) |
+| **M3** | Embedded preview — QuickLook, inline image/video/audio/PDF | ⬜️ planned |
+| **M4** | Sidebar tree — VS Code-style folder tree, lazy-loaded | 🟡 partial (sidebar shipped; tree expansion pending) |
+| **M5** | Release infra — signed/notarized builds, Homebrew tap, nightly | ⬜️ scaffolded |
+| **M6** | UX polish — keyboard shortcuts, in-pane search refinements, drag/drop, settings | 🟡 partial |
+
+**Out of scope for v1:** cloud sync, archive previews, file editing, plugins, iPadOS/iOS port, localization beyond English.
+
+## Contributing
+
+PRs welcome. Contributions are accepted via [DCO](https://developercertificate.org/) — every commit needs a `Signed-off-by:` line. **No CLA.** See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow, [`SECURITY.md`](SECURITY.md) for vulnerability disclosure, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
 
-## Contributing
+## Acknowledgments
 
-PRs welcome. Contributions are accepted via [DCO](https://developercertificate.org/) (Developer Certificate of Origin) — every commit needs a `Signed-off-by:` line. **No CLA.** See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full workflow.
-
-## Roadmap
-
-- **M0 — Skeleton.** App shell, OSS docs, CI, signing scaffold.
-- **M1 — Single-pane MVP** ← _in progress_. Folder browsing, persistent per-folder state, spacebar QuickLook. The load-bearing milestone.
-- **M2 — Multi-pane.** 1/2/3/4-pane layouts, per-pane tabs, session restore.
-- **M3 — Embedded preview.** Inline image (NSImageView with pinch-zoom), video / audio / PDF / text via QLPreviewView.
-- **M4 — Sidebar tree.** VS Code-style folder tree, lazy-loaded, navigates the focused pane.
-- **M5 — Release infra.** Signed + notarized builds via GitHub Actions, maintainer Homebrew tap, ad-hoc nightly builds.
-- **M6 — UX polish.** Keyboard shortcuts, in-pane search, drag/drop file moves, sidebar favorites, settings UI.
-
-Out of scope for v1: cloud sync, archive previews, file editing, plugins, iPadOS/iOS port, localization beyond English. Full list in plan §2.
+mq-dir's quad-pane layout is inspired by **[Q-Dir](https://www.q-dir.com/)** by SoftwareOK / Nenad Hrg, a long-running Windows file manager that made the case for multi-pane file management. mq-dir is an independent, clean-room implementation in Swift for macOS — **not affiliated with, endorsed by, or derived from Q-Dir's source code**.
