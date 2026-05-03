@@ -87,7 +87,7 @@ struct BrowserPaneView: View {
                     .foregroundStyle(Theme.Color.label)
                 Text("—")
                     .foregroundStyle(Theme.Color.labelTertiary)
-                Text("\(viewModel.entries.count) item\(viewModel.entries.count == 1 ? "" : "s")")
+                Text(itemCountLabel)
                     .foregroundStyle(Theme.Color.labelSecondary)
             } else {
                 Text("No folder open")
@@ -101,6 +101,22 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separatorFaint).frame(height: 0.5)
         }
+    }
+
+    private var itemCountLabel: String {
+        let total = viewModel.entries.count
+        if viewModel.isFiltering {
+            return "\(viewModel.visibleEntries.count) of \(total)"
+        }
+        return "\(total) item\(total == 1 ? "" : "s")"
+    }
+
+    private var emptyStateLabel: String {
+        if viewModel.isFiltering {
+            let trimmed = viewModel.searchQuery.trimmingCharacters(in: .whitespaces)
+            return "No matches for \u{201C}\(trimmed)\u{201D}"
+        }
+        return "No items"
     }
 
     // MARK: Column header
@@ -227,7 +243,7 @@ struct BrowserPaneView: View {
     private var fileList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(viewModel.entries) { entry in
+                ForEach(viewModel.visibleEntries) { entry in
                     rowView(for: entry)
                 }
             }
@@ -236,8 +252,8 @@ struct BrowserPaneView: View {
         .overlay {
             if viewModel.isLoading {
                 ProgressView().controlSize(.small)
-            } else if viewModel.entries.isEmpty {
-                Text("No items")
+            } else if viewModel.visibleEntries.isEmpty {
+                Text(emptyStateLabel)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.Color.labelTertiary)
             }

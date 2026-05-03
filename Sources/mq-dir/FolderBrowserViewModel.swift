@@ -18,6 +18,11 @@ final class FolderBrowserViewModel: ObservableObject {
             reload()
         }
     }
+    /// Per-pane in-place filter on the current folder. Case-insensitive
+    /// substring match on entry name. Cleared automatically when the pane
+    /// navigates to a different folder, matching Finder's filter semantics.
+    /// Not persisted — transient view state.
+    @Published var searchQuery: String = ""
     @Published private(set) var sortKey: FileEntrySortKey = .name
     @Published private(set) var sortAscending = true
     @Published var columnWidths = PaneColumnWidths()
@@ -104,6 +109,19 @@ final class FolderBrowserViewModel: ObservableObject {
         return entries.first { $0.id == selectedID }
     }
 
+    /// Entries visible after applying `searchQuery`. The canonical `entries`
+    /// list stays untouched — selection IDs and persistence still resolve
+    /// against it. Only the rendered slice narrows.
+    var visibleEntries: [FileEntry] {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return entries }
+        return entries.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+    }
+
+    var isFiltering: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     var folderDisplayPath: String {
         folderURL?.path(percentEncoded: false) ?? "No folder selected"
     }
@@ -170,6 +188,9 @@ final class FolderBrowserViewModel: ObservableObject {
         }
         folderURL = url
         selection.removeAll()
+        // Drop the per-folder filter so a query typed in the previous folder
+        // doesn't bleed into the new listing (matches Finder).
+        searchQuery = ""
         // User-driven navigation supersedes any pending restored selection.
         pendingRestoredSelection = []
         reload()
