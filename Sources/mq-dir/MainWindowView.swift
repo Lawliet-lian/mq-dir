@@ -11,6 +11,10 @@ struct MainWindowView: View {
     @State private var focusedPaneIndex: Int
     @State private var sidebarSelection: URL?
     @FocusState private var searchFocused: Bool
+    /// Gates the real TextField behind a tap. While false the field renders
+    /// as a static placeholder so SwiftUI doesn't auto-promote it to the
+    /// window's first responder on appearance.
+    @State private var searchActive: Bool = false
 
     /// Coalesces rapid state mutations into one save. Cancelled and
     /// restarted whenever a watched value changes; on natural completion
@@ -101,7 +105,10 @@ struct MainWindowView: View {
             focusedPane.goForward()
         }
         .onReceive(NotificationCenter.default.publisher(for: .mqdirFocusSearchRequested)) { _ in
-            searchFocused = true
+            searchActive = true
+            // Defer focus until after the conditional TextField has been
+            // installed by the body re-render triggered above.
+            DispatchQueue.main.async { searchFocused = true }
         }
         // After a drag/drop move or copy, reload every pane so all four views
         // stay in sync without each pane having its own FSEvents subscription
@@ -260,35 +267,58 @@ struct MainWindowView: View {
             set: { focusedPane.searchQuery = $0 }
         )
         let isEmpty = focusedPane.searchQuery.isEmpty
+        let showField = searchActive || !isEmpty
 
-        return HStack(spacing: 5) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.Color.labelTertiary)
-            TextField("Search", text: queryBinding)
-                .textFieldStyle(.plain)
-                .font(Theme.Font.breadcrumb)
-                .foregroundStyle(Theme.Color.label)
-                .frame(maxWidth: .infinity)
-                .focused($searchFocused)
-                .onKeyPress(.escape) {
-                    if !focusedPane.searchQuery.isEmpty {
-                        focusedPane.searchQuery = ""
-                    } else {
-                        searchFocused = false
-                    }
-                    return .handled
-                }
-            if !isEmpty {
-                Button {
-                    focusedPane.searchQuery = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
+        return Group {
+            if showField {
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.Color.labelTertiary)
+                    TextField("Search", text: queryBinding)
+                        .textFieldStyle(.plain)
+                        .font(Theme.Font.breadcrumb)
+                        .foregroundStyle(Theme.Color.label)
+                        .frame(maxWidth: .infinity)
+                        .focused($searchFocused)
+                        .onKeyPress(.escape) {
+                            if !focusedPane.searchQuery.isEmpty {
+                                focusedPane.searchQuery = ""
+                            } else {
+                                searchFocused = false
+                                searchActive = false
+                            }
+                            return .handled
+                        }
+                    if !isEmpty {
+                        Button {
+                            focusedPane.searchQuery = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.Color.labelTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear")
+                    }
+                }
+            } else {
+                Button {
+                    searchActive = true
+                    DispatchQueue.main.async { searchFocused = true }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.Color.labelTertiary)
+                        Text("Search")
+                            .font(Theme.Font.breadcrumb)
+                            .foregroundStyle(Theme.Color.labelTertiary)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Clear")
             }
         }
         .padding(.horizontal, 8)
@@ -299,6 +329,13 @@ struct MainWindowView: View {
                 .strokeBorder(searchFocused ? Theme.Color.accent : Theme.Color.separator,
                               lineWidth: searchFocused ? 1 : 0.5)
         )
+        .onChange(of: searchFocused) { _, focused in
+            // When the user tabs/clicks away from an empty field, drop back
+            // to the static placeholder so the next session starts inert.
+            if !focused && focusedPane.searchQuery.isEmpty {
+                searchActive = false
+            }
+        }
         .help("Search this folder (⌘F)")
     }
 
