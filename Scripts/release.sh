@@ -78,9 +78,25 @@ fi
 # 2. Bump version in project.yml. Both MARKETING_VERSION (Xcode setting)
 #    and CFBundleShortVersionString (Info.plist) must move together so
 #    the bundle's reported version matches the appcast/tag.
+#
+#    Validate the version shape up front so a typo (e.g. "0.1.0alpha9"
+#    missing a dash, or shell-injection-y characters) doesn't slip
+#    through into commit messages, tags, or the appcast.
+[[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] \
+    || err "Bad version '${VERSION}' — expected SemVer like 1.2.3 or 1.2.3-alpha.4"
+
 step "Bumping project.yml to ${VERSION}"
 sed -i '' "s/MARKETING_VERSION: \".*\"/MARKETING_VERSION: \"${VERSION}\"/" "${PROJECT_YML}"
 sed -i '' "s/CFBundleShortVersionString: \".*\"/CFBundleShortVersionString: \"${VERSION}\"/" "${PROJECT_YML}"
+# sed silently no-ops when the pattern doesn't match. If `project.yml`
+# ever gets reformatted (e.g. single-quoted values), the bump would
+# vanish and we'd ship a binary whose CFBundleShortVersionString
+# disagrees with the tag/appcast/DMG name. Verify both keys actually
+# moved before we burn build/notary cycles on the wrong version.
+grep -q "MARKETING_VERSION: \"${VERSION}\"" "${PROJECT_YML}" \
+    || err "MARKETING_VERSION bump didn't take in ${PROJECT_YML} — check formatting"
+grep -q "CFBundleShortVersionString: \"${VERSION}\"" "${PROJECT_YML}" \
+    || err "CFBundleShortVersionString bump didn't take in ${PROJECT_YML} — check formatting"
 
 step "Regenerating Xcode project"
 xcodegen generate >/dev/null
@@ -187,10 +203,25 @@ PUBDATE="$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")"
 
 # 7. Inject a new <item> right above the closing </channel>. Awk handles
 #    the splice so we don't need an XML toolchain in the dependency list.
+#
+#    EdDSA signatures are base64, but the surrounding `length="N"` and
+#    attribute quoting that `sign-update` emits can contain backslashes
+#    in pathological cases. `awk -v` interprets backslash escapes in
+#    its argument (\n, \t, \\), so we pass everything through ENVIRON
+#    instead — that path is byte-exact.
 step "Updating ${APPCAST}"
 TMP_APPCAST="$(mktemp)"
-awk -v ver="${VERSION}" -v url="${DMG_URL}" \
-    -v sig="${SIG_LINE}" -v pub="${PUBDATE}" '
+APPCAST_VER="${VERSION}" \
+APPCAST_URL="${DMG_URL}" \
+APPCAST_SIG="${SIG_LINE}" \
+APPCAST_PUB="${PUBDATE}" \
+awk '
+BEGIN {
+    ver = ENVIRON["APPCAST_VER"]
+    url = ENVIRON["APPCAST_URL"]
+    sig = ENVIRON["APPCAST_SIG"]
+    pub = ENVIRON["APPCAST_PUB"]
+}
 /<\/channel>/ {
     print "    <item>"
     print "      <title>Version " ver "</title>"
@@ -204,6 +235,17 @@ awk -v ver="${VERSION}" -v url="${DMG_URL}" \
 { print }
 ' "${APPCAST}" > "${TMP_APPCAST}"
 mv "${TMP_APPCAST}" "${APPCAST}"
+
+# Verify the splice actually landed. A regex miss on </channel>
+# (whitespace/case/attribute drift) would silently leave the appcast
+# unchanged and ship a release nobody can update to.
+grep -q "<sparkle:version>${VERSION}</sparkle:version>" "${APPCAST}" \
+    || err "Appcast splice did not produce a <sparkle:version>${VERSION}</sparkle:version> entry — inspect ${APPCAST}"
+# If `xmllint` is on the path, also check the result still parses.
+# Don't hard-require it — it's not in the prereq list.
+if command -v xmllint >/dev/null; then
+    xmllint --noout "${APPCAST}" || err "Updated ${APPCAST} fails XML parse"
+fi
 
 # 8. Bump cask version + sha256 so `brew upgrade mq-dir` picks the new DMG.
 step "Updating ${CASK}"
