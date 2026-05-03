@@ -269,6 +269,7 @@ struct MainWindowView: View {
                 .textFieldStyle(.plain)
                 .font(Theme.Font.breadcrumb)
                 .foregroundStyle(Theme.Color.label)
+                .frame(maxWidth: .infinity)
                 .focused($searchFocused)
                 .onKeyPress(.escape) {
                     if !focusedPane.searchQuery.isEmpty {
@@ -401,8 +402,13 @@ struct MainWindowView: View {
                 Text(ByteCountFormatter.string(fromByteCount: selectedSize, countStyle: .file))
                     .foregroundStyle(Theme.Color.labelSecondary)
             } else if focusedPane.isFiltering {
-                Text("\(visibleCount) of \(totalCount) match\(visibleCount == 1 ? "" : "es")")
-                    .foregroundStyle(Theme.Color.labelSecondary)
+                if focusedPane.isSearching {
+                    Text("Searching\u{2026}")
+                        .foregroundStyle(Theme.Color.labelSecondary)
+                } else {
+                    Text("\(visibleCount) match\(visibleCount == 1 ? "" : "es")")
+                        .foregroundStyle(Theme.Color.labelSecondary)
+                }
             } else if totalCount > 0 {
                 Text("\(totalCount) item\(totalCount == 1 ? "" : "s")")
                     .foregroundStyle(Theme.Color.labelSecondary)
