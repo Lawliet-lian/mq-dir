@@ -175,12 +175,13 @@ create-dmg \
 step "Signing DMG with Sparkle EdDSA"
 # Sparkle 2's sign-update reads from the macOS keychain by default;
 # fall back to a file-based private key only when a backup exists.
+# The output already carries `length="N"` alongside the EdDSA
+# signature, so we don't add it ourselves below.
 if [[ -f "${PRIV_KEY}" ]]; then
     SIG_LINE="$("${SIGN_BIN}" -f "${PRIV_KEY}" "${DMG_PATH}")"
 else
     SIG_LINE="$("${SIGN_BIN}" "${DMG_PATH}")"
 fi
-DMG_LENGTH="$(stat -f%z "${DMG_PATH}")"
 DMG_URL="https://github.com/${GH_REPO}/releases/download/v${VERSION}/${DMG_NAME}"
 PUBDATE="$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")"
 
@@ -188,7 +189,7 @@ PUBDATE="$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")"
 #    the splice so we don't need an XML toolchain in the dependency list.
 step "Updating ${APPCAST}"
 TMP_APPCAST="$(mktemp)"
-awk -v ver="${VERSION}" -v url="${DMG_URL}" -v len="${DMG_LENGTH}" \
+awk -v ver="${VERSION}" -v url="${DMG_URL}" \
     -v sig="${SIG_LINE}" -v pub="${PUBDATE}" '
 /<\/channel>/ {
     print "    <item>"
@@ -197,7 +198,7 @@ awk -v ver="${VERSION}" -v url="${DMG_URL}" -v len="${DMG_LENGTH}" \
     print "      <sparkle:version>" ver "</sparkle:version>"
     print "      <sparkle:shortVersionString>" ver "</sparkle:shortVersionString>"
     print "      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>"
-    print "      <enclosure url=\"" url "\" " sig " length=\"" len "\" type=\"application/octet-stream\" />"
+    print "      <enclosure url=\"" url "\" " sig " type=\"application/octet-stream\" />"
     print "    </item>"
 }
 { print }
