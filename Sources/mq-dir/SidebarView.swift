@@ -372,20 +372,7 @@ struct SidebarView: View {
                     .tracking(0.5)
                     .foregroundStyle(Theme.Color.labelTertiary)
                 Spacer(minLength: 0)
-                Button {
-                    Task { await cmux.sync() }
-                } label: {
-                    Image(systemName: cmux.isSyncing
-                          ? "arrow.triangle.2.circlepath"
-                          : "arrow.clockwise")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Theme.Color.labelSecondary)
-                        .frame(width: 16, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(cmux.isSyncing)
-                .help("Sync cmux workspaces")
+                cmuxSyncChip
             }
             .padding(.horizontal, 12)
             .padding(.top, 6)
@@ -414,6 +401,43 @@ struct SidebarView: View {
                 }
             }
         }
+    }
+
+    /// Pill-shaped Sync button. Higher hit-target + label than the bare
+    /// refresh icon — easier to find for someone who's never used the
+    /// integration before. Swaps to "Syncing…" with a spinner while a
+    /// fetch is in flight, and disables to prevent double-taps.
+    private var cmuxSyncChip: some View {
+        Button {
+            Task { await cmux.sync() }
+        } label: {
+            HStack(spacing: 4) {
+                if cmux.isSyncing {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.6)
+                        .frame(width: 8, height: 8)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                Text(cmux.isSyncing ? "Syncing\u{2026}" : "Sync")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(Theme.Color.label)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(
+                Capsule().fill(Color.white.opacity(cmux.isSyncing ? 0.04 : 0.10))
+            )
+            .overlay(
+                Capsule().strokeBorder(Theme.Color.separator, lineWidth: 0.5)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(cmux.isSyncing)
+        .help("Sync cmux workspaces")
     }
 
     private func cmuxRow(_ ws: CmuxWorkspace) -> some View {
