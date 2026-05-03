@@ -115,6 +115,7 @@ jobs:
           AUTH_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
           NOTARY_ZIP="$RUNNER_TEMP/${APP_NAME}-notary.zip"
           printf "%s" "$APPLE_API_KEY_BASE64" | base64 -D > "$AUTH_KEY_PATH"
+          chmod 600 "$AUTH_KEY_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           ditto -c -k --keepParent "$APP_PATH" "$NOTARY_ZIP"
           xcrun notarytool submit "$NOTARY_ZIP" \
@@ -155,4 +156,18 @@ jobs:
             gh release create "$TAG" dist/* \
               --title "${APP_NAME} ${TAG}" \
               --notes-file CHANGELOG.md
+          fi
+
+      # The notary .p8 holds a long-lived App Store Connect API key.
+      # GitHub-hosted runners are ephemeral, but any subsequent step or
+      # compromised dependency action could read it before the runner
+      # tears down — so wipe it on every exit path, success or failure.
+      - name: Wipe notary credentials
+        if: always()
+        run: |
+          AUTH_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          if [ -f "$AUTH_KEY_PATH" ]; then
+            # Try shred where available (it's not on macOS by default,
+            # so the rm -f fallback covers the macos-14 runner).
+            shred -u "$AUTH_KEY_PATH" 2>/dev/null || rm -f "$AUTH_KEY_PATH"
           fi
