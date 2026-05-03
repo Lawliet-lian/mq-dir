@@ -24,6 +24,13 @@ extension Notification.Name {
     /// the focused pane silently ignores out-of-range values.
     static let mqdirSelectTabAtIndexRequested =
         Notification.Name("mqdir.selectTabAtIndexRequested")
+    /// "Open in new tab" — ⌘-click on a folder row in tree view. The
+    /// receiver appends a new tab in the *focused* pane pointing at
+    /// `userInfo["url"]`. Mirrors Finder's ⌘-click-on-folder behavior
+    /// rather than VS Code's open-to-the-side, since the user wants the
+    /// new view to live next to the source rather than across panes.
+    static let mqdirOpenURLInNewTabRequested =
+        Notification.Name("mqdir.openURLInNewTabRequested")
     static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
     /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
     /// so the active window can flush a synchronous save before exit.

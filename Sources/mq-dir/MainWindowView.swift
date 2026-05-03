@@ -586,6 +586,14 @@ private struct TabNotifications: ViewModifier {
                     focusedPaneVM.selectTab(at: index)
                 }
             }
+            // ⌘-click on a folder in tree view → new tab pointing at it.
+            // Always lands in the *focused* pane so the user gets the
+            // detail view next to their tree, not in some other pane.
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenURLInNewTabRequested)) { note in
+                if let url = note.userInfo?["url"] as? URL {
+                    focusedPaneVM.newTab(folderURL: url)
+                }
+            }
     }
 }
 

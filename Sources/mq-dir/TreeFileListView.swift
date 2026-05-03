@@ -96,10 +96,20 @@ struct TreeFileListView: View {
         }
         .simultaneousGesture(TapGesture().onEnded {
             if !isFocused { onFocus() }
-            // In tree mode a single click selects but also toggles the
-            // disclosure if the click was on a directory — that mirrors
-            // VS Code's "click row" behavior, where the chevron isn't a
-            // separate hit target.
+            let mods = NSEvent.modifierFlags
+            // ⌘-click on a folder = open it in a new tab in this pane
+            // (Finder convention). Don't expand/select — that'd double
+            // the user's intent. Files fall through to the selection
+            // branch; new-tab semantics for files would just duplicate
+            // the row's primary action without adding value.
+            if entry.isDirectory && mods.contains(.command) {
+                NotificationCenter.default.post(
+                    name: .mqdirOpenURLInNewTabRequested,
+                    object: nil,
+                    userInfo: ["url": entry.url]
+                )
+                return
+            }
             viewModel.replaceSelection(entry.id)
             if entry.isDirectory {
                 viewModel.toggleExpanded(entry.url)
