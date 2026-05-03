@@ -106,6 +106,28 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
     build
 [[ -d "${APP_PATH}" ]] || err "Release build did not produce ${APP_PATH}"
 
+# 3b. Inside-out re-sign with hardened runtime + secure timestamp +
+#     explicit entitlements file (empty <dict/>, no get-task-allow).
+#     xcodebuild's auto-signing inherits the Debug-style ad-hoc options
+#     for SwiftPM frameworks like Sparkle, which Apple's notary then
+#     rejects on three counts: nested binaries not Developer ID-signed,
+#     no secure timestamp, get-task-allow injected. Signing every
+#     nested .app / .framework / .xpc / .dylib bottom-up with the right
+#     flags makes notarization pass cleanly.
+step "Re-signing nested code with Developer ID + hardened runtime + timestamp"
+SIGN_IDENTITY="Developer ID Application: Honam Kang (${TEAM_ID})"
+ENTITLEMENTS="${REPO_ROOT}/Resources/Entitlements/mq-dir.entitlements"
+while IFS= read -r item; do
+    codesign --force --options runtime --timestamp \
+        --sign "${SIGN_IDENTITY}" "${item}" >/dev/null
+done < <(find "${APP_PATH}" -depth \( \
+    -name "*.framework" -o -name "*.dylib" -o -name "*.app" -o -name "*.xpc" \
+    \) ! -path "${APP_PATH}")
+codesign --force --options runtime --timestamp \
+    --sign "${SIGN_IDENTITY}" \
+    --entitlements "${ENTITLEMENTS}" \
+    "${APP_PATH}" >/dev/null
+
 # 4. Notarize via stored keychain profile, then staple so the bundle
 #    works offline (Gatekeeper checks the stapled ticket without phoning
 #    Apple).
