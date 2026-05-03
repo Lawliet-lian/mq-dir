@@ -116,13 +116,6 @@ final class SidebarViewModel: ObservableObject {
         }
     }
 
-    /// Combines seeding policy: if the persisted state has not been seeded
-    /// yet, return the default seed and a `seeded = true` flag. Otherwise
-    /// pass the favorites through unchanged.
-    static func seedIfNeeded(_ state: WindowState) -> (favorites: [Favorite], seeded: Bool) {
-        if state.favoritesSeeded {
-            return (state.favorites, true)
-        }
-        return (defaultSeed(), true)
-    }
+    // Seeding policy lives on `WorkspaceManager.init` now — the manager
+    // owns the persisted `favoritesSeeded` flag at the workspace level.
 }

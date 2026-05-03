@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct MainWindowView: View {
+    @ObservedObject var workspace: WorkspaceManager
+
     @StateObject private var pane0: PaneTabsViewModel
     @StateObject private var pane1: PaneTabsViewModel
     @StateObject private var pane2: PaneTabsViewModel
@@ -17,45 +19,40 @@ struct MainWindowView: View {
     /// window's first responder on appearance.
     @State private var searchActive: Bool = false
 
-    /// Coalesces rapid state mutations into one save. Cancelled and
-    /// restarted whenever a watched value changes; on natural completion
-    /// (no further changes for ~500ms) it serializes the snapshot off the
-    /// main actor.
-    @State private var saveDebounceTask: Task<Void, Never>?
+    /// Owning ID of the project this view instance was constructed for.
+    /// `mqdirApp` keys this view on `workspace.workspace.activeProjectID`,
+    /// so a project switch tears down the old `MainWindowView` (and its
+    /// `@StateObject` panes) and instantiates a fresh one — no need to
+    /// reload pane state in place.
+    private let projectID: UUID
 
-    /// Lazily-resolved persistence service. Held as a constant so we don't
-    /// re-create the support directory on every save.
-    private let persistence: PersistenceService?
+    init(workspace: WorkspaceManager) {
+        self.workspace = workspace
+        let project = workspace.activeProject
+        self.projectID = project.id
+        let state = project.state
 
-    init() {
-        // Resolve the persistence service first so the initial state can
-        // come from disk. Failure to create it (e.g. read-only home dir in
-        // CI) degrades gracefully to a fresh window.
-        let service = try? PersistenceService()
-        let restored = service?.loadState() ?? WindowState.empty
-
-        self.persistence = service
-        self._layout = State(initialValue: restored.layout)
+        self._layout = State(initialValue: state.layout)
         self._focusedPaneIndex = State(
-            initialValue: min(max(restored.focusedPaneIndex, 0), 3)
+            initialValue: min(max(state.focusedPaneIndex, 0), 3)
         )
 
         // Always rehydrate four panes — any layout shrink stashes the
         // off-screen pane state so it returns when the layout grows back.
         // Each pane carries its own tab list; the VM forwards every nested
-        // tab's objectWillChange so the debounced save still fires when
-        // any tab anywhere mutates state.
-        let panes = restored.panes
+        // tab's objectWillChange so any change in any tab schedules a save.
+        let panes = state.panes
         self._pane0 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[0]))
         self._pane1 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[1]))
         self._pane2 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[2]))
         self._pane3 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[3]))
 
-        // First-run seeding for the sidebar. After this point the saved
-        // `favoritesSeeded` is always true so subsequent launches respect
-        // the user's edits (including "removed everything").
-        let seed = SidebarViewModel.seedIfNeeded(restored)
-        self._sidebar = StateObject(wrappedValue: SidebarViewModel(favorites: seed.favorites))
+        // Sidebar mirrors the workspace-level Favorites list. Mutations
+        // round-trip back through `workspace.setFavorites` (see the save
+        // trigger in `SaveTriggers`).
+        self._sidebar = StateObject(
+            wrappedValue: SidebarViewModel(favorites: workspace.workspace.favorites)
+        )
     }
 
     var body: some View {
@@ -83,7 +80,7 @@ struct MainWindowView: View {
 
     private var windowChrome: some View {
         HSplitView {
-            SidebarView(viewModel: sidebar, selectedURL: $sidebarSelection) { url in
+            SidebarView(viewModel: sidebar, workspace: workspace, selectedURL: $sidebarSelection) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
                 focusedPane.openFolder(url)
             }
@@ -102,7 +99,9 @@ struct MainWindowView: View {
 
     // MARK: Persistence wiring
 
-    /// Build a snapshot of every persistable bit of window state.
+    /// Build a snapshot of every persistable bit of window state. Favorites
+    /// are excluded — they live on `WorkspaceManager` because they're
+    /// shared across all projects.
     @MainActor
     private func snapshot() -> WindowState {
         WindowState(
@@ -113,63 +112,31 @@ struct MainWindowView: View {
                 pane1.snapshot(),
                 pane2.snapshot(),
                 pane3.snapshot(),
-            ],
-            favorites: sidebar.favorites,
-            // `init()` always runs SidebarViewModel.seedIfNeeded, so by the
-            // time we save we've definitely either preserved an existing
-            // seeded list or just produced a fresh one — either way, true.
-            favoritesSeeded: true
+            ]
         )
     }
 
-    /// Debounce window: 500ms of quiet before serialization.
-    /// Cancels any in-flight save scheduled within the same window.
+    /// Push the current snapshot into the workspace's active project.
+    /// `WorkspaceManager` owns the debounce window and the disk write —
+    /// this view just keeps the in-memory model current after every
+    /// observable mutation.
     @MainActor
     private func scheduleSave() {
-        guard let persistence else { return }
-        saveDebounceTask?.cancel()
-        saveDebounceTask = Task { @MainActor [persistence] in
-            try? await Task.sleep(for: .milliseconds(500))
-            if Task.isCancelled { return }
-            // Snapshot stays on the main actor (it reads @Published state).
-            // The encoded write goes off the main actor via Task.detached,
-            // and only the Sendable WindowState value crosses the boundary.
-            let state = snapshot()
-            await Self.persist(state, using: persistence)
-        }
+        let state = snapshot()
+        workspace.updateActive { $0.state = state }
+        // Favorites edit through the sidebar VM also feed in here so the
+        // workspace's cross-project list stays in sync.
+        workspace.setFavorites(sidebar.favorites)
     }
 
-    /// Off-main-actor write helper. Pulled out as a static so the detached
-    /// closure captures only Sendable values (`state`, `persistence`),
-    /// satisfying strict concurrency without an `@unchecked Sendable` view.
-    nonisolated private static func persist(
-        _ state: WindowState,
-        using persistence: PersistenceService
-    ) async {
-        await Task.detached(priority: .utility) {
-            do {
-                try persistence.saveState(state)
-            } catch {
-                FileHandle.standardError.write(
-                    Data("[mq-dir persist] save failed: \(error.localizedDescription)\n".utf8)
-                )
-            }
-        }.value
-    }
-
-    /// Skip the debounce window; called on app termination so we don't
-    /// lose the most recent state changes when the runloop tears down.
+    /// On app termination — flush the latest snapshot synchronously so
+    /// the runloop teardown can't cancel the debounced disk write.
     @MainActor
     private func saveSynchronously() {
-        guard let persistence else { return }
-        saveDebounceTask?.cancel()
-        do {
-            try persistence.saveState(snapshot())
-        } catch {
-            FileHandle.standardError.write(
-                Data("[mq-dir persist] terminal save failed: \(error.localizedDescription)\n".utf8)
-            )
-        }
+        let state = snapshot()
+        workspace.updateActive { $0.state = state }
+        workspace.setFavorites(sidebar.favorites)
+        workspace.saveSynchronously()
     }
 
     // MARK: Toolbar (compact, ~38pt)
@@ -620,6 +587,6 @@ private struct GlobalNotifications: ViewModifier {
 }
 
 #Preview {
-    MainWindowView()
+    MainWindowView(workspace: WorkspaceManager())
         .frame(width: 1100, height: 700)
 }

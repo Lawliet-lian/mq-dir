@@ -126,58 +126,21 @@ struct Favorite: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// Window-level state that survives an app restart.
-///
-/// Always carries four pane states even when `layout` shows fewer panes,
-/// so that growing the layout (e.g. single → 4-pane) restores the
-/// previously-loaded folders rather than reverting to empty.
+/// Window-level state that survives an app restart, scoped to a single
+/// project. Always carries four pane states even when `layout` shows
+/// fewer panes — growing the layout (e.g. single → 4-pane) restores the
+/// previously-loaded folders rather than reverting to empty. Favorites
+/// live a level up on `WorkspaceState` because they're cross-project.
 struct WindowState: Codable, Equatable, Sendable {
     var layout: PaneLayout
     var focusedPaneIndex: Int
     var panes: [PaneState]
-    var favorites: [Favorite]
-    /// Distinguishes "user has explicitly emptied favorites" from "first
-    /// launch / pre-favorites schema." When false, the window VM seeds the
-    /// six home subdirectories and flips the flag so we don't re-seed after
-    /// the user clears the list.
-    var favoritesSeeded: Bool
 
-    init(
-        layout: PaneLayout,
-        focusedPaneIndex: Int,
-        panes: [PaneState],
-        favorites: [Favorite] = [],
-        favoritesSeeded: Bool = false
-    ) {
+    init(layout: PaneLayout, focusedPaneIndex: Int, panes: [PaneState]) {
         precondition(panes.count == 4, "WindowState always carries exactly 4 pane records")
         self.layout = layout
         self.focusedPaneIndex = focusedPaneIndex
         self.panes = panes
-        self.favorites = favorites
-        self.favoritesSeeded = favoritesSeeded
-    }
-
-    /// Default missing keys to their empty values so old `state.json` files
-    /// (written before `favorites` existed) keep loading after upgrade. The
-    /// VM will then run the seeding pass.
-    private enum CodingKeys: String, CodingKey {
-        case layout, focusedPaneIndex, panes, favorites, favoritesSeeded
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        let layout = try c.decode(PaneLayout.self, forKey: .layout)
-        let focused = try c.decode(Int.self, forKey: .focusedPaneIndex)
-        let panes = try c.decode([PaneState].self, forKey: .panes)
-        let favorites = try c.decodeIfPresent([Favorite].self, forKey: .favorites) ?? []
-        let seeded = try c.decodeIfPresent(Bool.self, forKey: .favoritesSeeded) ?? false
-        self.init(
-            layout: layout,
-            focusedPaneIndex: focused,
-            panes: panes,
-            favorites: favorites,
-            favoritesSeeded: seeded
-        )
     }
 
     static let empty = WindowState(
@@ -185,6 +148,119 @@ struct WindowState: Codable, Equatable, Sendable {
         focusedPaneIndex: 0,
         panes: Array(repeating: PaneState(), count: 4)
     )
+}
+
+/// One named workspace. Carries a `WindowState` that fully describes the
+/// pane/tab arrangement when this project is active. Switching projects
+/// snapshots the outgoing project's `state` and applies the incoming
+/// project's `state` to fresh pane VMs.
+struct Project: Codable, Equatable, Sendable, Identifiable {
+    var id: UUID
+    var name: String
+    var state: WindowState
+
+    init(id: UUID = UUID(), name: String, state: WindowState = .empty) {
+        self.id = id
+        self.name = name
+        self.state = state
+    }
+}
+
+/// Top-level persisted state. Holds cross-project surface (favorites)
+/// alongside the project list and which one is active. Old `state.json`
+/// files from before this struct existed get migrated by the custom
+/// decoder into a single "Default" project so users don't lose state.
+struct WorkspaceState: Codable, Equatable, Sendable {
+    var favorites: [Favorite]
+    /// Distinguishes "user has explicitly emptied favorites" from "first
+    /// launch / pre-favorites schema." When false, the sidebar seeds the
+    /// six home subdirectories and flips the flag so we don't re-seed
+    /// after the user clears the list.
+    var favoritesSeeded: Bool
+    var activeProjectID: UUID
+    var projects: [Project]
+
+    init(
+        favorites: [Favorite] = [],
+        favoritesSeeded: Bool = false,
+        activeProjectID: UUID,
+        projects: [Project]
+    ) {
+        precondition(!projects.isEmpty, "WorkspaceState always carries at least one project")
+        self.favorites = favorites
+        self.favoritesSeeded = favoritesSeeded
+        self.activeProjectID = activeProjectID
+        self.projects = projects
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case favorites, favoritesSeeded, activeProjectID, projects
+        // Legacy keys (pre-projects schema)
+        case layout, focusedPaneIndex, panes
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+
+        // New shape — has a top-level `projects` array.
+        if let rawProjects = try? c.decode([Project].self, forKey: .projects) {
+            let projects = rawProjects.isEmpty ? [Project(name: "Default")] : rawProjects
+            let active = (try? c.decode(UUID.self, forKey: .activeProjectID)) ?? projects.first!.id
+            // Tolerate dangling activeProjectID — fall back to the first
+            // project so a corrupt write can't lock the user out.
+            let resolved = projects.contains(where: { $0.id == active }) ? active : projects.first!.id
+            self.init(
+                favorites: (try? c.decodeIfPresent([Favorite].self, forKey: .favorites)) ?? [],
+                favoritesSeeded: (try? c.decodeIfPresent(Bool.self, forKey: .favoritesSeeded)) ?? false,
+                activeProjectID: resolved,
+                projects: projects
+            )
+            return
+        }
+
+        // Legacy shape — top-level WindowState fields. Wrap as a single
+        // "Default" project so the user's last layout/panes survive the
+        // upgrade unchanged.
+        let layout = (try? c.decodeIfPresent(PaneLayout.self, forKey: .layout)) ?? .four
+        let focused = (try? c.decodeIfPresent(Int.self, forKey: .focusedPaneIndex)) ?? 0
+        let panes = (try? c.decodeIfPresent([PaneState].self, forKey: .panes))
+            ?? Array(repeating: PaneState(), count: 4)
+        let favorites = (try? c.decodeIfPresent([Favorite].self, forKey: .favorites)) ?? []
+        let seeded = (try? c.decodeIfPresent(Bool.self, forKey: .favoritesSeeded)) ?? false
+
+        let migrated = Project(
+            name: "Default",
+            state: WindowState(
+                layout: layout,
+                focusedPaneIndex: focused,
+                panes: panes.isEmpty ? Array(repeating: PaneState(), count: 4) : panes
+            )
+        )
+        self.init(
+            favorites: favorites,
+            favoritesSeeded: seeded,
+            activeProjectID: migrated.id,
+            projects: [migrated]
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(favorites, forKey: .favorites)
+        try c.encode(favoritesSeeded, forKey: .favoritesSeeded)
+        try c.encode(activeProjectID, forKey: .activeProjectID)
+        try c.encode(projects, forKey: .projects)
+    }
+
+    static var empty: WorkspaceState {
+        let project = Project(name: "Default")
+        return WorkspaceState(
+            favorites: [],
+            favoritesSeeded: false,
+            activeProjectID: project.id,
+            projects: [project]
+        )
+    }
 }
 
 /// Reads and writes the persisted window state to disk.
@@ -235,15 +311,15 @@ struct PersistenceService: @unchecked Sendable {
     /// Returns nil when the file is missing, unreadable, or contains
     /// corrupt JSON. Callers always treat a `nil` load as "first launch".
     /// Never throws — corruption recovery is part of the contract.
-    func loadState() -> WindowState? {
+    func loadState() -> WorkspaceState? {
         guard fileManager.fileExists(atPath: stateURL.path) else { return nil }
         guard let data = try? Data(contentsOf: stateURL) else { return nil }
-        return try? JSONDecoder().decode(WindowState.self, from: data)
+        return try? JSONDecoder().decode(WorkspaceState.self, from: data)
     }
 
     /// Writes the state atomically. Throws so the caller (typically a
     /// debounced save) can log a failure without crashing.
-    func saveState(_ state: WindowState) throws {
+    func saveState(_ state: WorkspaceState) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(state)

@@ -24,7 +24,7 @@ final class PersistenceServiceTests: XCTestCase {
 
     func testSaveAndLoadRoundTrip() throws {
         let service = try PersistenceService(stateURL: stateURL)
-        let original = sampleWindowState()
+        let original = sampleWorkspaceState()
 
         try service.saveState(original)
         let reloaded = service.loadState()
@@ -37,7 +37,7 @@ final class PersistenceServiceTests: XCTestCase {
     /// to mimic an app relaunch and asserts non-default values survive.
     func testFreshServiceLoadsPreviouslySavedState() throws {
         let writer = try PersistenceService(stateURL: stateURL)
-        let original = sampleWindowState()
+        let original = sampleWorkspaceState()
         try writer.saveState(original)
 
         let reader = try PersistenceService(stateURL: stateURL)
@@ -78,22 +78,33 @@ final class PersistenceServiceTests: XCTestCase {
 
         var tab = TabState()
         tab.folderBookmark = bookmark
-        let state = WindowState(
-            layout: .four,
-            focusedPaneIndex: 0,
-            panes: [
-                PaneState(tabs: [tab]),
-                PaneState(),
-                PaneState(),
-                PaneState()
-            ]
+        let project = Project(
+            name: "BookmarkTest",
+            state: WindowState(
+                layout: .four,
+                focusedPaneIndex: 0,
+                panes: [
+                    PaneState(tabs: [tab]),
+                    PaneState(),
+                    PaneState(),
+                    PaneState()
+                ]
+            )
+        )
+        let state = WorkspaceState(
+            favorites: [],
+            favoritesSeeded: true,
+            activeProjectID: project.id,
+            projects: [project]
         )
 
         let service = try PersistenceService(stateURL: stateURL)
         try service.saveState(state)
 
         let loaded = try XCTUnwrap(service.loadState())
-        let loadedBookmark = try XCTUnwrap(loaded.panes[0].tabs[0].folderBookmark)
+        let loadedBookmark = try XCTUnwrap(
+            loaded.projects[0].state.panes[0].tabs[0].folderBookmark
+        )
         let resolved = try XCTUnwrap(PersistenceService.resolveBookmark(loadedBookmark))
 
         // Compare canonical paths to neutralize /tmp ↔ /private/tmp aliasing
@@ -107,10 +118,9 @@ final class PersistenceServiceTests: XCTestCase {
     // MARK: - Schema migration
 
     /// State files written before tabs existed stored each pane as a flat
-    /// `TabState` shape (folderBookmark / sortKey / …) instead of the new
-    /// `{ tabs: [...], activeTabIndex }`. The decoder is supposed to detect
-    /// the legacy shape and promote it to a single-tab pane so users don't
-    /// lose their last-open folder on upgrade.
+    /// `TabState` shape. Pre-projects state files were a flat `WindowState`
+    /// at the top level. Both shapes need to load cleanly so users don't
+    /// lose state on upgrade.
     func testLoadMigratesLegacyFlatPaneState() throws {
         let legacy = """
         {
@@ -136,50 +146,101 @@ final class PersistenceServiceTests: XCTestCase {
         try Data(legacy.utf8).write(to: stateURL)
 
         let loaded = try XCTUnwrap(PersistenceService(stateURL: stateURL).loadState())
-        XCTAssertEqual(loaded.panes.count, 4)
-        XCTAssertEqual(loaded.panes[0].tabs.count, 1, "legacy pane should promote to a single-tab pane")
-        XCTAssertEqual(loaded.panes[0].activeTabIndex, 0)
-        XCTAssertEqual(loaded.panes[0].tabs[0].selectedURLPaths, ["/legacy/path.txt"],
+        XCTAssertEqual(loaded.projects.count, 1, "legacy WindowState should wrap as a single Default project")
+        XCTAssertEqual(loaded.projects[0].name, "Default")
+        let panes = loaded.projects[0].state.panes
+        XCTAssertEqual(panes.count, 4)
+        XCTAssertEqual(panes[0].tabs.count, 1, "legacy pane should promote to a single-tab pane")
+        XCTAssertEqual(panes[0].activeTabIndex, 0)
+        XCTAssertEqual(panes[0].tabs[0].selectedURLPaths, ["/legacy/path.txt"],
                        "tab content should survive migration")
+        XCTAssertTrue(loaded.favoritesSeeded, "seeded flag should round-trip from legacy file")
+    }
+
+    /// A workspace with a non-existent activeProjectID falls back to the
+    /// first project rather than refusing to load — protects against
+    /// hand-edited state.json or interrupted writes.
+    func testLoadFallsBackToFirstProjectOnDanglingActiveID() throws {
+        let realProject = Project(name: "Real")
+        let json = """
+        {
+          "favorites": [],
+          "favoritesSeeded": true,
+          "activeProjectID": "00000000-0000-0000-0000-000000000000",
+          "projects": [
+            {
+              "id": "\(realProject.id.uuidString)",
+              "name": "Real",
+              "state": {
+                "layout": 4,
+                "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 }
+                ]
+              }
+            }
+          ]
+        }
+        """
+        try Data(json.utf8).write(to: stateURL)
+
+        let loaded = try XCTUnwrap(PersistenceService(stateURL: stateURL).loadState())
+        XCTAssertEqual(loaded.activeProjectID, realProject.id,
+                       "dangling activeProjectID should resolve to the first available project")
     }
 
     // MARK: - Default-state shape
 
-    func testEmptyStateHasFourPanes() {
-        XCTAssertEqual(WindowState.empty.panes.count, 4)
-        XCTAssertEqual(WindowState.empty.layout, .four)
-        XCTAssertEqual(WindowState.empty.focusedPaneIndex, 0)
+    func testEmptyWorkspaceHasOneDefaultProject() {
+        let empty = WorkspaceState.empty
+        XCTAssertEqual(empty.projects.count, 1)
+        XCTAssertEqual(empty.projects[0].name, "Default")
+        XCTAssertEqual(empty.projects[0].state.layout, .four)
+        XCTAssertEqual(empty.projects[0].state.panes.count, 4)
+        XCTAssertEqual(empty.activeProjectID, empty.projects[0].id)
     }
 
     // MARK: - Helpers
 
-    private func sampleWindowState() -> WindowState {
-        WindowState(
-            layout: .twoH,
-            focusedPaneIndex: 1,
-            panes: [
-                PaneState(tabs: [
-                    TabState(
-                        folderBookmark: Data([0x01, 0x02, 0x03]),
-                        sortKey: .modified,
-                        sortAscending: false,
-                        includeHidden: true,
-                        columnWidths: PaneColumnWidths(modified: 200, size: 100, kind: 150),
-                        selectedURLPaths: ["/tmp/foo.txt", "/tmp/bar.txt"]
-                    ),
-                    TabState(folderBookmark: Data([0x10]))
-                ], activeTabIndex: 1),
-                PaneState(tabs: [TabState(
-                    folderBookmark: nil,
-                    sortKey: .size,
-                    sortAscending: true,
-                    includeHidden: false,
-                    columnWidths: PaneColumnWidths(),
-                    selectedURLPaths: []
-                )]),
-                PaneState(),
-                PaneState(),
-            ]
+    private func sampleWorkspaceState() -> WorkspaceState {
+        let project = Project(
+            name: "Sample",
+            state: WindowState(
+                layout: .twoH,
+                focusedPaneIndex: 1,
+                panes: [
+                    PaneState(tabs: [
+                        TabState(
+                            folderBookmark: Data([0x01, 0x02, 0x03]),
+                            sortKey: .modified,
+                            sortAscending: false,
+                            includeHidden: true,
+                            columnWidths: PaneColumnWidths(modified: 200, size: 100, kind: 150),
+                            selectedURLPaths: ["/tmp/foo.txt", "/tmp/bar.txt"]
+                        ),
+                        TabState(folderBookmark: Data([0x10]))
+                    ], activeTabIndex: 1),
+                    PaneState(tabs: [TabState(
+                        folderBookmark: nil,
+                        sortKey: .size,
+                        sortAscending: true,
+                        includeHidden: false,
+                        columnWidths: PaneColumnWidths(),
+                        selectedURLPaths: []
+                    )]),
+                    PaneState(),
+                    PaneState(),
+                ]
+            )
+        )
+        return WorkspaceState(
+            favorites: [],
+            favoritesSeeded: true,
+            activeProjectID: project.id,
+            projects: [project]
         )
     }
 }

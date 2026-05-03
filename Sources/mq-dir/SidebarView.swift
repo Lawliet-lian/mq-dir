@@ -4,21 +4,36 @@ import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @ObservedObject var viewModel: SidebarViewModel
+    @ObservedObject var workspace: WorkspaceManager
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
 
+    /// Custom drag-payload identifier for project rows. Distinct from the
+    /// favorite reorder type so dragging a project onto a favorite (or
+    /// vice versa) is silently ignored instead of firing the wrong move.
+    static let projectDragType = "com.mqdir.project.uuid"
+
     /// Whichever favorite is currently being inline-renamed. Cleared on
     /// commit (Enter) or cancel (Esc / focus loss with empty input).
-    @State private var editingID: Favorite.ID?
+    @State private var editingFavoriteID: Favorite.ID?
     /// Working draft for the rename TextField. Mirrored to a focus
     /// state so we can autoselect on entry.
-    @State private var editingDraft: String = ""
-    @FocusState private var renameFocused: Favorite.ID?
+    @State private var editingFavoriteDraft: String = ""
+    @FocusState private var renameFavoriteFocused: Favorite.ID?
 
-    /// Drop highlights: section-level for "drop into Favorites", row-level
-    /// for "insert before this row." Only one is active at a time.
-    @State private var sectionDropTargeted = false
-    @State private var rowDropTargetedID: Favorite.ID?
+    /// Same idea for the Projects section, kept on a separate state slot
+    /// so editing a project name doesn't leak into a favorite editor.
+    @State private var editingProjectID: UUID?
+    @State private var editingProjectDraft: String = ""
+    @FocusState private var renameProjectFocused: UUID?
+
+    /// Drop highlights for favorites — section vs row, mutually exclusive.
+    @State private var favSectionDropTargeted = false
+    @State private var favRowDropTargetedID: Favorite.ID?
+    /// Drop highlight for project reorder.
+    @State private var projectRowDropTargetedID: UUID?
+    /// Project being dragged for reorder.
+    @State private var draggingProjectID: UUID?
 
     var body: some View {
         ScrollView {
@@ -26,11 +41,7 @@ struct SidebarView: View {
                 favoritesSection
                     .padding(.bottom, 8)
 
-                section("Locations") {
-                    ForEach(SidebarItem.locations) { item in
-                        locationRow(item)
-                    }
-                }
+                projectsSection
             }
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,12 +67,12 @@ struct SidebarView: View {
         // the Favorites area (not just on an existing row) to append.
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(sectionDropTargeted ? Theme.Color.accent.opacity(0.10) : .clear)
+                .fill(favSectionDropTargeted ? Theme.Color.accent.opacity(0.10) : .clear)
                 .padding(.horizontal, 6)
         )
         .onDrop(
             of: DragDropSupport.acceptedDropTypes,
-            isTargeted: $sectionDropTargeted
+            isTargeted: $favSectionDropTargeted
         ) { providers in
             handleDrop(providers: providers, before: nil)
             return true
@@ -82,19 +93,19 @@ struct SidebarView: View {
         let resolved = viewModel.resolveURL(favorite)
         let isActive = resolved != nil && selectedURL == resolved
         let isStale = resolved == nil
-        let isEditing = editingID == favorite.id
-        let isDropTarget = rowDropTargetedID == favorite.id
+        let isEditing = editingFavoriteID == favorite.id
+        let isDropTarget = favRowDropTargetedID == favorite.id
 
         let row = HStack(spacing: 6) {
             iconView(for: resolved)
                 .frame(width: 14)
                 .opacity(isStale ? 0.4 : 1)
             if isEditing {
-                TextField("", text: $editingDraft)
+                TextField("", text: $editingFavoriteDraft)
                     .textFieldStyle(.plain)
                     .font(Theme.Font.sidebarItem)
                     .foregroundStyle(Theme.Color.label)
-                    .focused($renameFocused, equals: favorite.id)
+                    .focused($renameFavoriteFocused, equals: favorite.id)
                     .onSubmit { commitRename(favorite.id) }
                     .onKeyPress(.escape) {
                         cancelRename()
@@ -151,8 +162,8 @@ struct SidebarView: View {
             .onDrop(
                 of: DragDropSupport.acceptedDropTypes + [UTType.plainText.identifier],
                 isTargeted: Binding(
-                    get: { rowDropTargetedID == favorite.id },
-                    set: { rowDropTargetedID = $0 ? favorite.id : nil }
+                    get: { favRowDropTargetedID == favorite.id },
+                    set: { favRowDropTargetedID = $0 ? favorite.id : nil }
                 )
             ) { providers in
                 handleDrop(providers: providers, before: favorite.id)
@@ -184,37 +195,130 @@ struct SidebarView: View {
             .padding(.horizontal, isActive ? 6 : 0)
     }
 
-    // MARK: Locations (unchanged from the static list)
+    // MARK: Projects
+
+    private var projectsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Text("PROJECTS")
+                    .font(Theme.Font.sidebarHeader)
+                    .tracking(0.5)
+                    .foregroundStyle(Theme.Color.labelTertiary)
+                Spacer(minLength: 0)
+                Button {
+                    workspace.createProject()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.Color.labelSecondary)
+                        .frame(width: 16, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("New Project")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+
+            ForEach(workspace.workspace.projects) { project in
+                projectRow(project)
+            }
+        }
+    }
 
     @ViewBuilder
-    private func locationRow(_ item: SidebarItem) -> some View {
-        let isActive = selectedURL == item.url
+    private func projectRow(_ project: Project) -> some View {
+        let isActive = workspace.workspace.activeProjectID == project.id
+        let isEditing = editingProjectID == project.id
+        let isDropTarget = projectRowDropTargetedID == project.id
+        let isOnlyProject = workspace.workspace.projects.count == 1
 
-        Button {
-            selectedURL = item.url
-            onSelect(item.url)
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "internaldrive.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(white: 0.55))
-                    .frame(width: 14)
-                Text(item.label)
+        let row = HStack(spacing: 6) {
+            Image(systemName: "folder.fill.badge.gearshape")
+                .font(.system(size: 11))
+                .foregroundStyle(isActive ? Theme.Color.accent.opacity(0.85) : Color(white: 0.55))
+                .frame(width: 14)
+            if isEditing {
+                TextField("", text: $editingProjectDraft)
+                    .textFieldStyle(.plain)
                     .font(Theme.Font.sidebarItem)
                     .foregroundStyle(Theme.Color.label)
+                    .focused($renameProjectFocused, equals: project.id)
+                    .onSubmit { commitProjectRename(project.id) }
+                    .onKeyPress(.escape) {
+                        cancelProjectRename()
+                        return .handled
+                    }
+            } else {
+                Text(project.name)
+                    .font(Theme.Font.sidebarItem)
+                    .foregroundStyle(isActive ? Theme.Color.label : Theme.Color.labelSecondary)
                     .lineLimit(1)
-                Spacer(minLength: 0)
             }
-            .padding(.leading, isActive ? 10 : 14)
-            .padding(.trailing, 8)
-            .frame(height: 22)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(isActive ? Color.white.opacity(0.06) : Color.clear)
-                    .padding(.horizontal, isActive ? 6 : 0)
-            )
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
+        .padding(.leading, isActive ? 10 : 14)
+        .padding(.trailing, 8)
+        .frame(height: 22)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isActive ? Color.white.opacity(0.06) : Color.clear)
+                .padding(.horizontal, isActive ? 6 : 0)
+        )
+        .overlay(alignment: .top) {
+            if isDropTarget {
+                Rectangle()
+                    .fill(Theme.Color.accent)
+                    .frame(height: 2)
+                    .padding(.horizontal, 6)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !isEditing else { return }
+            workspace.switchTo(projectID: project.id)
+        }
+        .contextMenu {
+            Button("Rename") { startProjectRename(project) }
+            Button("Delete", role: .destructive) {
+                workspace.delete(project.id)
+            }
+            // Last-project guard. The manager refuses too, but disabling
+            // the menu item makes the intent visible up-front.
+            .disabled(isOnlyProject)
+        }
+
+        row
+            .onDrag {
+                draggingProjectID = project.id
+                return makeProjectDragProvider(project.id)
+            }
+            .onDrop(
+                of: [Self.projectDragType],
+                delegate: ProjectReorderDropDelegate(
+                    target: project.id,
+                    workspace: workspace,
+                    draggingID: $draggingProjectID,
+                    highlightID: $projectRowDropTargetedID
+                )
+            )
+    }
+
+    /// Build an item provider whose payload is the project UUID under
+    /// our private type identifier. Using a custom type (instead of plain
+    /// text) keeps a project drag from accidentally triggering the
+    /// favorite-reorder drop target during a sloppy mouse path.
+    private func makeProjectDragProvider(_ id: UUID) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: Self.projectDragType,
+            visibility: .ownProcess
+        ) { completion in
+            completion(Data(id.uuidString.utf8), nil)
+            return nil
+        }
+        return provider
     }
 
     // MARK: Section chrome
@@ -240,20 +344,37 @@ struct SidebarView: View {
     // MARK: Rename flow
 
     private func startRename(_ favorite: Favorite) {
-        editingID = favorite.id
-        editingDraft = favorite.label
-        DispatchQueue.main.async { renameFocused = favorite.id }
+        editingFavoriteID = favorite.id
+        editingFavoriteDraft = favorite.label
+        DispatchQueue.main.async { renameFavoriteFocused = favorite.id }
     }
 
     private func commitRename(_ id: Favorite.ID) {
-        viewModel.rename(id, to: editingDraft)
+        viewModel.rename(id, to: editingFavoriteDraft)
         cancelRename()
     }
 
     private func cancelRename() {
-        editingID = nil
-        editingDraft = ""
-        renameFocused = nil
+        editingFavoriteID = nil
+        editingFavoriteDraft = ""
+        renameFavoriteFocused = nil
+    }
+
+    private func startProjectRename(_ project: Project) {
+        editingProjectID = project.id
+        editingProjectDraft = project.name
+        DispatchQueue.main.async { renameProjectFocused = project.id }
+    }
+
+    private func commitProjectRename(_ id: UUID) {
+        workspace.rename(id, to: editingProjectDraft)
+        cancelProjectRename()
+    }
+
+    private func cancelProjectRename() {
+        editingProjectID = nil
+        editingProjectDraft = ""
+        renameProjectFocused = nil
     }
 
     // MARK: Drop dispatch
@@ -296,22 +417,44 @@ struct SidebarView: View {
     }
 }
 
-// MARK: Hardcoded location items
+// MARK: Project reorder
 
-struct SidebarItem: Identifiable {
-    let id = UUID()
-    let label: String
-    let url: URL
+/// Project equivalent of the favorite reorder delegate. Reordering happens
+/// on `dropEntered` (not `performDrop`) so the user sees the row swap as
+/// soon as the cursor crosses a sibling, mirroring Safari's tab strip
+/// instead of waiting until mouse-up.
+private struct ProjectReorderDropDelegate: DropDelegate {
+    let target: UUID
+    @ObservedObject var workspace: WorkspaceManager
+    @Binding var draggingID: UUID?
+    @Binding var highlightID: UUID?
 
-    init(_ label: String, _ url: URL) {
-        self.label = label
-        self.url = url
+    func dropEntered(info: DropInfo) {
+        guard let dragging = draggingID, dragging != target else { return }
+        highlightID = target
+        // Insert AFTER the target if dragging from earlier in the list,
+        // BEFORE if dragging from later — same convention as favorites.
+        let projects = workspace.workspace.projects
+        guard let from = projects.firstIndex(where: { $0.id == dragging }),
+              let to = projects.firstIndex(where: { $0.id == target })
+        else { return }
+        let beforeID: UUID? = from < to
+            ? (to + 1 < projects.count ? projects[to + 1].id : nil)
+            : projects[to].id
+        workspace.move(sourceID: dragging, before: beforeID)
     }
 
-    static var locations: [SidebarItem] {
-        [
-            SidebarItem("Macintosh HD", URL(fileURLWithPath: "/")),
-            SidebarItem("Applications", URL(fileURLWithPath: "/Applications")),
-        ]
+    func dropExited(info: DropInfo) {
+        if highlightID == target { highlightID = nil }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingID = nil
+        highlightID = nil
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
     }
 }
