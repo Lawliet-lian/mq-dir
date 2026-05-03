@@ -384,15 +384,10 @@ struct SidebarView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.Color.labelTertiary)
                     if cmux.lastSyncDate == nil && cmux.lastError == nil {
-                        // First-run prerequisite hint — easy to miss otherwise,
-                        // because cmux ships with the restrictive socket mode.
-                        // Mention both unlock paths so the user can pick the
-                        // tradeoff they're comfortable with.
-                        Text("Quick: cmux → Settings → Automation → Socket Control Mode = Allow All.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.Color.labelTertiary)
-                            .opacity(0.75)
-                        Text("Stricter: set Socket Control Mode = Password, then run\n`launchctl setenv CMUX_SOCKET_PASSWORD <pw>` and relaunch mq-dir.")
+                        // Sidebar real estate is tight — give the one
+                        // recipe most users will pick and link to the
+                        // README for the password-mode alternative.
+                        Text("Requires cmux → Settings → Automation → Socket Control Mode = Allow All. See README for the password-mode alternative.")
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.Color.labelTertiary)
                             .opacity(0.75)
