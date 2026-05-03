@@ -39,22 +39,51 @@ if [[ ! -x "${TOOLS_BIN}/sign_update" || ! -x "${TOOLS_BIN}/generate_keys" ]]; t
     tar -C "${TMP}" -xJf "${TMP}/sparkle.tar.xz"
     cp -R "${TMP}/bin" "${TOOLS_DIR}/bin"
 fi
-[[ -x "${TOOLS_BIN}/sign_update" ]]   || err "sign_update missing after extract"
-[[ -x "${TOOLS_BIN}/generate_keys" ]] || err "generate_keys missing after extract"
+# Sparkle 2.6.x renamed its CLI tools (generate-keys / sign-update) and
+# moved the canonical private key into the macOS keychain. Older 2.x
+# tarballs still shipped the underscore names, so resolve either form.
+resolve_bin() {
+    local hyphen="${TOOLS_BIN}/$1" underscore="${TOOLS_BIN}/$2"
+    if   [[ -x "${hyphen}"     ]]; then printf '%s\n' "${hyphen}"
+    elif [[ -x "${underscore}" ]]; then printf '%s\n' "${underscore}"
+    else return 1
+    fi
+}
+GEN_KEYS_BIN="$(resolve_bin generate-keys generate_keys)" \
+    || err "generate-keys missing under ${TOOLS_BIN}"
+SIGN_UPDATE_BIN="$(resolve_bin sign-update sign_update)" \
+    || err "sign-update missing under ${TOOLS_BIN}"
 
-# 2. Generate the EdDSA key pair if not already present. The private key
-#    lives under ~/.config so it's outside the repo and survives reinstalls.
-step "Provisioning EdDSA key pair at ${KEYS_DIR}"
+# 2. Provision the EdDSA key pair. Sparkle 2 stores the canonical private
+#    key in the macOS keychain — `generate-keys` with no flags creates it
+#    if absent and is a no-op if it's already there. We then export a
+#    file-based backup under ~/.config so a maintainer can move to a new
+#    machine without re-publishing the public key.
+step "Provisioning EdDSA key pair (keychain + file backup at ${KEYS_DIR})"
 mkdir -p "${KEYS_DIR}"
 chmod 700 "${KEYS_DIR}"
-if [[ -f "${PRIV_KEY}" && -f "${PUB_KEY}" ]]; then
-    echo "Key pair already exists — leaving in place."
+
+if "${GEN_KEYS_BIN}" -p >/dev/null 2>&1; then
+    echo "Existing keychain key pair detected — leaving in place."
 else
-    # generate_keys writes both halves to its own keychain item by default.
-    # We force file output via -p (public) and -x (private) so the keys
-    # end up where Scripts/release.sh expects them.
-    "${TOOLS_BIN}/generate_keys" -p "${PUB_KEY}" -x "${PRIV_KEY}"
-    chmod 600 "${PRIV_KEY}"
+    echo "No existing key pair — generating one in the keychain..."
+    "${GEN_KEYS_BIN}"
+fi
+
+# Export public key (always — cheap, lets the script print it on rerun)
+"${GEN_KEYS_BIN}" -p > "${PUB_KEY}"
+chmod 644 "${PUB_KEY}"
+
+# Optional file-only backup of the private key. Skip if export refuses
+# (some Sparkle builds gate -x behind extra prompts); keychain is the
+# primary store regardless.
+if [[ ! -f "${PRIV_KEY}" ]]; then
+    if "${GEN_KEYS_BIN}" -x "${PRIV_KEY}" 2>/dev/null; then
+        chmod 600 "${PRIV_KEY}"
+        echo "Backed up private key to ${PRIV_KEY}"
+    else
+        echo "(Skipped private-key file backup — Sparkle keychain remains the source of truth.)"
+    fi
 fi
 
 # 3. Surface the public key for the maintainer to paste into project.yml.

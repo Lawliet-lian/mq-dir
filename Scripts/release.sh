@@ -35,7 +35,15 @@ cd "${REPO_ROOT}"
 
 KEYS_DIR="${HOME}/.config/mq-dir-release/sparkle"
 PRIV_KEY="${KEYS_DIR}/ed_priv"
-SIGN_BIN="${REPO_ROOT}/.build-tools/sparkle/bin/sign_update"
+SPARKLE_BIN_DIR="${REPO_ROOT}/.build-tools/sparkle/bin"
+# Sparkle 2.6.x renamed sign_update → sign-update; check both.
+if   [[ -x "${SPARKLE_BIN_DIR}/sign-update" ]]; then
+    SIGN_BIN="${SPARKLE_BIN_DIR}/sign-update"
+elif [[ -x "${SPARKLE_BIN_DIR}/sign_update" ]]; then
+    SIGN_BIN="${SPARKLE_BIN_DIR}/sign_update"
+else
+    SIGN_BIN=""
+fi
 
 APPCAST="${REPO_ROOT}/docs/appcast.xml"
 CASK="${REPO_ROOT}/Casks/${APP_NAME}.rb"
@@ -57,8 +65,8 @@ command -v xcodegen   >/dev/null || err "Missing xcodegen (brew install xcodegen
 command -v xcodebuild >/dev/null || err "Missing xcodebuild (install Xcode)"
 command -v create-dmg >/dev/null || err "Missing create-dmg (brew install create-dmg)"
 command -v gh         >/dev/null || err "Missing gh (brew install gh)"
-[[ -x "${SIGN_BIN}" ]] || err "Missing Sparkle sign_update at ${SIGN_BIN} — run Scripts/sparkle-setup.sh"
-[[ -f "${PRIV_KEY}" ]] || err "Missing Sparkle private key at ${PRIV_KEY} — run Scripts/sparkle-setup.sh"
+[[ -n "${SIGN_BIN}" && -x "${SIGN_BIN}" ]] \
+    || err "Missing Sparkle sign-update under ${SPARKLE_BIN_DIR} — run Scripts/sparkle-setup.sh"
 
 if [[ -n "$(git status --porcelain)" ]]; then
     err "Working tree is dirty — commit or stash before releasing."
@@ -115,7 +123,13 @@ create-dmg \
 #    `sparkle:edSignature="…" length="…"` which we splice straight into
 #    the appcast enclosure attributes.
 step "Signing DMG with Sparkle EdDSA"
-SIG_LINE="$("${SIGN_BIN}" -f "${PRIV_KEY}" "${DMG_PATH}")"
+# Sparkle 2's sign-update reads from the macOS keychain by default;
+# fall back to a file-based private key only when a backup exists.
+if [[ -f "${PRIV_KEY}" ]]; then
+    SIG_LINE="$("${SIGN_BIN}" -f "${PRIV_KEY}" "${DMG_PATH}")"
+else
+    SIG_LINE="$("${SIGN_BIN}" "${DMG_PATH}")"
+fi
 DMG_LENGTH="$(stat -f%z "${DMG_PATH}")"
 DMG_URL="https://github.com/${GH_REPO}/releases/download/v${VERSION}/${DMG_NAME}"
 PUBDATE="$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")"
