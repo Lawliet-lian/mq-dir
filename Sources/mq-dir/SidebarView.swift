@@ -6,6 +6,7 @@ struct SidebarView: View {
     @ObservedObject var viewModel: SidebarViewModel
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject var updateManager: UpdateManager
+    @ObservedObject var cmux: CmuxSidebarModel
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
 
@@ -44,6 +45,11 @@ struct SidebarView: View {
                         .padding(.bottom, 8)
 
                     projectsSection
+
+                    if cmux.cmuxAvailable {
+                        cmuxSection
+                            .padding(.top, 8)
+                    }
                 }
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -354,6 +360,116 @@ struct SidebarView: View {
             return nil
         }
         return provider
+    }
+
+    // MARK: cmux
+
+    private var cmuxSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Text("CMUX")
+                    .font(Theme.Font.sidebarHeader)
+                    .tracking(0.5)
+                    .foregroundStyle(Theme.Color.labelTertiary)
+                Spacer(minLength: 0)
+                Button {
+                    Task { await cmux.sync() }
+                } label: {
+                    Image(systemName: cmux.isSyncing
+                          ? "arrow.triangle.2.circlepath"
+                          : "arrow.clockwise")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Theme.Color.labelSecondary)
+                        .frame(width: 16, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(cmux.isSyncing)
+                .help("Sync cmux workspaces")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+
+            if cmux.workspaces.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(cmux.lastError ?? "Press ⟳ to sync cmux workspaces")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.Color.labelTertiary)
+                    if cmux.lastSyncDate == nil && cmux.lastError == nil {
+                        // First-run prerequisite hint — easy to miss otherwise,
+                        // because cmux ships with the restrictive socket mode.
+                        Text("Requires cmux → Settings → Automation → Socket Control Mode = Allow All.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.Color.labelTertiary)
+                            .opacity(0.75)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(cmux.workspaces) { ws in
+                    cmuxRow(ws)
+                }
+            }
+        }
+    }
+
+    private func cmuxRow(_ ws: CmuxWorkspace) -> some View {
+        let cwd = ws.currentDirectory.flatMap { URL(fileURLWithPath: $0) }
+        let isActive = cwd != nil && selectedURL == cwd
+
+        return Button {
+            guard let url = cwd else { return }
+            // ⌘-click → open in a new tab in the focused pane (matches
+            // the Finder convention used by tree-view ⌘-click).
+            // Plain click → swap the focused pane's active tab to it.
+            if NSEvent.modifierFlags.contains(.command) {
+                NotificationCenter.default.post(
+                    name: .mqdirOpenURLInNewTabRequested,
+                    object: nil,
+                    userInfo: ["url": url]
+                )
+            } else {
+                selectedURL = url
+                onSelect(url)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: ws.selected ? "play.circle.fill" : "terminal")
+                    .font(.system(size: 11))
+                    .foregroundStyle(ws.selected
+                                     ? Theme.Color.accent.opacity(0.85)
+                                     : Color(white: 0.55))
+                    .frame(width: 14)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(ws.title)
+                        .font(Theme.Font.sidebarItem)
+                        .foregroundStyle(Theme.Color.label)
+                        .lineLimit(1)
+                    if let cwd {
+                        Text(cwd.lastPathComponent)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.Color.labelTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, isActive ? 10 : 14)
+            .padding(.trailing, 8)
+            .frame(minHeight: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isActive ? Color.white.opacity(0.06) : Color.clear)
+                    .padding(.horizontal, isActive ? 6 : 0)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(cwd == nil)
+        .help(ws.currentDirectory ?? "no working directory")
     }
 
     // MARK: Section chrome

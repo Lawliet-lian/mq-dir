@@ -4,6 +4,7 @@ import SwiftUI
 struct MainWindowView: View {
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject var updateManager: UpdateManager
+    @StateObject private var cmux = CmuxSidebarModel()
 
     @StateObject private var pane0: PaneTabsViewModel
     @StateObject private var pane1: PaneTabsViewModel
@@ -86,6 +87,7 @@ struct MainWindowView: View {
                 viewModel: sidebar,
                 workspace: workspace,
                 updateManager: updateManager,
+                cmux: cmux,
                 selectedURL: $sidebarSelection
             ) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }

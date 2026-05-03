@@ -30,6 +30,7 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 - 💾 **State persistence** — every pane / tab / favorite / project survives relaunch, force-quit, and even schema upgrades (legacy `state.json` shapes auto-migrate).
 - 🔎 **Per-pane recursive search** — debounced, case-insensitive substring match across the current folder's subtree. ⌘F.
 - 🔄 **In-app auto-update** — Sparkle 2 polls the appcast every 24 h; when a new release is out, the sidebar grows an "Update Available" button that runs the standard install/relaunch flow.
+- 🔗 **[cmux](https://cmux.com) sync** — sidebar grows a CMUX section that mirrors your cmux workspaces. Click a row to open its working directory in the focused pane (⌘-click for a new tab). Requires **cmux → Settings → Automation → Socket Control Mode = Allow All** (cmux ships locked to its own children); section stays hidden when cmux isn't installed.
 - 🎨 **Native macOS look** — SwiftUI + AppKit, system theme tokens, hand-finished app icon.
 
 **Coming next**
