@@ -15,6 +15,9 @@ struct MenuCommands: Commands {
             Divider()
             Button("Reveal in Finder") { post(.mqdirRevealSelectedRequested) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
+            Divider()
+            Button("Add to Favorites") { post(.mqdirAddCurrentFolderToFavoritesRequested) }
+                .keyboardShortcut("d", modifiers: .command)
         }
 
         CommandGroup(after: .textEditing) {

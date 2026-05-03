@@ -31,6 +31,26 @@ struct PaneState: Codable, Equatable, Sendable {
     }
 }
 
+/// One sidebar favorite. Folder reference is stored as a security-scoped
+/// bookmark like `PaneState.folderBookmark`; `fallbackPath` is the raw path
+/// at the time of save, used only to display a stale entry when bookmark
+/// resolution fails (e.g. the folder was deleted on disk).
+struct Favorite: Codable, Equatable, Sendable, Identifiable {
+    var id: UUID
+    /// User-editable display name. Defaults to the folder's last path
+    /// component on creation; Rename overwrites it.
+    var label: String
+    var bookmark: Data?
+    var fallbackPath: String?
+
+    init(id: UUID = UUID(), label: String, bookmark: Data? = nil, fallbackPath: String? = nil) {
+        self.id = id
+        self.label = label
+        self.bookmark = bookmark
+        self.fallbackPath = fallbackPath
+    }
+}
+
 /// Window-level state that survives an app restart.
 ///
 /// Always carries four pane states even when `layout` shows fewer panes,
@@ -40,12 +60,49 @@ struct WindowState: Codable, Equatable, Sendable {
     var layout: PaneLayout
     var focusedPaneIndex: Int
     var panes: [PaneState]
+    var favorites: [Favorite]
+    /// Distinguishes "user has explicitly emptied favorites" from "first
+    /// launch / pre-favorites schema." When false, the window VM seeds the
+    /// six home subdirectories and flips the flag so we don't re-seed after
+    /// the user clears the list.
+    var favoritesSeeded: Bool
 
-    init(layout: PaneLayout, focusedPaneIndex: Int, panes: [PaneState]) {
+    init(
+        layout: PaneLayout,
+        focusedPaneIndex: Int,
+        panes: [PaneState],
+        favorites: [Favorite] = [],
+        favoritesSeeded: Bool = false
+    ) {
         precondition(panes.count == 4, "WindowState always carries exactly 4 pane records")
         self.layout = layout
         self.focusedPaneIndex = focusedPaneIndex
         self.panes = panes
+        self.favorites = favorites
+        self.favoritesSeeded = favoritesSeeded
+    }
+
+    /// Default missing keys to their empty values so old `state.json` files
+    /// (written before `favorites` existed) keep loading after upgrade. The
+    /// VM will then run the seeding pass.
+    private enum CodingKeys: String, CodingKey {
+        case layout, focusedPaneIndex, panes, favorites, favoritesSeeded
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let layout = try c.decode(PaneLayout.self, forKey: .layout)
+        let focused = try c.decode(Int.self, forKey: .focusedPaneIndex)
+        let panes = try c.decode([PaneState].self, forKey: .panes)
+        let favorites = try c.decodeIfPresent([Favorite].self, forKey: .favorites) ?? []
+        let seeded = try c.decodeIfPresent(Bool.self, forKey: .favoritesSeeded) ?? false
+        self.init(
+            layout: layout,
+            focusedPaneIndex: focused,
+            panes: panes,
+            favorites: favorites,
+            favoritesSeeded: seeded
+        )
     }
 
     static let empty = WindowState(

@@ -6,6 +6,7 @@ struct MainWindowView: View {
     @StateObject private var pane1: FolderBrowserViewModel
     @StateObject private var pane2: FolderBrowserViewModel
     @StateObject private var pane3: FolderBrowserViewModel
+    @StateObject private var sidebar: SidebarViewModel
 
     @State private var layout: PaneLayout
     @State private var focusedPaneIndex: Int
@@ -46,11 +47,17 @@ struct MainWindowView: View {
         self._pane1 = StateObject(wrappedValue: FolderBrowserViewModel(state: panes[1]))
         self._pane2 = StateObject(wrappedValue: FolderBrowserViewModel(state: panes[2]))
         self._pane3 = StateObject(wrappedValue: FolderBrowserViewModel(state: panes[3]))
+
+        // First-run seeding for the sidebar. After this point the saved
+        // `favoritesSeeded` is always true so subsequent launches respect
+        // the user's edits (including "removed everything").
+        let seed = SidebarViewModel.seedIfNeeded(restored)
+        self._sidebar = StateObject(wrappedValue: SidebarViewModel(favorites: seed.favorites))
     }
 
     var body: some View {
         HSplitView {
-            SidebarView(selectedURL: $sidebarSelection) { url in
+            SidebarView(viewModel: sidebar, selectedURL: $sidebarSelection) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
                 focusedPane.openFolder(url)
             }
@@ -80,6 +87,7 @@ struct MainWindowView: View {
         .onReceive(pane1.objectWillChange) { _ in scheduleSave() }
         .onReceive(pane2.objectWillChange) { _ in scheduleSave() }
         .onReceive(pane3.objectWillChange) { _ in scheduleSave() }
+        .onReceive(sidebar.objectWillChange) { _ in scheduleSave() }
         .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenFolderRequested)) { _ in
             focusedPane.chooseFolder()
         }
@@ -110,6 +118,11 @@ struct MainWindowView: View {
             // installed by the body re-render triggered above.
             DispatchQueue.main.async { searchFocused = true }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mqdirAddCurrentFolderToFavoritesRequested)) { _ in
+            if let url = focusedPane.folderURL {
+                sidebar.add(url: url)
+            }
+        }
         // After a drag/drop move or copy, reload every pane so all four views
         // stay in sync without each pane having its own FSEvents subscription
         // (FSEvents lands in M3 per plan §3).
@@ -139,7 +152,12 @@ struct MainWindowView: View {
                 pane1.paneSnapshot(),
                 pane2.paneSnapshot(),
                 pane3.paneSnapshot(),
-            ]
+            ],
+            favorites: sidebar.favorites,
+            // `init()` always runs SidebarViewModel.seedIfNeeded, so by the
+            // time we save we've definitely either preserved an existing
+            // seeded list or just produced a fresh one — either way, true.
+            favoritesSeeded: true
         )
     }
 

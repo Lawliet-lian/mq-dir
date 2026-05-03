@@ -10,6 +10,10 @@ extension Notification.Name {
     static let mqdirGoBackRequested = Notification.Name("mqdir.goBackRequested")
     static let mqdirGoForwardRequested = Notification.Name("mqdir.goForwardRequested")
     static let mqdirFocusSearchRequested = Notification.Name("mqdir.focusSearchRequested")
+    /// Add the focused pane's current folder to the sidebar Favorites list.
+    /// Bound to ⌘D in MenuCommands; mirrors Finder's "Add to Sidebar" hotkey.
+    static let mqdirAddCurrentFolderToFavoritesRequested =
+        Notification.Name("mqdir.addCurrentFolderToFavoritesRequested")
     static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
     /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
     /// so the active window can flush a synchronous save before exit.
