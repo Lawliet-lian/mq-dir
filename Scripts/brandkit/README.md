@@ -35,15 +35,22 @@ timestamp suffix.
 
 ## Wire the App Icon into Xcode
 
-After `python gen.py app_icon` produces `output/app_icon_master.png`:
+The App Icon is built **procedurally** — no AI call. `build_app_icon.py`
+writes a Discord-pattern master (solid dark squircle, 2x2 cell grid, one
+accent-blue tile) directly to `output/app_icon_master.png`. Then resample:
 
 ```bash
+python build_app_icon.py
 python postprocess.py
 ```
 
-This writes 10 size variants and a fresh `Contents.json` to
+`postprocess.py` writes 10 size variants and a fresh `Contents.json` to
 `../Resources/Assets.xcassets/AppIcon.appiconset/`. Re-run xcodegen and
 rebuild — the dock icon, Finder icon, and About box will all switch over.
+
+The legacy `gen.py app_icon` route still exists for AI experiments, but
+its output requires `refine_app_icon.py` cleanup and tends to produce a
+glass-bezel inset that reads small against peer apps in the Dock.
 
 ## Asset list
 
