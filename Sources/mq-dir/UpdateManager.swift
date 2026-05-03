@@ -34,11 +34,22 @@ final class UpdateManager: NSObject, ObservableObject {
         let publicKey = (Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String) ?? ""
         guard !publicKey.isEmpty else { return }
 
-        self.updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+        // Build the controller without auto-starting so we can catch the
+        // throw from `start()` ourselves instead of letting Sparkle's
+        // standard controller pop its "updater failed to start" alert
+        // on every launch of an unsigned dev build.
+        let controller = SPUStandardUpdaterController(
+            startingUpdater: false,
             updaterDelegate: self,
             userDriverDelegate: nil
         )
+        do {
+            try controller.updater.start()
+            self.updaterController = controller
+        } catch {
+            NSLog("[mq-dir] Sparkle did not start: \(error.localizedDescription) — auto-update disabled for this build.")
+            self.updaterController = nil
+        }
     }
 
     /// Manual check entry-point. Bound to the sidebar update button —
