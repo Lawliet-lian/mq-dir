@@ -1,12 +1,12 @@
 import Foundation
 
-/// Per-pane state that survives an app restart.
+/// Per-tab state that survives an app restart.
 ///
 /// Folder reference is stored as a security-scoped bookmark (not a raw path)
 /// so the file manager remains operable when the app moves to the App Store
 /// sandbox. Selection is stored as URL-paths and re-intersected with the
 /// freshly enumerated entries on restore.
-struct PaneState: Codable, Equatable, Sendable {
+struct TabState: Codable, Equatable, Sendable {
     var folderBookmark: Data?
     var sortKey: FileEntrySortKey
     var sortAscending: Bool
@@ -28,6 +28,49 @@ struct PaneState: Codable, Equatable, Sendable {
         self.includeHidden = includeHidden
         self.columnWidths = columnWidths
         self.selectedURLPaths = selectedURLPaths
+    }
+}
+
+/// Per-pane state. A pane carries an ordered list of tabs and which one is
+/// currently active. Always carries at least one tab so the pane is never
+/// in a tabless state — closing the last tab leaves an empty tab in place.
+struct PaneState: Codable, Equatable, Sendable {
+    var tabs: [TabState]
+    var activeTabIndex: Int
+
+    init(tabs: [TabState] = [TabState()], activeTabIndex: Int = 0) {
+        precondition(!tabs.isEmpty, "PaneState must carry at least one tab")
+        self.tabs = tabs
+        self.activeTabIndex = max(0, min(activeTabIndex, tabs.count - 1))
+    }
+
+    /// Backward-compat decode: pre-tabs `state.json` had each pane stored as
+    /// a flat `TabState` (folderBookmark/sortKey/...). Detect that shape and
+    /// promote it to a single-tab pane so users don't lose their last folder.
+    private enum CodingKeys: String, CodingKey {
+        case tabs, activeTabIndex
+    }
+
+    init(from decoder: Decoder) throws {
+        if let c = try? decoder.container(keyedBy: CodingKeys.self),
+           let tabs = try? c.decode([TabState].self, forKey: .tabs)
+        {
+            let active = (try? c.decodeIfPresent(Int.self, forKey: .activeTabIndex)) ?? 0
+            self.init(
+                tabs: tabs.isEmpty ? [TabState()] : tabs,
+                activeTabIndex: active
+            )
+            return
+        }
+        // Legacy shape: decode the whole container as a single TabState.
+        let legacy = try TabState(from: decoder)
+        self.init(tabs: [legacy], activeTabIndex: 0)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(tabs, forKey: .tabs)
+        try c.encode(activeTabIndex, forKey: .activeTabIndex)
     }
 }
 

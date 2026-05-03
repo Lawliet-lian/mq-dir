@@ -1,14 +1,55 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// Routes a tab drop to `paneVM.move`. The drop "happens" when the user
+/// hovers over a target tab (`dropEntered`) — that gives the immediate
+/// drag-to-reorder feel like Safari, instead of waiting for `performDrop`
+/// which only fires on mouseUp. `performDrop` returns true so SwiftUI
+/// considers the drop accepted and clears the drag state.
+private struct TabReorderDropDelegate: DropDelegate {
+    let target: ObjectIdentifier
+    let paneVM: PaneTabsViewModel
+    @Binding var draggingID: ObjectIdentifier?
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging = draggingID, dragging != target,
+              let from = paneVM.tabs.firstIndex(where: { ObjectIdentifier($0) == dragging }),
+              let to = paneVM.tabs.firstIndex(where: { ObjectIdentifier($0) == target })
+        else { return }
+        // Insert AFTER the target if the drag came from earlier in the bar,
+        // BEFORE if it came from later — matches the visual swap users expect.
+        let dest = from < to ? to + 1 : to
+        paneVM.move(from: from, to: dest)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingID = nil
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+}
 
 struct BrowserPaneView: View {
     let index: Int
-    @ObservedObject var viewModel: FolderBrowserViewModel
+    @ObservedObject var paneVM: PaneTabsViewModel
     let isFocused: Bool
     let onFocus: () -> Void
 
     @State private var paneIsDropTargeted = false
     @State private var rowDropTargeted: FileEntry.ID?
+    /// Tab being dragged for in-pane reorder. Carries the source tab's
+    /// identity so the drop target can resolve the right index even after
+    /// SwiftUI re-renders the row layout mid-drag.
+    @State private var draggingTabID: ObjectIdentifier?
+
+    /// Compatibility alias — the body code throughout this file used to
+    /// read `viewModel` when one pane held one folder. Now it routes to
+    /// the pane's currently-active tab so call sites keep working.
+    private var viewModel: FolderBrowserViewModel { paneVM.activeTab }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,46 +76,121 @@ struct BrowserPaneView: View {
         return .clear
     }
 
-    // MARK: Tab bar (Safari-style; single tab in M1)
+    // MARK: Tab bar
 
     private var tabBar: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.Color.accent.opacity(0.85))
-                Text(viewModel.folderURL?.lastPathComponent ?? "Untitled")
-                    .font(Theme.Font.tab)
-                    .foregroundStyle(Theme.Color.label)
-                    .lineLimit(1)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(Array(paneVM.tabs.enumerated()), id: \.element.id) { idx, tab in
+                    tabChip(for: tab, at: idx)
+                }
+                newTabButton
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
-            .frame(height: Theme.Metrics.tabBarHeight)
-            .background(Color.white.opacity(0.04))
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(Theme.Color.separatorFaint)
-                    .frame(width: 0.5)
-            }
-
-            Spacer(minLength: 0)
-
-            Button {
-                viewModel.chooseFolder()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.Color.labelSecondary)
-                    .frame(width: 24, height: Theme.Metrics.tabBarHeight)
-            }
-            .buttonStyle(.plain)
-            .help("Open Folder in Pane \(index + 1)")
         }
         .frame(height: Theme.Metrics.tabBarHeight)
         .background(Theme.Color.tabBarBg)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
         }
+    }
+
+    @ViewBuilder
+    private func tabChip(for tab: FolderBrowserViewModel, at idx: Int) -> some View {
+        let isActive = paneVM.activeIndex == idx
+        let title = tab.folderURL?.lastPathComponent ?? "Untitled"
+        let id = ObjectIdentifier(tab)
+
+        HStack(spacing: 6) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(isActive
+                                 ? Theme.Color.accent.opacity(0.85)
+                                 : Theme.Color.labelTertiary)
+            Text(title)
+                .font(Theme.Font.tab)
+                .foregroundStyle(isActive ? Theme.Color.label : Theme.Color.labelSecondary)
+                .lineLimit(1)
+            Button {
+                paneVM.closeTab(at: idx)
+                if !isFocused { onFocus() }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Theme.Color.labelTertiary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close Tab")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 4)
+        .frame(height: Theme.Metrics.tabBarHeight)
+        .background(isActive ? Color.white.opacity(0.06) : Color.clear)
+        .overlay(alignment: .bottom) {
+            // 1pt accent underline for the active tab — subtle but reads
+            // immediately even with low chrome contrast.
+            if isActive {
+                Rectangle()
+                    .fill(Theme.Color.accent)
+                    .frame(height: 1.5)
+            }
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Theme.Color.separatorFaint).frame(width: 0.5)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            paneVM.selectTab(at: idx)
+            if !isFocused { onFocus() }
+        }
+        .contextMenu {
+            Button("New Tab") { paneVM.newTab() }
+            Divider()
+            Button("Close Tab") { paneVM.closeTab(at: idx) }
+            Button("Close Other Tabs") { paneVM.closeOthers(keep: idx) }
+                .disabled(paneVM.tabs.count <= 1)
+            Button("Close Tabs to the Right") { paneVM.closeToTheRight(of: idx) }
+                .disabled(idx >= paneVM.tabs.count - 1)
+            Divider()
+            Button("Duplicate Tab") { paneVM.duplicate(at: idx) }
+            if let url = tab.folderURL {
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            }
+        }
+        // Drag source: ship the tab's ObjectIdentifier as plain text so the
+        // drop target can route to `paneVM.move`. Pasteboard stays internal —
+        // dragging a tab out of the bar onto Finder/etc. simply does nothing.
+        .onDrag {
+            draggingTabID = id
+            return NSItemProvider(object: String(describing: id) as NSString)
+        }
+        .onDrop(
+            of: [UTType.plainText.identifier],
+            delegate: TabReorderDropDelegate(
+                target: id,
+                paneVM: paneVM,
+                draggingID: $draggingTabID
+            )
+        )
+    }
+
+    private var newTabButton: some View {
+        Button {
+            paneVM.newTab()
+            if !isFocused { onFocus() }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.Color.labelSecondary)
+                .frame(width: 28, height: Theme.Metrics.tabBarHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("New Tab (⌘T)")
     }
 
     // MARK: Folder header strip

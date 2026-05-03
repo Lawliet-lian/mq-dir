@@ -2,10 +2,10 @@ import AppKit
 import SwiftUI
 
 struct MainWindowView: View {
-    @StateObject private var pane0: FolderBrowserViewModel
-    @StateObject private var pane1: FolderBrowserViewModel
-    @StateObject private var pane2: FolderBrowserViewModel
-    @StateObject private var pane3: FolderBrowserViewModel
+    @StateObject private var pane0: PaneTabsViewModel
+    @StateObject private var pane1: PaneTabsViewModel
+    @StateObject private var pane2: PaneTabsViewModel
+    @StateObject private var pane3: PaneTabsViewModel
     @StateObject private var sidebar: SidebarViewModel
 
     @State private var layout: PaneLayout
@@ -42,11 +42,14 @@ struct MainWindowView: View {
 
         // Always rehydrate four panes — any layout shrink stashes the
         // off-screen pane state so it returns when the layout grows back.
+        // Each pane carries its own tab list; the VM forwards every nested
+        // tab's objectWillChange so the debounced save still fires when
+        // any tab anywhere mutates state.
         let panes = restored.panes
-        self._pane0 = StateObject(wrappedValue: FolderBrowserViewModel(state: panes[0]))
-        self._pane1 = StateObject(wrappedValue: FolderBrowserViewModel(state: panes[1]))
-        self._pane2 = StateObject(wrappedValue: FolderBrowserViewModel(state: panes[2]))
-        self._pane3 = StateObject(wrappedValue: FolderBrowserViewModel(state: panes[3]))
+        self._pane0 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[0]))
+        self._pane1 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[1]))
+        self._pane2 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[2]))
+        self._pane3 = StateObject(wrappedValue: PaneTabsViewModel(state: panes[3]))
 
         // First-run seeding for the sidebar. After this point the saved
         // `favoritesSeeded` is always true so subsequent launches respect
@@ -56,6 +59,29 @@ struct MainWindowView: View {
     }
 
     var body: some View {
+        windowChrome
+            .background(Theme.Color.windowBg)
+            .modifier(SaveTriggers(
+                pane0: pane0, pane1: pane1, pane2: pane2, pane3: pane3,
+                sidebar: sidebar,
+                layout: $layout,
+                focusedPaneIndex: $focusedPaneIndex,
+                scheduleSave: scheduleSave
+            ))
+            .modifier(NavigationNotifications(
+                focusedPane: focusedPane,
+                searchActive: $searchActive,
+                searchFocused: $searchFocused,
+                sidebar: sidebar
+            ))
+            .modifier(TabNotifications(focusedPaneVM: focusedPaneVM))
+            .modifier(GlobalNotifications(
+                allPanes: [pane0, pane1, pane2, pane3],
+                saveSynchronously: saveSynchronously
+            ))
+    }
+
+    private var windowChrome: some View {
         HSplitView {
             SidebarView(viewModel: sidebar, selectedURL: $sidebarSelection) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
@@ -72,71 +98,6 @@ struct MainWindowView: View {
             }
             .background(Theme.Color.windowBg)
         }
-        .background(Theme.Color.windowBg)
-        .onChange(of: layout) { _, newLayout in
-            if focusedPaneIndex >= newLayout.paneCount {
-                focusedPaneIndex = 0
-            }
-            scheduleSave()
-        }
-        .onChange(of: focusedPaneIndex) { _, _ in scheduleSave() }
-        // Watch each pane's persistable surface. Using @Published bindings
-        // here keeps us decoupled from the VM internals — any future field
-        // we add to paneSnapshot() will also flow through these triggers.
-        .onReceive(pane0.objectWillChange) { _ in scheduleSave() }
-        .onReceive(pane1.objectWillChange) { _ in scheduleSave() }
-        .onReceive(pane2.objectWillChange) { _ in scheduleSave() }
-        .onReceive(pane3.objectWillChange) { _ in scheduleSave() }
-        .onReceive(sidebar.objectWillChange) { _ in scheduleSave() }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenFolderRequested)) { _ in
-            focusedPane.chooseFolder()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenSelectedRequested)) { _ in
-            focusedPane.openSelected()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirRevealSelectedRequested)) { _ in
-            focusedPane.revealSelected()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirReloadRequested)) { _ in
-            focusedPane.reload()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirParentFolderRequested)) { _ in
-            focusedPane.openParentFolder()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirToggleHiddenFilesRequested)) { _ in
-            focusedPane.toggleHiddenFiles()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirGoBackRequested)) { _ in
-            focusedPane.goBack()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirGoForwardRequested)) { _ in
-            focusedPane.goForward()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirFocusSearchRequested)) { _ in
-            searchActive = true
-            // Defer focus until after the conditional TextField has been
-            // installed by the body re-render triggered above.
-            DispatchQueue.main.async { searchFocused = true }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirAddCurrentFolderToFavoritesRequested)) { _ in
-            if let url = focusedPane.folderURL {
-                sidebar.add(url: url)
-            }
-        }
-        // After a drag/drop move or copy, reload every pane so all four views
-        // stay in sync without each pane having its own FSEvents subscription
-        // (FSEvents lands in M3 per plan §3).
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirFileSystemChanged)) { _ in
-            pane0.reload()
-            pane1.reload()
-            pane2.reload()
-            pane3.reload()
-        }
-        // Synchronous save on app termination (debounce would be cancelled
-        // by the runloop tearing down). Posted by mqdirApp.
-        .onReceive(NotificationCenter.default.publisher(for: .mqdirAppWillTerminate)) { _ in
-            saveSynchronously()
-        }
     }
 
     // MARK: Persistence wiring
@@ -148,10 +109,10 @@ struct MainWindowView: View {
             layout: layout,
             focusedPaneIndex: focusedPaneIndex,
             panes: [
-                pane0.paneSnapshot(),
-                pane1.paneSnapshot(),
-                pane2.paneSnapshot(),
-                pane3.paneSnapshot(),
+                pane0.snapshot(),
+                pane1.snapshot(),
+                pane2.snapshot(),
+                pane3.snapshot(),
             ],
             favorites: sidebar.favorites,
             // `init()` always runs SidebarViewModel.seedIfNeeded, so by the
@@ -430,7 +391,7 @@ struct MainWindowView: View {
     private func paneView(_ index: Int) -> some View {
         BrowserPaneView(
             index: index,
-            viewModel: pane(at: index),
+            paneVM: paneVM(at: index),
             isFocused: focusedPaneIndex == index
         ) {
             focusedPaneIndex = index
@@ -496,15 +457,157 @@ struct MainWindowView: View {
 
     // MARK: Helpers
 
-    private var focusedPane: FolderBrowserViewModel { pane(at: focusedPaneIndex) }
+    /// The currently-focused pane's tab list. Use this for tab-list operations
+    /// (new tab, close, reopen, switch). For tab-content actions like
+    /// navigation or selection, prefer `focusedPane` so the call routes to
+    /// the active tab inside the pane.
+    private var focusedPaneVM: PaneTabsViewModel { paneVM(at: focusedPaneIndex) }
 
-    private func pane(at index: Int) -> FolderBrowserViewModel {
+    /// The active tab inside the focused pane. Compatibility shim: every
+    /// pre-tabs call site (`focusedPane.openFolder`, `focusedPane.goBack`,
+    /// `focusedPane.searchQuery`, …) keeps working unchanged because what
+    /// "the pane" used to mean is now "the active tab of the pane."
+    private var focusedPane: FolderBrowserViewModel { focusedPaneVM.activeTab }
+
+    private func paneVM(at index: Int) -> PaneTabsViewModel {
         switch index {
         case 0: pane0
         case 1: pane1
         case 2: pane2
         default: pane3
         }
+    }
+}
+
+// MARK: - Body modifier chunks
+//
+// SwiftUI's view-builder type checker collapses on a body with ~25 chained
+// modifiers, so the wiring is split into focused `ViewModifier` chunks. Each
+// modifier owns one slice of the cross-cutting concern (save triggers,
+// navigation notifications, tab notifications, app lifecycle), and the body
+// applies them in sequence. The split is purely a compile-time concession;
+// the runtime semantics match the original flat chain.
+
+private struct SaveTriggers: ViewModifier {
+    @ObservedObject var pane0: PaneTabsViewModel
+    @ObservedObject var pane1: PaneTabsViewModel
+    @ObservedObject var pane2: PaneTabsViewModel
+    @ObservedObject var pane3: PaneTabsViewModel
+    @ObservedObject var sidebar: SidebarViewModel
+    @Binding var layout: PaneLayout
+    @Binding var focusedPaneIndex: Int
+    let scheduleSave: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: layout) { _, newLayout in
+                if focusedPaneIndex >= newLayout.paneCount {
+                    focusedPaneIndex = 0
+                }
+                scheduleSave()
+            }
+            .onChange(of: focusedPaneIndex) { _, _ in scheduleSave() }
+            .onReceive(pane0.objectWillChange) { _ in scheduleSave() }
+            .onReceive(pane1.objectWillChange) { _ in scheduleSave() }
+            .onReceive(pane2.objectWillChange) { _ in scheduleSave() }
+            .onReceive(pane3.objectWillChange) { _ in scheduleSave() }
+            .onReceive(sidebar.objectWillChange) { _ in scheduleSave() }
+    }
+}
+
+private struct NavigationNotifications: ViewModifier {
+    let focusedPane: FolderBrowserViewModel
+    @Binding var searchActive: Bool
+    var searchFocused: FocusState<Bool>.Binding
+    @ObservedObject var sidebar: SidebarViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenFolderRequested)) { _ in
+                focusedPane.chooseFolder()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenSelectedRequested)) { _ in
+                focusedPane.openSelected()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirRevealSelectedRequested)) { _ in
+                focusedPane.revealSelected()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirReloadRequested)) { _ in
+                focusedPane.reload()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirParentFolderRequested)) { _ in
+                focusedPane.openParentFolder()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirToggleHiddenFilesRequested)) { _ in
+                focusedPane.toggleHiddenFiles()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirGoBackRequested)) { _ in
+                focusedPane.goBack()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirGoForwardRequested)) { _ in
+                focusedPane.goForward()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirFocusSearchRequested)) { _ in
+                searchActive = true
+                // Defer focus until after the conditional TextField has been
+                // installed by the body re-render triggered above.
+                DispatchQueue.main.async { searchFocused.wrappedValue = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirAddCurrentFolderToFavoritesRequested)) { _ in
+                if let url = focusedPane.folderURL {
+                    sidebar.add(url: url)
+                }
+            }
+    }
+}
+
+private struct TabNotifications: ViewModifier {
+    @ObservedObject var focusedPaneVM: PaneTabsViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirNewTabRequested)) { _ in
+                focusedPaneVM.newTab()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCloseTabRequested)) { _ in
+                focusedPaneVM.closeActive()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirReopenClosedTabRequested)) { _ in
+                focusedPaneVM.reopenClosed()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirNextTabRequested)) { _ in
+                focusedPaneVM.nextTab()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirPreviousTabRequested)) { _ in
+                focusedPaneVM.prevTab()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirSelectTabAtIndexRequested)) { note in
+                if let index = note.userInfo?["index"] as? Int {
+                    focusedPaneVM.selectTab(at: index)
+                }
+            }
+    }
+}
+
+private struct GlobalNotifications: ViewModifier {
+    let allPanes: [PaneTabsViewModel]
+    let saveSynchronously: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            // FSEvents lands in M3 per plan §3 — until then drag/drop posts
+            // an explicit "I changed the filesystem" notification and every
+            // open tab in every pane refetches its folder.
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirFileSystemChanged)) { _ in
+                for paneVM in allPanes {
+                    for tab in paneVM.tabs { tab.reload() }
+                }
+            }
+            // Synchronous save on app termination (debounce would be cancelled
+            // by the runloop tearing down). Posted by mqdirApp.
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirAppWillTerminate)) { _ in
+                saveSynchronously()
+            }
     }
 }
 

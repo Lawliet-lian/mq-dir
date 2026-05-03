@@ -7,7 +7,13 @@ import Foundation
 // re-exported by being members of the same Xcode module.
 
 @MainActor
-final class FolderBrowserViewModel: ObservableObject {
+final class FolderBrowserViewModel: ObservableObject, Identifiable {
+    /// Stable identity for SwiftUI's diffing — `ObjectIdentifier` is unique
+    /// per instance and free, since the VM is always class-bound. The tab
+    /// bar uses this to keep its `ForEach` rows tied to the right VM across
+    /// reorders and closes.
+    nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+
     @Published private(set) var folderURL: URL?
     @Published private(set) var entries: [FileEntry] = []
     @Published var selection: Set<FileEntry.ID> = []
@@ -44,7 +50,7 @@ final class FolderBrowserViewModel: ObservableObject {
     private var pendingRestoredSelection: [String] = []
 
     /// Bookmark for the currently-open `folderURL`, refreshed on each
-    /// `openFolder` so a `paneSnapshot()` returns durable state without
+    /// `openFolder` so a `tabSnapshot()` returns durable state without
     /// re-creating bookmarks at save time.
     private var currentBookmark: Data?
 
@@ -71,10 +77,10 @@ final class FolderBrowserViewModel: ObservableObject {
     /// first launch when no persisted state exists).
     init() {}
 
-    /// Restoration initializer — rehydrates a pane from a saved `PaneState`.
+    /// Restoration initializer — rehydrates a tab from a saved `TabState`.
     /// If the bookmark resolves, opens the folder and queues the saved
     /// selection to be matched against the loaded entries.
-    init(state: PaneState) {
+    init(state: TabState) {
         self.sortKey = state.sortKey
         self.sortAscending = state.sortAscending
         self.includeHidden = state.includeHidden
@@ -103,9 +109,9 @@ final class FolderBrowserViewModel: ObservableObject {
         }
     }
 
-    /// Snapshot the live pane state for serialization.
-    func paneSnapshot() -> PaneState {
-        PaneState(
+    /// Snapshot the live tab state for serialization.
+    func tabSnapshot() -> TabState {
+        TabState(
             folderBookmark: currentBookmark,
             sortKey: sortKey,
             sortAscending: sortAscending,
