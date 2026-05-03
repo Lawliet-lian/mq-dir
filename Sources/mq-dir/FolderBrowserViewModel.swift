@@ -310,6 +310,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let includeHidden = includeHidden
 
         searchTask = Task { [weak self] in
+            // Always clear the spinner on the way out, even if we get
+            // cancelled (folder navigation, supersede, deinit). Without
+            // this the sidebar's "Searching…" hint can stick on screen.
+            defer {
+                Task { @MainActor [weak self] in
+                    guard let self, self.searchCancelToken === token else { return }
+                    self.isSearching = false
+                }
+            }
+
             // Coalesce keystrokes — only the final pause kicks the walk.
             try? await Task.sleep(for: .milliseconds(220))
             if Task.isCancelled || token.isCancelled { return }
@@ -330,7 +340,6 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                 by: self.sortKey,
                 ascending: self.sortAscending
             )
-            self.isSearching = false
         }
     }
 
