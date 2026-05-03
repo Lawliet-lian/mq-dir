@@ -87,7 +87,24 @@ struct CmuxClient: Sendable {
         process.standardError = stderr
 
         try process.run()
+
+        // Arm a watchdog so a hung cmux socket doesn't leave the sidebar
+        // showing "Syncing…" forever. 5s is well above the 100s-of-ms a
+        // healthy cold socket takes; anything past that is a real hang.
+        let watchdog = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        watchdog.schedule(deadline: .now() + 5)
+        watchdog.setEventHandler {
+            if process.isRunning { process.terminate() }
+        }
+        watchdog.resume()
         process.waitUntilExit()
+        watchdog.cancel()
+
+        // SIGTERM exits with status 15 on Darwin. Distinguish that from a
+        // protocol-level error so the user gets an actionable hint.
+        if process.terminationReason == .uncaughtSignal {
+            throw CmuxError.timedOut
+        }
 
         guard process.terminationStatus == 0 else {
             let msg = String(data: stderr.fileHandleForReading.readDataToEndOfFile(),
@@ -135,6 +152,7 @@ private struct WorkspaceListResponse: Decodable {
 enum CmuxError: Error, LocalizedError {
     case notInstalled
     case accessDenied
+    case timedOut
     case rpcFailed(status: Int, message: String)
 
     var errorDescription: String? {
@@ -144,6 +162,9 @@ enum CmuxError: Error, LocalizedError {
         case .accessDenied:
             return "cmux is set to allow only its own children. " +
                    "Open cmux → Settings → Automation and switch Socket Control Mode away from cmuxOnly."
+        case .timedOut:
+            return "cmux did not respond within 5 seconds. " +
+                   "Try again, or quit and reopen cmux if the socket looks stuck."
         case .rpcFailed(let status, let message):
             let detail = message.trimmingCharacters(in: .whitespacesAndNewlines)
             return "cmux rpc failed (exit \(status))\(detail.isEmpty ? "" : ": \(detail)")"
