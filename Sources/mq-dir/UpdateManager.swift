@@ -19,14 +19,21 @@ final class UpdateManager: NSObject, ObservableObject {
     @Published private(set) var updateAvailable: Bool = false
     @Published private(set) var lastCheckDate: Date?
 
-    private var updaterController: SPUStandardUpdaterController!
+    /// Optional + var because Sparkle's controller takes its delegate at
+    /// construction time, but `self` isn't usable until super.init() runs.
+    /// We resolve the order by initializing super first, then assigning
+    /// the controller with `self` as the delegate. Stays nil entirely
+    /// when the public EdDSA key is missing — Sparkle 2 refuses to start
+    /// without one and the resulting "updater failed to start" alert is
+    /// worse UX than dormant auto-update.
+    private var updaterController: SPUStandardUpdaterController?
 
     override init() {
         super.init()
-        // `startingUpdater: true` immediately schedules background checks
-        // per the SUScheduledCheckInterval / SUEnableAutomaticChecks values
-        // in Info.plist. Setting the delegate at construction is the only
-        // way Sparkle can call back into us for "found update."
+
+        let publicKey = (Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String) ?? ""
+        guard !publicKey.isEmpty else { return }
+
         self.updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: self,
@@ -38,14 +45,14 @@ final class UpdateManager: NSObject, ObservableObject {
     /// triggers the standard Sparkle UI for confirm + install + relaunch.
     @MainActor
     func checkForUpdatesAndShowUI() {
-        updaterController.checkForUpdates(nil)
+        updaterController?.checkForUpdates(nil)
     }
 
     /// Background-check entry-point — same as the timer-driven one but
     /// callable from us if we ever add a manual "Check Now" menu item.
     @MainActor
     func checkInBackground() {
-        updaterController.updater.checkForUpdatesInBackground()
+        updaterController?.updater.checkForUpdatesInBackground()
     }
 }
 
