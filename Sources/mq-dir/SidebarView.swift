@@ -417,9 +417,6 @@ struct SidebarView: View {
                         .controlSize(.mini)
                         .scaleEffect(0.6)
                         .frame(width: 8, height: 8)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 8, weight: .bold))
                 }
                 Text(cmux.isSyncing ? "Syncing\u{2026}" : "Sync")
                     .font(.system(size: 10, weight: .medium))
