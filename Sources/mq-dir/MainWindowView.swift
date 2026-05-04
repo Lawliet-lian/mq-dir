@@ -155,13 +155,13 @@ struct MainWindowView: View {
             // Spacer for traffic-light area on the left edge of the window.
             Spacer().frame(width: 64)
 
-            iconButton("chevron.left", help: "Back (⌘[)") { focusedPane.goBack() }
+            ToolbarIconButton(symbol: "chevron.left", help: "Back (⌘[)") { focusedPane.goBack() }
                 .disabled(!focusedPane.canGoBack)
-            iconButton("chevron.right", help: "Forward (⌘])") { focusedPane.goForward() }
+            ToolbarIconButton(symbol: "chevron.right", help: "Forward (⌘])") { focusedPane.goForward() }
                 .disabled(!focusedPane.canGoForward)
-            iconButton("chevron.up", help: "Parent Folder (⌘↑)") { focusedPane.openParentFolder() }
+            ToolbarIconButton(symbol: "chevron.up", help: "Parent Folder (⌘↑)") { focusedPane.openParentFolder() }
                 .disabled(focusedPane.folderURL == nil)
-            iconButton("arrow.clockwise", help: "Reload (⌘R)") { focusedPane.reload() }
+            ToolbarIconButton(symbol: "arrow.clockwise", help: "Reload (⌘R)") { focusedPane.reload() }
                 .disabled(focusedPane.folderURL == nil)
 
             breadcrumb
@@ -317,15 +317,36 @@ struct MainWindowView: View {
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
     }
 
-    private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.Color.labelSecondary)
-                .frame(width: 24, height: 22)
+    // Toolbar nav buttons: a comfortable 30×28 hit target with a subtle
+    // hover background so the click area is obvious. Disabled state dims
+    // the icon and skips the hover affordance.
+    private struct ToolbarIconButton: View {
+        let symbol: String
+        let help: String
+        let action: () -> Void
+
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovering = false
+
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.Color.labelSecondary)
+                    .opacity(isEnabled ? 1 : 0.35)
+                    .frame(width: 30, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(isEnabled && isHovering
+                                  ? Color.white.opacity(0.08)
+                                  : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .help(help)
         }
-        .buttonStyle(.plain)
-        .help(help)
     }
 
     // MARK: Pane grid
