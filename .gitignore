@@ -54,3 +54,7 @@ marketing/
 
 # Claude Code repo guide — local-only AI assistant context.
 CLAUDE.md
+
+# Promo video / hyperframe exports — local working bundle, not part of
+# the shipping repo (sits at ~tens of MB, unrelated to source).
+hyperframes/
