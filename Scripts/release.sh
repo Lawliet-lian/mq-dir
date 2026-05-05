@@ -262,11 +262,34 @@ git push origin main
 git push origin "v${VERSION}"
 
 # 10. GitHub release with the DMG attached.
+#
+# Notes are seeded from `git log <prev-tag>..<this-tag>` so the body lands
+# with one bullet per landed commit plus a compare link, instead of the
+# old "See CHANGELOG.md" placeholder. Polish on the GitHub UI if needed —
+# this is a starting point, not the final story.
 step "Creating GitHub release"
+PREV_TAG="$(git describe --tags --abbrev=0 "v${VERSION}^" 2>/dev/null || true)"
+NOTES_FILE="$(mktemp)"
+trap 'rm -f "${NOTES_FILE}"' EXIT
+if [[ -n "${PREV_TAG}" ]]; then
+    {
+        echo "## What's Changed"
+        echo
+        # Skip the script's own "Release vX.Y.Z" commit — it's noise to
+        # readers and would otherwise sit at the top of every release.
+        git log "${PREV_TAG}..v${VERSION}" --pretty=format:'- %s' \
+            | grep -vE '^- Release v[0-9]'
+        echo
+        echo
+        echo "**Full Changelog**: https://github.com/${GH_REPO}/compare/${PREV_TAG}...v${VERSION}"
+    } > "${NOTES_FILE}"
+else
+    echo "Initial release." > "${NOTES_FILE}"
+fi
 gh release create "v${VERSION}" "${DMG_PATH}" \
     --repo "${GH_REPO}" \
     --title "v${VERSION}" \
-    --notes "See CHANGELOG.md for changes."
+    --notes-file "${NOTES_FILE}"
 
 step "Released v${VERSION} 🎉"
 echo "  - DMG:      ${DMG_PATH}"

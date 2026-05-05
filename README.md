@@ -7,7 +7,7 @@
 [![swift](https://img.shields.io/badge/swift-5.10-orange)](https://swift.org)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-🌐 [mqdir.com](https://mqdir.com) · 📓 [Changelog](CHANGELOG.md) · 🛠 [Contributing](CONTRIBUTING.md)
+🌐 [mqdir.com](https://mqdir.com) · 📓 [Releases](https://github.com/h5nam/mq-dir/releases) · 🛠 [Contributing](CONTRIBUTING.md)
 
 ![mq-dir hero](.github/assets/readme_hero.png)
 
@@ -45,7 +45,7 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 
 ## Status
 
-**Alpha.** v0.1.0-alpha.9 is a Developer ID-signed, Apple-notarized release. The working set above is stable enough for daily-driving by the maintainer; expect rough edges around ergonomics and edge cases. Track per-release detail in [`CHANGELOG.md`](CHANGELOG.md).
+**Pre-release.** Each tagged build is Developer ID-signed and Apple-notarized. The working set above is stable enough for daily-driving by the maintainer; expect rough edges around ergonomics and edge cases. Per-release detail lives on the [Releases page](https://github.com/h5nam/mq-dir/releases).
 
 ## Requirements
 

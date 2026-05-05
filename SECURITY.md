@@ -38,4 +38,4 @@ We aim to coordinate disclosure within **90 days** of acknowledged report. If we
 
 ## Hall of Fame
 
-Reporters who follow coordinated disclosure get acknowledged in `CHANGELOG.md` for the release that contains the fix, unless they ask to remain anonymous. We'd rather thank you publicly than not.
+Reporters who follow coordinated disclosure get acknowledged in the GitHub release notes for the release that contains the fix, unless they ask to remain anonymous. We'd rather thank you publicly than not.

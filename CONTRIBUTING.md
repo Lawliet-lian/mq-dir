@@ -74,9 +74,8 @@ Then double-click. Future launches work without intervention.
 Maintainer-only:
 
 1. Bump `MARKETING_VERSION` in `project.yml`.
-2. Update `CHANGELOG.md` (move `[Unreleased]` → `[X.Y.Z]`).
-3. Tag: `git tag vX.Y.Z && git push --tags`.
-4. `release.yml` builds, signs, notarizes, and uploads the `.dmg`.
+2. Tag: `git tag vX.Y.Z && git push --tags`.
+3. `release.yml` builds, signs, notarizes, and uploads the `.dmg`. The release body is seeded from `git log <prev-tag>..<this-tag>` — polish it on the [Releases page](https://github.com/h5nam/mq-dir/releases) if you want a narrative beyond the bullet list.
 
 ## Reporting bugs
 

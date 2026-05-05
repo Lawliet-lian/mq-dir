@@ -31,6 +31,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history so the release-notes step can compute commit
+          # subjects between the previous tag and this one.
+          fetch-depth: 0
 
       - name: Resolve version
         run: |
@@ -153,9 +157,27 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
           else
+            # Seed the body from `git log` between the previous tag and
+            # this one. Maintainer can polish on the Releases page.
+            PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+            NOTES_FILE="$(mktemp)"
+            if [ -n "$PREV_TAG" ]; then
+              {
+                echo "## What's Changed"
+                echo
+                git log "${PREV_TAG}..${TAG}" --pretty=format:'- %s' \
+                  | grep -vE '^- Release v[0-9]' || true
+                echo
+                echo
+                echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
+              } > "$NOTES_FILE"
+            else
+              echo "Initial release." > "$NOTES_FILE"
+            fi
             gh release create "$TAG" dist/* \
               --title "${APP_NAME} ${TAG}" \
-              --notes-file CHANGELOG.md
+              --notes-file "$NOTES_FILE"
+            rm -f "$NOTES_FILE"
           fi
 
       # The notary .p8 holds a long-lived App Store Connect API key.
