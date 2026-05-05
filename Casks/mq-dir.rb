@@ -1,6 +1,6 @@
 cask "mq-dir" do
-  version "0.1.0-alpha.12"
-  sha256 "11f9fb9e09bba1bf489670ae9a903fbfc41d29e9a5a2e3667b3797ba7bc94f4b"
+  version "0.1.0-beta.1"
+  sha256 "87b0ca0c1a42e89982b593a48061f6c9ea8d6f922707d3394121d8d416b80f67"
 
   url "https://github.com/h5nam/mq-dir/releases/download/v#{version}/mq-dir-v#{version}.dmg"
   name "mq-dir"
