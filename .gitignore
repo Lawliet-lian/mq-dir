@@ -48,3 +48,9 @@ __pycache__/
 # Internal design handoff bundles (Claude Design exports + chat transcripts).
 # Useful as a local reference but not appropriate for the public repo.
 design-source/
+
+# Marketing drafts — local-only copy decks for LinkedIn / Threads / X.
+marketing/
+
+# Claude Code repo guide — local-only AI assistant context.
+CLAUDE.md
