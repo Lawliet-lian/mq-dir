@@ -122,10 +122,13 @@ struct TreeFileListView: View {
                 }
                 Divider()
             }
-            Button("Open") { viewModel.open(entry) }
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([entry.url])
-            }
+            // Tree view is single-row interaction (no multi-select), so
+            // the menu always operates on just the clicked entry.
+            FileEntryContextMenu(
+                viewModel: viewModel,
+                targets: [entry],
+                primaryName: entry.name
+            )
         }
 
         if isExpanded,

@@ -492,9 +492,94 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         selection = Set(entries[lower...upper].map(\.id))
     }
 
+    /// Move the selection up or down by `offset` rows in `visibleEntries`,
+    /// the same set the file list renders. With `extending: true` (Shift
+    /// held) grows the selection from the anchor instead of replacing it,
+    /// matching Finder's arrow-key behavior. No-op on an empty list.
+    func moveSelection(by offset: Int, extending: Bool) {
+        let visible = visibleEntries
+        guard !visible.isEmpty else { return }
+
+        let currentIdx: Int
+        if let anchor = selectionAnchor,
+           let idx = visible.firstIndex(where: { $0.id == anchor }) {
+            currentIdx = idx
+        } else if let firstID = selection.first,
+                  let idx = visible.firstIndex(where: { $0.id == firstID }) {
+            currentIdx = idx
+        } else {
+            // No prior selection — arrow-down lands on the first row,
+            // arrow-up on the last (Finder convention).
+            guard let target = offset >= 0 ? visible.first : visible.last
+            else { return }
+            replaceSelection(target.id)
+            return
+        }
+
+        let newIdx = max(0, min(visible.count - 1, currentIdx + offset))
+        let target = visible[newIdx]
+
+        if extending,
+           let anchor = selectionAnchor,
+           let anchorIdx = visible.firstIndex(where: { $0.id == anchor }) {
+            let lower = min(anchorIdx, newIdx)
+            let upper = max(anchorIdx, newIdx)
+            selection = Set(visible[lower...upper].map(\.id))
+        } else {
+            replaceSelection(target.id)
+        }
+    }
+
     /// URLs of every currently-selected entry, in row order.
     var selectedURLs: [URL] {
         entries.filter { selection.contains($0.id) }.map(\.url)
+    }
+
+    /// Right-click "Duplicate" → for each entry, copy in place with a
+    /// Finder-style " 2" / " 3" suffix. Mirrors `acceptDrop`'s detached-task
+    /// + system-wide reload pattern so an open second pane viewing the same
+    /// folder also picks up the new copies.
+    func duplicate(_ entries: [FileEntry]) {
+        let urls = entries.map(\.url)
+        Task {
+            await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                for source in urls {
+                    let parent = source.deletingLastPathComponent()
+                    let dest = Self.uniqueDestination(for: source, in: parent)
+                    do {
+                        try fm.copyItem(at: source, to: dest)
+                    } catch {
+                        FileHandle.standardError.write(
+                            Data("[mq-dir duplicate] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                        )
+                    }
+                }
+            }.value
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+        }
+    }
+
+    /// Right-click "Move to Trash" → `FileManager.trashItem` per entry.
+    /// Failures (permission, missing file) are logged to stderr and skipped
+    /// so a partial selection doesn't abort the whole operation.
+    func moveToTrash(_ entries: [FileEntry]) {
+        let urls = entries.map(\.url)
+        Task {
+            await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                for url in urls {
+                    do {
+                        try fm.trashItem(at: url, resultingItemURL: nil)
+                    } catch {
+                        FileHandle.standardError.write(
+                            Data("[mq-dir trash] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                        )
+                    }
+                }
+            }.value
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+        }
     }
 
     /// Move (or copy across volumes) a list of file URLs into a destination folder.

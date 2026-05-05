@@ -45,6 +45,11 @@ struct BrowserPaneView: View {
     /// identity so the drop target can resolve the right index even after
     /// SwiftUI re-renders the row layout mid-drag.
     @State private var draggingTabID: ObjectIdentifier?
+    /// Bridges this pane's "active for keyboard input" state into SwiftUI's
+    /// focus chain so `.onKeyPress` on the file list actually fires. Tracks
+    /// `isFocused` — clicking another pane updates `focusedPaneIndex`
+    /// upstream which flips `isFocused`, which we mirror here.
+    @FocusState private var listFocused: Bool
 
     /// Compatibility alias — the body code throughout this file used to
     /// read `viewModel` when one pane held one folder. Now it routes to
@@ -466,42 +471,97 @@ struct BrowserPaneView: View {
     }
 
     private var fileList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(viewModel.visibleEntries) { entry in
-                    rowView(for: entry)
+        // ScrollViewReader gives us a proxy so arrow-key navigation can keep
+        // the selected row visible — Finder-style. `.id(entry.id)` on each
+        // row makes the proxy able to find rows by FileEntry.ID.
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(viewModel.visibleEntries) { entry in
+                        rowView(for: entry)
+                            .id(entry.id)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .focusable()
+            .focused($listFocused)
+            .onAppear {
+                if isFocused { listFocused = true }
+            }
+            .onChange(of: isFocused) { _, newValue in
+                // Mirror pane focus into SwiftUI's focus chain so the
+                // currently-focused pane's list claims keyboard input.
+                if newValue { listFocused = true }
+            }
+            .onKeyPress(.downArrow) {
+                handleArrowKey(by: 1, proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.upArrow) {
+                handleArrowKey(by: -1, proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.return) {
+                if !isFocused { onFocus() }
+                viewModel.openSelected()
+                return .handled
+            }
+            .overlay {
+                if viewModel.isLoading {
+                    ProgressView().controlSize(.small)
+                } else if viewModel.visibleEntries.isEmpty {
+                    Text(emptyStateLabel)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.Color.labelTertiary)
                 }
             }
-            .padding(.vertical, 2)
-        }
-        .overlay {
-            if viewModel.isLoading {
-                ProgressView().controlSize(.small)
-            } else if viewModel.visibleEntries.isEmpty {
-                Text(emptyStateLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.Color.labelTertiary)
-            }
-        }
-        // Drop on the pane background → drop INTO the current folder.
-        // We use the lower-level NSItemProvider API so a single drop can carry
-        // a multi-item internal selection (see DragDropSupport).
-        .onDrop(of: DragDropSupport.acceptedDropTypes, isTargeted: $paneIsDropTargeted) { providers in
-            guard let folder = viewModel.folderURL else { return false }
-            let modifiers = NSEvent.modifierFlags
-            Task {
-                let urls = await DragDropSupport.resolveURLs(from: providers)
-                guard !urls.isEmpty else { return }
-                await MainActor.run {
-                    viewModel.acceptDrop(
-                        urls,
-                        into: folder,
-                        copy: modifiers.contains(.option)
-                    )
+            // Drop on the pane background → drop INTO the current folder.
+            // We use the lower-level NSItemProvider API so a single drop can carry
+            // a multi-item internal selection (see DragDropSupport).
+            .onDrop(of: DragDropSupport.acceptedDropTypes, isTargeted: $paneIsDropTargeted) { providers in
+                guard let folder = viewModel.folderURL else { return false }
+                let modifiers = NSEvent.modifierFlags
+                Task {
+                    let urls = await DragDropSupport.resolveURLs(from: providers)
+                    guard !urls.isEmpty else { return }
+                    await MainActor.run {
+                        viewModel.acceptDrop(
+                            urls,
+                            into: folder,
+                            copy: modifiers.contains(.option)
+                        )
+                    }
                 }
+                return true
             }
-            return true
         }
+    }
+
+    /// Shared body for ↑/↓ key presses on the file list. Honors Shift to
+    /// extend the selection, focuses this pane if it wasn't already, and
+    /// scrolls the new anchor into view so keyboard nav off-screen still
+    /// keeps the user oriented.
+    private func handleArrowKey(by offset: Int, proxy: ScrollViewProxy) {
+        if !isFocused { onFocus() }
+        let extending = NSEvent.modifierFlags.contains(.shift)
+        viewModel.moveSelection(by: offset, extending: extending)
+        if let anchor = viewModel.selectionAnchor {
+            proxy.scrollTo(anchor, anchor: .center)
+        }
+    }
+
+    /// Resolve the right-click target list. If the clicked row is part of
+    /// a multi-selection, every selected row gets the action — Finder's
+    /// behavior. Otherwise just the clicked row, even if a different row
+    /// is the current single selection (matches what users expect when
+    /// they right-click outside their selection).
+    private func targetEntries(for clicked: FileEntry) -> [FileEntry] {
+        let selection = viewModel.selection
+        guard selection.contains(clicked.id), selection.count > 1 else {
+            return [clicked]
+        }
+        return viewModel.visibleEntries.filter { selection.contains($0.id) }
     }
 
     @ViewBuilder
@@ -530,12 +590,6 @@ struct BrowserPaneView: View {
                 viewModel.replaceSelection(entry.id)
             }
         })
-        .contextMenu {
-            Button("Open") { viewModel.open(entry) }
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([entry.url])
-            }
-        }
         // Drag SOURCE: ship one NSItemProvider that carries the row's URL as
         // public.file-url for external apps, plus a private multi-URL payload
         // when this row is part of a multi-selection (internal pane↔pane).
@@ -544,6 +598,18 @@ struct BrowserPaneView: View {
                 ? viewModel.selectedURLs
                 : []
             return DragDropSupport.makeItemProvider(primary: entry.url, multiURLs: multi)
+        }
+        // `.contextMenu` MUST sit outside `.onDrag` — SwiftUI on macOS lets
+        // the drag gesture eat right-mouse events when the menu is the
+        // inner modifier, so the menu only fires on the second right-click.
+        // Keeping contextMenu as the outermost modifier here makes the
+        // first right-click reliably show the menu.
+        .contextMenu {
+            FileEntryContextMenu(
+                viewModel: viewModel,
+                targets: targetEntries(for: entry),
+                primaryName: entry.name
+            )
         }
 
         if entry.isDirectory {
