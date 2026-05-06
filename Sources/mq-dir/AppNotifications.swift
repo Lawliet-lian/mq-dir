@@ -35,6 +35,12 @@ extension Notification.Name {
     /// tab. Bound to ⌘⇧P, matching Finder's "Show/Hide Preview" hotkey.
     static let mqdirTogglePreviewRequested =
         Notification.Name("mqdir.togglePreviewRequested")
+    /// View → As List / As Tree. Bound to ⌘⌥1 / ⌘⌥2 (Finder's ⌘1/⌘2
+    /// already belong to tab switching here, Safari-style).
+    static let mqdirSetViewModeListRequested =
+        Notification.Name("mqdir.setViewModeListRequested")
+    static let mqdirSetViewModeTreeRequested =
+        Notification.Name("mqdir.setViewModeTreeRequested")
     static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
     /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
     /// so the active window can flush a synchronous save before exit.

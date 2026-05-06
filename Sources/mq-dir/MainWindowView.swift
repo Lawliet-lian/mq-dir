@@ -558,6 +558,12 @@ private struct NavigationNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .mqdirTogglePreviewRequested)) { _ in
                 focusedPane.previewVisible.toggle()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirSetViewModeListRequested)) { _ in
+                focusedPane.viewMode = .list
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirSetViewModeTreeRequested)) { _ in
+                focusedPane.viewMode = .tree
+            }
     }
 }
 

@@ -43,10 +43,10 @@ struct MenuCommands: Commands {
             Button("Toggle Hidden Files") { post(.mqdirToggleHiddenFilesRequested) }
                 .keyboardShortcut(".", modifiers: [.command, .shift])
             Divider()
-            Button("As List") { stub("View → As List") }
+            Button("As List") { post(.mqdirSetViewModeListRequested) }
                 .keyboardShortcut("1", modifiers: [.command, .option])
-            Button("As Icons") { stub("View → As Icons") }
-                .disabled(true)
+            Button("As Tree") { post(.mqdirSetViewModeTreeRequested) }
+                .keyboardShortcut("2", modifiers: [.command, .option])
         }
 
         // Tab navigation lives under the standard Window menu, matching

@@ -557,6 +557,13 @@ struct BrowserPaneView: View {
                 viewModel.openSelected()
                 return .handled
             }
+            .onKeyPress(.space) {
+                if !isFocused { onFocus() }
+                let urls = viewModel.selectedURLs
+                guard !urls.isEmpty else { return .ignored }
+                QuickLookManager.shared.toggle(urls: urls)
+                return .handled
+            }
             .overlay {
                 if viewModel.isLoading {
                     ProgressView().controlSize(.small)
