@@ -37,6 +37,8 @@ struct SidebarView: View {
     /// Project being dragged for reorder.
     @State private var draggingProjectID: UUID?
 
+    @State private var showingFeedback = false
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -54,40 +56,87 @@ struct SidebarView: View {
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // Bottom-left update affordance — only renders when Sparkle's
-            // background check has surfaced an available update.
-            if updateManager.updateAvailable {
-                updateAvailableButton
-            }
+            sidebarFooter
         }
         .background(Theme.Color.sidebarBg)
+        .sheet(isPresented: $showingFeedback) {
+            FeedbackSheet()
+        }
     }
 
-    /// Tinted bar that lives at the bottom of the sidebar when an update
-    /// is waiting. Click → Sparkle's standard "install update" dialog.
-    private var updateAvailableButton: some View {
+    /// Bottom row: a help menu (always visible) and an update pill that
+    /// only appears when Sparkle's background check has flagged a new
+    /// version. The pill is loud on purpose — the previous flat bar was
+    /// quiet enough that users missed available updates.
+    private var sidebarFooter: some View {
+        HStack(spacing: 8) {
+            helpMenu
+            if updateManager.updateAvailable {
+                updatePill
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
+        }
+    }
+
+    private var helpMenu: some View {
+        Menu {
+            Button("Welcome to mq-dir") { openURL("https://mqdir.com") }
+            Button("Send Feedback") { showingFeedback = true }
+            Button("GitHub") { openURL("https://github.com/h5nam/mq-dir") }
+            Divider()
+            Button("Check for Updates") {
+                updateManager.checkForUpdatesAndShowUI()
+            }
+        } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(Theme.Color.label.opacity(0.55))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Help")
+    }
+
+    private var updatePill: some View {
         Button {
             updateManager.checkForUpdatesAndShowUI()
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.Color.accent)
-                Text("Update Available")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.Color.label)
-                Spacer(minLength: 0)
+                Image(systemName: "shippingbox.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(pillLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.Color.accent.opacity(0.12))
-            .overlay(alignment: .top) {
-                Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
-            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(Theme.Color.accent)
+            )
         }
         .buttonStyle(.plain)
         .help("Install the available update")
+    }
+
+    private var pillLabel: String {
+        if let version = updateManager.availableVersion {
+            return "Update Available: \(version)"
+        }
+        return "Update Available"
+    }
+
+    private func openURL(_ string: String) {
+        guard let url = URL(string: string) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: Favorites
