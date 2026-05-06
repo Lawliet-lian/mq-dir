@@ -7,7 +7,7 @@
 [![swift](https://img.shields.io/badge/swift-5.10-orange)](https://swift.org)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-🌐 [mqdir.com](https://mqdir.com) · 📓 [Releases](https://github.com/h5nam/mq-dir/releases) · 🛠 [Contributing](CONTRIBUTING.md)
+🌐 [mqdir.com](https://mqdir.com) · 📓 [Releases](https://github.com/h5nam/mq-dir/releases) · 🛠 [Contributing](CONTRIBUTING.md) · 🌏 [한국어](README.ko.md)
 
 ![mq-dir hero](.github/assets/readme_hero.png)
 
