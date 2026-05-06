@@ -40,6 +40,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     @Published private(set) var isSearching: Bool = false
     @Published private(set) var sortKey: FileEntrySortKey = .name
     @Published private(set) var sortAscending = true
+    /// When true, directories sort ahead of files within the same key.
+    /// Per-tab so a user can keep folders pinned in one pane while
+    /// reading a flat date-sorted list in another.
+    @Published private(set) var foldersOnTop = true
     @Published var columnWidths = PaneColumnWidths()
     /// Per-tab view mode. Switching to `.tree` triggers a lazy enumeration
     /// of the root, then of any folder the user expands.
@@ -98,6 +102,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     init(state: TabState) {
         self.sortKey = state.sortKey
         self.sortAscending = state.sortAscending
+        self.foldersOnTop = state.foldersOnTop
         self.includeHidden = state.includeHidden
         self.columnWidths = state.columnWidths
         self.pendingRestoredSelection = state.selectedURLPaths
@@ -143,7 +148,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             selectedURLPaths: selectedURLs.map(\.path),
             viewMode: viewMode,
             expandedPaths: Array(expandedPaths),
-            previewVisible: previewVisible
+            previewVisible: previewVisible,
+            foldersOnTop: foldersOnTop
         )
     }
 
@@ -177,7 +183,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             .enumerateDirectory(at: url, includingHidden: includeHidden)
         else { return }
         treeChildren[url.path] = FileEntrySorter.sorted(
-            entries, by: sortKey, ascending: sortAscending
+            entries, by: sortKey, ascending: sortAscending, foldersOnTop: foldersOnTop
         )
     }
 
@@ -338,7 +344,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             self.searchResults = FileEntrySorter.sorted(
                 results,
                 by: self.sortKey,
-                ascending: self.sortAscending
+                ascending: self.sortAscending,
+                foldersOnTop: self.foldersOnTop
             )
         }
     }
@@ -355,6 +362,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let includeHidden = includeHidden
         let sortKey = sortKey
         let sortAscending = sortAscending
+        let foldersOnTop = foldersOnTop
 
         loadTask = Task {
             do {
@@ -372,7 +380,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                 entries = FileEntrySorter.sorted(
                     loadedEntries,
                     by: sortKey,
-                    ascending: sortAscending
+                    ascending: sortAscending,
+                    foldersOnTop: foldersOnTop
                 )
                 // Restore selection from a persisted PaneState if any —
                 // intersect saved paths with the freshly enumerated entries
@@ -414,11 +423,23 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             sortAscending = true
         }
 
-        entries = FileEntrySorter.sorted(entries, by: sortKey, ascending: sortAscending)
+        entries = FileEntrySorter.sorted(entries, by: sortKey, ascending: sortAscending, foldersOnTop: foldersOnTop)
         // Apply the same sort across every cached tree subtree so the
         // hierarchy stays internally consistent.
         treeChildren = treeChildren.mapValues {
-            FileEntrySorter.sorted($0, by: sortKey, ascending: sortAscending)
+            FileEntrySorter.sorted($0, by: sortKey, ascending: sortAscending, foldersOnTop: foldersOnTop)
+        }
+    }
+
+    /// Toggle whether directories pin to the top of every sort. Re-sorts
+    /// the live entries immediately so the change is visible without
+    /// needing to flip the sort key.
+    func setFoldersOnTop(_ value: Bool) {
+        guard foldersOnTop != value else { return }
+        foldersOnTop = value
+        entries = FileEntrySorter.sorted(entries, by: sortKey, ascending: sortAscending, foldersOnTop: foldersOnTop)
+        treeChildren = treeChildren.mapValues {
+            FileEntrySorter.sorted($0, by: sortKey, ascending: sortAscending, foldersOnTop: foldersOnTop)
         }
     }
 

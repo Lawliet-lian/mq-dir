@@ -23,6 +23,11 @@ struct TabState: Codable, Equatable, Sendable {
     /// Defaults off so existing tabs don't grow a new chrome surface
     /// behind the user's back on upgrade.
     var previewVisible: Bool
+    /// When true, directories sort ahead of files within the same key.
+    /// Defaults true to preserve the historical Finder-list behaviour
+    /// for upgraded state.json files; user can flip it per tab from the
+    /// column header context menu when they want pure key-only sorting.
+    var foldersOnTop: Bool
 
     init(
         folderBookmark: Data? = nil,
@@ -33,7 +38,8 @@ struct TabState: Codable, Equatable, Sendable {
         selectedURLPaths: [String] = [],
         viewMode: PaneViewMode = .list,
         expandedPaths: [String] = [],
-        previewVisible: Bool = false
+        previewVisible: Bool = false,
+        foldersOnTop: Bool = true
     ) {
         self.folderBookmark = folderBookmark
         self.sortKey = sortKey
@@ -44,6 +50,7 @@ struct TabState: Codable, Equatable, Sendable {
         self.viewMode = viewMode
         self.expandedPaths = expandedPaths
         self.previewVisible = previewVisible
+        self.foldersOnTop = foldersOnTop
     }
 
     /// Default the new fields when reading a `state.json` written before
@@ -52,7 +59,7 @@ struct TabState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case folderBookmark, sortKey, sortAscending, includeHidden,
              columnWidths, selectedURLPaths, viewMode, expandedPaths,
-             previewVisible
+             previewVisible, foldersOnTop
     }
 
     init(from decoder: Decoder) throws {
@@ -66,7 +73,8 @@ struct TabState: Codable, Equatable, Sendable {
             selectedURLPaths: (try c.decodeIfPresent([String].self, forKey: .selectedURLPaths)) ?? [],
             viewMode: (try c.decodeIfPresent(PaneViewMode.self, forKey: .viewMode)) ?? .list,
             expandedPaths: (try c.decodeIfPresent([String].self, forKey: .expandedPaths)) ?? [],
-            previewVisible: (try c.decodeIfPresent(Bool.self, forKey: .previewVisible)) ?? false
+            previewVisible: (try c.decodeIfPresent(Bool.self, forKey: .previewVisible)) ?? false,
+            foldersOnTop: (try c.decodeIfPresent(Bool.self, forKey: .foldersOnTop)) ?? true
         )
     }
 }

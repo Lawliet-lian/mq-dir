@@ -192,6 +192,31 @@ final class PersistenceServiceTests: XCTestCase {
                        "dangling activeProjectID should resolve to the first available project")
     }
 
+    /// `foldersOnTop` was added to TabState after the v0.1.0-beta.2
+    /// shipping schema. State files written by older builds must still
+    /// load and default to true so the historical "directories-first"
+    /// list behaviour survives the upgrade.
+    func testTabStateMigratesMissingFoldersOnTopAsTrue() throws {
+        let pre = """
+        {
+          "folderBookmark": null,
+          "sortKey": "name",
+          "sortAscending": true,
+          "includeHidden": false,
+          "columnWidths": { "kind": 120, "modified": 160, "size": 90 },
+          "selectedURLPaths": ["/a/b.txt"],
+          "viewMode": "list",
+          "expandedPaths": [],
+          "previewVisible": false
+        }
+        """
+        let tab = try JSONDecoder().decode(TabState.self, from: Data(pre.utf8))
+        XCTAssertTrue(tab.foldersOnTop,
+                      "default to true on pre-foldersOnTop state.json so existing users keep folders pinned")
+        XCTAssertEqual(tab.sortKey, .name)
+        XCTAssertEqual(tab.selectedURLPaths, ["/a/b.txt"])
+    }
+
     // MARK: - Default-state shape
 
     func testEmptyWorkspaceHasOneDefaultProject() {

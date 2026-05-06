@@ -398,6 +398,19 @@ struct BrowserPaneView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Right-click any column header to toggle folder pinning. Same
+        // surface as the sort key affordance, so users discover it
+        // when they're already thinking about how the list is sorted.
+        .contextMenu {
+            Button {
+                viewModel.setFoldersOnTop(!viewModel.foldersOnTop)
+            } label: {
+                Label(
+                    "Folders on Top",
+                    systemImage: viewModel.foldersOnTop ? "checkmark" : ""
+                )
+            }
+        }
     }
 
     // MARK: Content

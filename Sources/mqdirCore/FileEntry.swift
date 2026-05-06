@@ -25,10 +25,11 @@ enum FileEntrySorter {
     static func sorted(
         _ entries: [FileEntry],
         by key: FileEntrySortKey,
-        ascending: Bool
+        ascending: Bool,
+        foldersOnTop: Bool = true
     ) -> [FileEntry] {
         entries.sorted { lhs, rhs in
-            if lhs.isDirectory != rhs.isDirectory {
+            if foldersOnTop, lhs.isDirectory != rhs.isDirectory {
                 return lhs.isDirectory && !rhs.isDirectory
             }
 
