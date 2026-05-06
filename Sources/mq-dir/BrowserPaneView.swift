@@ -590,15 +590,18 @@ struct BrowserPaneView: View {
                 viewModel.replaceSelection(entry.id)
             }
         })
-        // Drag SOURCE: ship one NSItemProvider that carries the row's URL as
-        // public.file-url for external apps, plus a private multi-URL payload
-        // when this row is part of a multi-selection (internal pane↔pane).
-        .onDrag {
-            let multi = (isSelected && viewModel.selection.count > 1)
+        // Drag SOURCE: bypass SwiftUI's `.onDrag` (which adds an
+        // auto-promise that materialises a cache copy on the receiver
+        // side) and drive an AppKit NSDraggingSession directly with our
+        // own NSPasteboardItem. Carries `public.file-url` for external
+        // apps plus a private multi-URL payload when this row is part
+        // of a multi-selection (internal pane↔pane).
+        .appKitFileDrag(
+            primary: entry.url,
+            multiURLs: (isSelected && viewModel.selection.count > 1)
                 ? viewModel.selectedURLs
                 : []
-            return DragDropSupport.makeItemProvider(primary: entry.url, multiURLs: multi)
-        }
+        )
         // `.contextMenu` MUST sit outside `.onDrag` — SwiftUI on macOS lets
         // the drag gesture eat right-mouse events when the menu is the
         // inner modifier, so the menu only fires on the second right-click.
