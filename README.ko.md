@@ -2,7 +2,7 @@
 
 > AI 멀티태스커를 위한 macOS 네이티브 파일 매니저. 프로젝트와 에이전트를 병렬로 굴릴 수 있는 최대 4개의 독립 패인 — 영구 상태, 네이티브 마감, 타협 없음.
 
-[![status](https://img.shields.io/badge/status-alpha-orange)](#상태)
+[![status](https://img.shields.io/badge/status-beta-yellow)](#상태)
 [![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)](#요구사항)
 [![swift](https://img.shields.io/badge/swift-5.10-orange)](https://swift.org)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -19,11 +19,12 @@ mq-dir은 최대 4개의 독립 패인을 나란히 띄워줍니다. 프로젝�
 
 ## 기능
 
-**현재 동작 (alpha.9)**
+**현재 동작 (beta.1)**
 
 - 🟦 **1 / 2H / 2V / 4-패인 레이아웃** — 포커스된 패인으로 라우팅, 패인별 독립 폴더.
 - ↹ **패인별 탭** — Safari 스타일 탭 바와 X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], 드래그로 재정렬, 우클릭 Close Other / Close to Right / Duplicate, 마지막 탭 안전장치 placeholder.
 - 🌳 **VS Code 스타일 트리 뷰** — 탭별 토글, 자식 lazy 로드, 폴더 ⌘-클릭 시 같은 패인의 새 탭으로 오픈.
+- ⌨️ **키보드 네비게이션 + Finder 수준의 우클릭** — ↑/↓로 행 이동 (Shift로 다중 선택 확장), Return으로 열기. 우클릭 메뉴는 Open With ▸ (LaunchServices 후보 + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Move to Trash까지 커버. 다중 선택 시 우클릭은 선택 전체에 적용.
 - 👀 **탭별 프리뷰 패인** — 패인 헤더에서 토글 (또는 ⌘⇧P). 이미지/PDF/코드/비디오/오디오/오피스 문서는 Quick Look으로, `.md`는 MarkdownUI로 GFM(테이블, 코드블록, 리스트) 풀 렌더링. 폴더/다중/빈 선택은 커스텀 요약.
 - ⭐ **편집 가능한 즐겨찾기 사이드바** — 폴더 드래그로 추가, 우클릭 Remove/Rename, 드래그로 재정렬, ⌘D로 포커스된 패인의 폴더 추가. 진짜 Finder 폴더 아이콘과 stale 경로 스타일링.
 - 📁 **프로젝트(워크스페이스)** — (레이아웃 + 패인 탭 + 포커스)의 이름 붙은 스냅샷. + 버튼으로 생성, 클릭으로 전환, 우클릭 Rename / Delete, 드래그로 재정렬. 전환 시 떠나는 프로젝트는 자동 저장.

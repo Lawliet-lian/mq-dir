@@ -2,7 +2,7 @@
 
 > The native macOS file manager for AI multi-taskers. Up to four independent panes for parallel projects and agents — persistent state, native polish, no compromise.
 
-[![status](https://img.shields.io/badge/status-alpha-orange)](#status)
+[![status](https://img.shields.io/badge/status-beta-yellow)](#status)
 [![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)](#requirements)
 [![swift](https://img.shields.io/badge/swift-5.10-orange)](https://swift.org)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -19,11 +19,12 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 
 ## Features
 
-**Working today (alpha.9)**
+**Working today (beta.1)**
 
 - 🟦 **1 / 2H / 2V / 4-pane layouts** — focused-pane routing, independent folder per pane.
 - ↹ **Per-pane tabs** — Safari-style strip with X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], drag-to-reorder, right-click Close Other / Close to Right / Duplicate, last-tab safety placeholder.
 - 🌳 **VS Code-style tree view** — per-tab toggle, lazy child loading, ⌘-click on a folder opens it as a new tab in the same pane.
+- ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ to step through rows (Shift to extend the selection), Return to open. Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, and Move to Trash. Multi-selection right-clicks act on the whole selection.
 - 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). Quick Look for images, PDF, code, video, audio, office docs; MarkdownUI for `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries.
 - ⭐ **User-editable Favorites sidebar** — drag folders in, right-click Remove or Rename, drag to reorder, ⌘D adds the focused pane's folder. Real Finder folder icons, stale-path styling.
 - 📁 **Projects (workspaces)** — named snapshots of (layout + pane tabs + focus). + button creates one, click switches, right-click Rename / Delete, drag to reorder. Switching auto-saves the outgoing project.
