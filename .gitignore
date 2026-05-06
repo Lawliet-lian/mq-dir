@@ -58,3 +58,9 @@ CLAUDE.md
 # Promo video / hyperframe exports — local working bundle, not part of
 # the shipping repo (sits at ~tens of MB, unrelated to source).
 hyperframes/
+
+# Local-only feedback channel webhook URL (Discord). NEVER commit.
+# If this file is missing the build will fail with "Cannot find
+# 'FeedbackSecrets' in scope" — create it from the comment in
+# Sources/mq-dir/FeedbackSheet.swift.
+Sources/mq-dir/FeedbackSecrets.swift
