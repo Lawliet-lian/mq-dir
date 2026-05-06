@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import Sparkle
@@ -17,6 +18,7 @@ import Sparkle
 /// that surface area is wasted work.
 final class UpdateManager: NSObject, ObservableObject {
     @Published private(set) var updateAvailable: Bool = false
+    @Published private(set) var availableVersion: String?
     @Published private(set) var lastCheckDate: Date?
 
     /// Optional + var because Sparkle's controller takes its delegate at
@@ -27,9 +29,20 @@ final class UpdateManager: NSObject, ObservableObject {
     /// without one and the resulting "updater failed to start" alert is
     /// worse UX than dormant auto-update.
     private var updaterController: SPUStandardUpdaterController?
+    private var cancellables = Set<AnyCancellable>()
 
     override init() {
         super.init()
+
+        // Mirror availability into the Dock badge so users notice updates
+        // even when the sidebar isn't visible. Sparkle's stock UX has no
+        // notification surface of its own.
+        $updateAvailable
+            .receive(on: DispatchQueue.main)
+            .sink { available in
+                NSApp.dockTile.badgeLabel = available ? "1" : nil
+            }
+            .store(in: &cancellables)
 
         let publicKey = (Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String) ?? ""
         guard !publicKey.isEmpty else { return }
@@ -46,6 +59,14 @@ final class UpdateManager: NSObject, ObservableObject {
         do {
             try controller.updater.start()
             self.updaterController = controller
+            // Force a one-shot background check on launch. Sparkle's own
+            // scheduler waits for `SUScheduledCheckInterval` to elapse
+            // since the last `SULastCheckTime`, which means a new release
+            // published right after a check can sit unnoticed for hours.
+            // Kicking a background check immediately closes that window.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.updaterController?.updater.checkForUpdatesInBackground()
+            }
         } catch {
             NSLog("[mq-dir] Sparkle did not start: \(error.localizedDescription) — auto-update disabled for this build.")
             self.updaterController = nil
@@ -75,8 +96,10 @@ extension UpdateManager: SPUUpdaterDelegate {
     /// We just flip the flag — the sidebar reacts and the user clicks the
     /// button when ready, no surprise modal popups.
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        let version = item.displayVersionString
         Task { @MainActor in
             self.updateAvailable = true
+            self.availableVersion = version
             self.lastCheckDate = Date()
         }
     }
@@ -91,12 +114,14 @@ extension UpdateManager: SPUUpdaterDelegate {
     ) {
         Task { @MainActor in
             self.updateAvailable = false
+            self.availableVersion = nil
         }
     }
 
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
         Task { @MainActor in
             self.updateAvailable = false
+            self.availableVersion = nil
             self.lastCheckDate = Date()
         }
     }
