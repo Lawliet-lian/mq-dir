@@ -60,9 +60,6 @@ struct BrowserPaneView: View {
         VStack(spacing: 0) {
             tabBar
             paneHeader
-            if viewModel.viewMode == .list {
-                columnHeader
-            }
             content
         }
         .background(Theme.Color.paneBg)
@@ -81,6 +78,46 @@ struct BrowserPaneView: View {
         if paneIsDropTargeted && rowDropTargeted == nil { return Theme.Color.accent }
         if isFocused { return Theme.Color.accent }
         return .clear
+    }
+
+    /// Minimum width the Name column collapses to before the whole list
+    /// strip starts horizontally scrolling. Calibrated so a typical
+    /// "kebab-case-some-thing.swift" still survives middle-truncation
+    /// cleanly without the row going completely blank when the preview
+    /// pane opens and the pane shrinks.
+    private static let nameColumnMinWidth: CGFloat = 200
+
+    /// Natural minimum of the columns strip = name floor + the
+    /// configured Modified/Size/Kind widths + 3 resize-handle gaps
+    /// (6pt each) + outer header padding (6pt × 2). When the pane is
+    /// narrower than this we let the horizontal ScrollView take over;
+    /// when it's wider, the .frame(minWidth: geo.size.width) below
+    /// stretches the strip to fill so columns don't pile up on the left.
+    private var minColumnsTotal: CGFloat {
+        let widths = viewModel.columnWidths
+        let handles: CGFloat = 6 * 3
+        let outerPadding: CGFloat = 6 * 2
+        return Self.nameColumnMinWidth + widths.modified + widths.size + widths.kind + handles + outerPadding
+    }
+
+    /// Header + list wrapped in a horizontal ScrollView so the Name
+    /// column stays anchored on the left when the pane shrinks (e.g.
+    /// when the preview pane opens). Without this, SwiftUI's flexible
+    /// `.frame(maxWidth: .infinity)` on Name lets it collapse to zero
+    /// and the filenames disappear entirely while Modified/Size/Kind
+    /// crowd the visible area. The GeometryReader pins the inner
+    /// height so the inner vertical scroll keeps working.
+    private var listWithHorizontalScroll: some View {
+        GeometryReader { geo in
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(spacing: 0) {
+                    columnHeader
+                    fileList
+                }
+                .frame(minWidth: max(minColumnsTotal, geo.size.width), alignment: .leading)
+                .frame(height: geo.size.height, alignment: .top)
+            }
+        }
     }
 
     // MARK: Tab bar
@@ -446,7 +483,7 @@ struct BrowserPaneView: View {
                 onFocus: onFocus
             )
         } else {
-            fileList
+            listWithHorizontalScroll
         }
     }
 
