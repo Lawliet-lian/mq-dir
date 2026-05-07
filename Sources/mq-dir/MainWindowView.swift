@@ -212,6 +212,7 @@ struct MainWindowView: View {
                     .foregroundStyle(Theme.Color.labelTertiary)
             }
             Spacer(minLength: 0)
+            breadcrumbCopyButton
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 22)
@@ -220,7 +221,48 @@ struct MainWindowView: View {
             RoundedRectangle(cornerRadius: 5)
                 .strokeBorder(Theme.Color.separator, lineWidth: 0.5)
         )
+        .contentShape(Rectangle())
         .onTapGesture { focusedPane.chooseFolder() }
+        .contextMenu { breadcrumbContextMenu }
+    }
+
+    /// Trailing clipboard glyph that copies the current folder's POSIX
+    /// path in one click — Windows File Explorer's "address bar copy"
+    /// pattern. Sits inside the breadcrumb pill so it's at hand when
+    /// the user is already looking at the path. Right-click on the
+    /// pill itself surfaces the longer menu for the open-elsewhere
+    /// actions.
+    @ViewBuilder
+    private var breadcrumbCopyButton: some View {
+        Button {
+            focusedPane.copyCurrentFolderPath()
+        } label: {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.Color.labelTertiary)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Copy Path")
+        .disabled(focusedPane.folderURL == nil)
+    }
+
+    @ViewBuilder
+    private var breadcrumbContextMenu: some View {
+        Button("Copy Path") { focusedPane.copyCurrentFolderPath() }
+            .disabled(focusedPane.folderURL == nil)
+        Divider()
+        Button("Open in Terminal") { focusedPane.openCurrentFolderInTerminal() }
+            .disabled(focusedPane.folderURL == nil)
+        if focusedPane.canOpenInCmux {
+            Button("Open in cmux") { focusedPane.openCurrentFolderInCmux() }
+                .disabled(focusedPane.folderURL == nil)
+        }
+        Button("Open in Finder") { focusedPane.openCurrentFolderInFinder() }
+            .disabled(focusedPane.folderURL == nil)
+        Divider()
+        Button("Open Folder…") { focusedPane.chooseFolder() }
     }
 
     private var searchField: some View {
