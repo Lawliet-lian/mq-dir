@@ -80,6 +80,15 @@ struct MainWindowView: View {
                 allPanes: [pane0, pane1, pane2, pane3],
                 saveSynchronously: saveSynchronously
             ))
+            .onAppear {
+                // Hand the live pane VMs to the cross-pane tab drag
+                // coordinator so a drop on a different pane can detach
+                // from the source pane and attach here. Re-runs on
+                // project switch (this view is keyed on activeProjectID
+                // and gets re-instantiated, so the coordinator gets
+                // fresh references for the active project).
+                TabDragCoordinator.shared.register(panes: [pane0, pane1, pane2, pane3])
+            }
     }
 
     private var windowChrome: some View {

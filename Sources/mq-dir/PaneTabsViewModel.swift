@@ -153,6 +153,37 @@ final class PaneTabsViewModel: ObservableObject {
         wireTabs()
     }
 
+    /// Remove the tab matching `id` from this pane and return it, ready
+    /// to be re-attached to a different pane via `attachTab(_:at:)`.
+    /// If removing the active tab would leave the pane empty, drop in
+    /// a fresh blank tab so the pane keeps its "always at least one
+    /// tab" invariant. Returns nil when no tab matches.
+    func detachTab(id: ObjectIdentifier) -> FolderBrowserViewModel? {
+        guard let index = tabs.firstIndex(where: { ObjectIdentifier($0) == id }) else { return nil }
+        let detached = tabs.remove(at: index)
+
+        if tabs.isEmpty {
+            tabs = [FolderBrowserViewModel()]
+            activeIndex = 0
+        } else if activeIndex >= tabs.count {
+            activeIndex = tabs.count - 1
+        } else if index < activeIndex {
+            activeIndex -= 1
+        }
+        wireTabs()
+        return detached
+    }
+
+    /// Insert `tab` at `index` (clamped) and make it active. Used by
+    /// the cross-pane drag drop: the source pane's `detachTab(id:)`
+    /// hands the live VM over and this method re-homes it.
+    func attachTab(_ tab: FolderBrowserViewModel, at index: Int) {
+        let insertAt = max(0, min(index, tabs.count))
+        tabs.insert(tab, at: insertAt)
+        activeIndex = insertAt
+        wireTabs()
+    }
+
     // MARK: Persistence
 
     func snapshot() -> PaneState {

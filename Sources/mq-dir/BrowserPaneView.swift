@@ -7,29 +7,69 @@ import UniformTypeIdentifiers
 /// drag-to-reorder feel like Safari, instead of waiting for `performDrop`
 /// which only fires on mouseUp. `performDrop` returns true so SwiftUI
 /// considers the drop accepted and clears the drag state.
+/// Chrome-style tab drop delegate.
+///
+/// Hover over a tab → an insertion-line indicator appears (blue 2pt
+/// vertical bar) and the cursor's horizontal position decides whether
+/// the line snaps to the leading or trailing edge of the hovered chip.
+/// The actual reorder doesn't run until `performDrop`, so the bar
+/// doesn't shuffle around as the user drags — it only moves the once,
+/// where the user told it to land. Cross-pane drops decode the source
+/// pane via `TabDragCoordinator` and detach + attach in one step.
 private struct TabReorderDropDelegate: DropDelegate {
-    let target: ObjectIdentifier
     let paneVM: PaneTabsViewModel
+    let paneIndex: Int
+    /// Insertion index this delegate represents, computed from hover
+    /// position. For per-tab delegates we resolve leading vs trailing
+    /// half via the chip width snapshot. For the trailing zone after
+    /// the last tab we just hardcode `tabs.count`.
+    let resolveInsertionIndex: (DropInfo) -> Int
+    @Binding var insertionPreview: Int?
     @Binding var draggingID: ObjectIdentifier?
 
     func dropEntered(info: DropInfo) {
-        guard let dragging = draggingID, dragging != target,
-              let from = paneVM.tabs.firstIndex(where: { ObjectIdentifier($0) == dragging }),
-              let to = paneVM.tabs.firstIndex(where: { ObjectIdentifier($0) == target })
-        else { return }
-        // Insert AFTER the target if the drag came from earlier in the bar,
-        // BEFORE if it came from later — matches the visual swap users expect.
-        let dest = from < to ? to + 1 : to
-        paneVM.move(from: from, to: dest)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggingID = nil
-        return true
+        insertionPreview = resolveInsertionIndex(info)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        let next = resolveInsertionIndex(info)
+        if insertionPreview != next { insertionPreview = next }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        insertionPreview = nil
+    }
+
+    @MainActor
+    func performDrop(info: DropInfo) -> Bool {
+        let coord = TabDragCoordinator.shared
+        let insertionIndex = resolveInsertionIndex(info)
+        let sourceTabID = coord.sourceTabID
+        let sourcePaneIdx = coord.sourcePaneIndex
+
+        // Clear the visual preview FIRST so the blue insertion bar
+        // disappears the instant the user lets go, even if the move
+        // logic short-circuits below.
+        insertionPreview = nil
+        draggingID = nil
+        coord.clear()
+
+        guard let sourceTabID, let sourcePaneIdx else { return false }
+
+        if sourcePaneIdx == paneIndex {
+            guard let from = paneVM.tabs.firstIndex(where: { ObjectIdentifier($0) == sourceTabID })
+            else { return false }
+            paneVM.move(from: from, to: insertionIndex)
+        } else {
+            // moveTab needs the coord state, but we already cleared it.
+            // Re-arm with the cached values just for this call, then
+            // clear again so any subsequent stale event sees no source.
+            coord.begin(sourcePaneIndex: sourcePaneIdx, tabID: sourceTabID)
+            coord.moveTab(toPaneIndex: paneIndex, atTabIndex: insertionIndex)
+            coord.clear()
+        }
+        return true
     }
 }
 
@@ -41,6 +81,22 @@ struct BrowserPaneView: View {
 
     @State private var paneIsDropTargeted = false
     @State private var rowDropTargeted: FileEntry.ID?
+    /// Where the blue insertion-line indicator should render in this
+    /// pane's tab bar while a tab is being dragged over it. `nil` =
+    /// no preview (no drag in this pane). `0` = before the first tab,
+    /// `tabs.count` = after the last tab.
+    @State private var tabDropInsertionIndex: Int?
+    /// Per-tab-index width snapshot, captured via a GeometryReader
+    /// background on each chip. Used by the per-tab drop delegate to
+    /// decide leading vs trailing half from the cursor position.
+    @State private var tabChipWidths: [Int: CGFloat] = [:]
+
+    /// Observe the cross-pane drag coordinator so we can clear our
+    /// insertion-marker preview the moment any drop completes — a
+    /// belt-and-suspenders against SwiftUI processing a sibling drop
+    /// zone's dropEntered AFTER our performDrop returns.
+    @ObservedObject private var tabDragCoordinator = TabDragCoordinator.shared
+
     /// Tab being dragged for in-pane reorder. Carries the source tab's
     /// identity so the drop target can resolve the right index even after
     /// SwiftUI re-renders the row layout mid-drag.
@@ -72,6 +128,12 @@ struct BrowserPaneView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { onFocus() }
+        .onChange(of: tabDragCoordinator.sourceTabID) { _, new in
+            // Drag finished (drop or cancel) → wipe any leftover
+            // insertion marker, no matter which delegate's events fired
+            // last.
+            if new == nil { tabDropInsertionIndex = nil }
+        }
     }
 
     private var paneBorderColor: Color {
@@ -126,8 +188,11 @@ struct BrowserPaneView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ForEach(Array(paneVM.tabs.enumerated()), id: \.element.id) { idx, tab in
+                    tabInsertionMarker(at: idx)
                     tabChip(for: tab, at: idx)
                 }
+                tabInsertionMarker(at: paneVM.tabs.count)
+                trailingTabDropZone
                 newTabButton
                 Spacer(minLength: 0)
             }
@@ -137,6 +202,42 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
         }
+    }
+
+    /// Blue 2pt vertical bar — the Chrome-style "this is where the tab
+    /// will land if you drop now" indicator. Only renders when the
+    /// active drop preview matches this slot AND a drag is actually
+    /// in flight (the coordinator still has a source tab). Without
+    /// the second guard a stale @State preview value can survive
+    /// performDrop and leave a phantom bar after the drop completes.
+    @ViewBuilder
+    private func tabInsertionMarker(at index: Int) -> some View {
+        if tabDropInsertionIndex == index, tabDragCoordinator.sourceTabID != nil {
+            Rectangle()
+                .fill(Theme.Color.accent)
+                .frame(width: 2, height: Theme.Metrics.tabBarHeight - 8)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 1)
+        }
+    }
+
+    /// Captures drops in the empty area after the last tab so "drop at
+    /// the end" works without forcing the user to hover the rightmost
+    /// tab's trailing half.
+    private var trailingTabDropZone: some View {
+        Color.clear
+            .frame(width: 32, height: Theme.Metrics.tabBarHeight)
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [UTType.plainText.identifier],
+                delegate: TabReorderDropDelegate(
+                    paneVM: paneVM,
+                    paneIndex: index,
+                    resolveInsertionIndex: { _ in paneVM.tabs.count },
+                    insertionPreview: $tabDropInsertionIndex,
+                    draggingID: $draggingTabID
+                )
+            )
     }
 
     @ViewBuilder
@@ -205,18 +306,43 @@ struct BrowserPaneView: View {
                 }
             }
         }
-        // Drag source: ship the tab's ObjectIdentifier as plain text so the
-        // drop target can route to `paneVM.move`. Pasteboard stays internal —
-        // dragging a tab out of the bar onto Finder/etc. simply does nothing.
+        // Drag source: ship the tab id as `public.text` but with
+        // `.ownProcess` visibility so external destinations (cmux,
+        // terminals, text editors) don't see the drag at all and
+        // therefore can't paste the literal `ObjectIdentifier(0x…)`
+        // string. The actual reorder routing reads
+        // `TabDragCoordinator.shared` (which knows source pane +
+        // tab id) rather than the pasteboard payload — the string is
+        // only here to satisfy SwiftUI's drop-type matching.
         .onDrag {
             draggingTabID = id
-            return NSItemProvider(object: String(describing: id) as NSString)
+            TabDragCoordinator.shared.begin(sourcePaneIndex: index, tabID: id)
+            let provider = NSItemProvider()
+            provider.registerObject(
+                String(describing: id) as NSString,
+                visibility: .ownProcess
+            )
+            return provider
         }
+        .background(
+            // Snapshot the live chip width so the drop delegate can
+            // decide leading vs trailing half from the cursor position.
+            GeometryReader { geo in
+                Color.clear.onAppear { tabChipWidths[idx] = geo.size.width }
+                    .onChange(of: geo.size.width) { _, new in tabChipWidths[idx] = new }
+            }
+        )
+        .opacity(draggingTabID == id ? 0.35 : 1)
         .onDrop(
             of: [UTType.plainText.identifier],
             delegate: TabReorderDropDelegate(
-                target: id,
                 paneVM: paneVM,
+                paneIndex: index,
+                resolveInsertionIndex: { info in
+                    let width = tabChipWidths[idx] ?? 100
+                    return info.location.x < width / 2 ? idx : idx + 1
+                },
+                insertionPreview: $tabDropInsertionIndex,
                 draggingID: $draggingTabID
             )
         )
@@ -241,18 +367,7 @@ struct BrowserPaneView: View {
 
     private var paneHeader: some View {
         HStack(spacing: 6) {
-            if let url = viewModel.folderURL {
-                Text(url.lastPathComponent)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.Color.label)
-                Text("—")
-                    .foregroundStyle(Theme.Color.labelTertiary)
-                Text(itemCountLabel)
-                    .foregroundStyle(Theme.Color.labelSecondary)
-            } else {
-                Text("No folder open")
-                    .foregroundStyle(Theme.Color.labelTertiary)
-            }
+            paneHeaderTitle
             Spacer(minLength: 0)
             viewModeToggle
         }
@@ -261,6 +376,33 @@ struct BrowserPaneView: View {
         .frame(height: Theme.Metrics.paneHeaderHeight)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separatorFaint).frame(height: 0.5)
+        }
+    }
+
+    /// Folder name + item count strip on the left of the pane header.
+    /// Doubles as a drag SOURCE for the current folder URL itself, so
+    /// the user can drop the whole folder onto cmux / a terminal /
+    /// another file manager without first navigating into it. Drag
+    /// only attaches when a folder is actually open — the empty state
+    /// label has nothing to drag.
+    @ViewBuilder
+    private var paneHeaderTitle: some View {
+        if let url = viewModel.folderURL {
+            HStack(spacing: 6) {
+                Text(url.lastPathComponent)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.Color.label)
+                Text("—")
+                    .foregroundStyle(Theme.Color.labelTertiary)
+                Text(itemCountLabel)
+                    .foregroundStyle(Theme.Color.labelSecondary)
+            }
+            .contentShape(Rectangle())
+            .help(url.path)
+            .appKitFileDrag(primary: url)
+        } else {
+            Text("No folder open")
+                .foregroundStyle(Theme.Color.labelTertiary)
         }
     }
 
