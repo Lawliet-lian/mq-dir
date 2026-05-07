@@ -142,6 +142,66 @@ struct BrowserPaneView: View {
         return .clear
     }
 
+    /// Right-click in the file list's empty area. Mirrors the Finder
+    /// background context menu — actions that operate on the *current
+    /// folder* rather than a specific file. The Sort By submenu lets
+    /// users discover the sort options without finding the column
+    /// headers; "Folders on Top" toggles the per-tab pin behaviour
+    /// already exposed via the column-header menu.
+    @ViewBuilder
+    private var emptyAreaContextMenu: some View {
+        Button("New Folder") { viewModel.createNewFolder() }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .disabled(viewModel.folderURL == nil)
+
+        Divider()
+
+        Button("Paste") { viewModel.pasteFromPasteboard() }
+            .keyboardShortcut("v", modifiers: .command)
+            .disabled(!viewModel.canPasteFiles || viewModel.folderURL == nil)
+
+        Divider()
+
+        Menu("Sort By") {
+            sortMenuItem("Name", key: .name)
+            sortMenuItem("Date Modified", key: .modified)
+            sortMenuItem("Size", key: .size)
+            sortMenuItem("Kind", key: .kind)
+            Divider()
+            Button(viewModel.foldersOnTop ? "✓ Folders on Top" : "Folders on Top") {
+                viewModel.setFoldersOnTop(!viewModel.foldersOnTop)
+            }
+        }
+
+        Button(viewModel.includeHidden ? "✓ Show Hidden Files" : "Show Hidden Files") {
+            viewModel.toggleHiddenFiles()
+        }
+        .keyboardShortcut(".", modifiers: [.command, .shift])
+
+        Divider()
+
+        Button("Open in Terminal") { viewModel.openCurrentFolderInTerminal() }
+            .disabled(viewModel.folderURL == nil)
+        if viewModel.canOpenInCmux {
+            Button("Open in cmux") { viewModel.openCurrentFolderInCmux() }
+                .disabled(viewModel.folderURL == nil)
+        }
+        Button("Open in Finder") { viewModel.openCurrentFolderInFinder() }
+            .disabled(viewModel.folderURL == nil)
+        Button("Copy Path") { viewModel.copyCurrentFolderPath() }
+            .disabled(viewModel.folderURL == nil)
+    }
+
+    /// One row in the Sort By submenu — current key gets a leading
+    /// checkmark prefix; tapping any row swaps to that key (or flips
+    /// direction if it was already active, matching column-header
+    /// click behaviour).
+    @ViewBuilder
+    private func sortMenuItem(_ title: String, key: FileEntrySortKey) -> some View {
+        let isActive = viewModel.sortKey == key
+        Button(isActive ? "✓ \(title)" : title) { viewModel.setSort(key) }
+    }
+
     /// Minimum width the Name column collapses to before the whole list
     /// strip starts horizontally scrolling. Calibrated so a typical
     /// "kebab-case-some-thing.swift" still survives middle-truncation
@@ -678,10 +738,12 @@ struct BrowserPaneView: View {
                         }
                         .padding(.vertical, 2)
 
-                        // Fill any empty space below the last row. Clicking
-                        // it clears the selection — Finder parity. Sits
-                        // beneath the rows in the VStack so row gestures
-                        // win when the user actually clicks a file.
+                        // Fill any empty space below the last row.
+                        // Clicking it clears the selection (Finder
+                        // parity), right-clicking opens the
+                        // empty-area context menu. Sits beneath the
+                        // rows in the VStack so row gestures win when
+                        // the user actually clicks a file.
                         Color.clear
                             .contentShape(Rectangle())
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -689,6 +751,7 @@ struct BrowserPaneView: View {
                                 if !isFocused { onFocus() }
                                 viewModel.clearSelection()
                             }
+                            .contextMenu { emptyAreaContextMenu }
                     }
                     .frame(minHeight: geo.size.height, alignment: .top)
                 }

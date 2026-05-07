@@ -484,6 +484,84 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         includeHidden.toggle()
     }
 
+    /// Create "untitled folder" (or "untitled folder 2" / 3 / …) in
+    /// the current directory and reload. Mirrors Finder's New Folder
+    /// behaviour from the empty-area context menu and the ⌘⇧N shortcut.
+    func createNewFolder() {
+        guard let folder = folderURL else { return }
+        let target = uniqueDestination(for: folder.appendingPathComponent("untitled folder"))
+        do {
+            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+            reload()
+        } catch {
+            FileHandle.standardError.write(
+                Data("[mq-dir new folder] \(error.localizedDescription)\n".utf8)
+            )
+        }
+    }
+
+    /// True when cmux.app is installed under any of its known bundle
+    /// identifiers — used to gate the "Open in cmux" menu item so it
+    /// hides for users who don't have cmux at all.
+    var canOpenInCmux: Bool {
+        CmuxClient.appURL() != nil
+    }
+
+    /// Hand the current folder to cmux as a workspace. Cmux declares
+    /// `public.folder` as a CFBundleDocumentType in its Info.plist
+    /// and its application(_:open:) wires dropped folders into a new
+    /// workspace, so a plain `NSWorkspace.open(_:withApplicationAt:)`
+    /// is enough — no URL scheme dance, no AppleScript.
+    func openCurrentFolderInCmux() {
+        guard let folder = folderURL, let cmux = CmuxClient.appURL() else { return }
+        NSWorkspace.shared.open(
+            [folder],
+            withApplicationAt: cmux,
+            configuration: NSWorkspace.OpenConfiguration(),
+            completionHandler: nil
+        )
+    }
+
+    /// Open the current folder in Terminal.app. Uses the modern
+    /// async-completion variant of `open(_:withApplicationAt:…)` and
+    /// fires-and-forgets — Terminal handles the rest.
+    func openCurrentFolderInTerminal() {
+        guard let folder = folderURL else { return }
+        let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        NSWorkspace.shared.open(
+            [folder],
+            withApplicationAt: terminal,
+            configuration: NSWorkspace.OpenConfiguration(),
+            completionHandler: nil
+        )
+    }
+
+    /// Open the current folder *in Finder* — i.e. show its contents in
+    /// a Finder window, not reveal it inside its parent. The empty-area
+    /// menu's "Open in Finder" entry binds to this.
+    func openCurrentFolderInFinder() {
+        guard let folder = folderURL else { return }
+        NSWorkspace.shared.open(folder)
+    }
+
+    /// Write the current folder's POSIX path to the system pasteboard.
+    /// Pure plain-text — no `public.file-url` — so a paste in a
+    /// terminal or text editor lands the path string directly.
+    func copyCurrentFolderPath() {
+        guard let folder = folderURL else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(folder.path, forType: .string)
+    }
+
+    /// True when the system pasteboard carries one or more file URLs
+    /// our `pasteFromPasteboard()` would actually copy. Used by the
+    /// empty-area context menu to grey out "Paste" when there's
+    /// nothing pasteable.
+    var canPasteFiles: Bool {
+        NSPasteboard.general.canReadObject(forClasses: [NSURL.self], options: nil)
+    }
+
     // MARK: Selection (multi-select with cmd / shift)
 
     func replaceSelection(_ id: FileEntry.ID) {

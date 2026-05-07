@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Lightweight wrapper around the `cmux` CLI binary.
@@ -30,6 +31,32 @@ struct CmuxClient: Sendable {
         "/opt/homebrew/",
         "/usr/local/",
     ]
+
+    /// Bundle identifiers for the cmux app on macOS, in production →
+    /// staging → debug order. `appURL()` returns the first one found.
+    private static let appBundleIdentifiers: [String] = [
+        "com.cmuxterm.app",
+        "com.cmuxterm.app.staging",
+        "com.cmuxterm.app.debug",
+    ]
+
+    /// Locate cmux.app on this machine. Tried via Launch Services
+    /// (`urlForApplication(withBundleIdentifier:)`) so a user-installed
+    /// copy in any /Applications-equivalent path resolves correctly,
+    /// then falls back to the canonical `/Applications/cmux.app` for
+    /// the case where Launch Services hasn't indexed yet.
+    static func appURL() -> URL? {
+        for id in appBundleIdentifiers {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                return url
+            }
+        }
+        let fallback = URL(fileURLWithPath: "/Applications/cmux.app")
+        if FileManager.default.fileExists(atPath: fallback.path) {
+            return fallback
+        }
+        return nil
+    }
 
     /// Resolves the `cmux` binary on this machine. Returns nil when cmux
     /// isn't installed — the sidebar uses that to hide the CMUX section
