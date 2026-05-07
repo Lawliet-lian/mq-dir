@@ -44,35 +44,53 @@ private struct AppKitFileDragModifier: ViewModifier {
               let window = event.window,
               let view = window.contentView else { return false }
 
-        let item = NSPasteboardItem()
-        if let data = primary.absoluteString.data(using: .utf8) {
-            item.setData(data, forType: .fileURL)
-        }
-        if multiURLs.count > 1,
-           let data = try? JSONEncoder().encode(multiURLs.map(\.absoluteString)) {
-            item.setData(
-                data,
-                forType: NSPasteboard.PasteboardType(DragDropSupport.mqdirSelectionTypeIdentifier)
-            )
-        }
+        // External destinations (Finder, cmux/WebKit, IDEs) read the
+        // pasteboard one item at a time — they only see "all the dragged
+        // files" if we put one NSPasteboardItem per file. Stuffing the
+        // extra URLs into the private mqdirSelection type is enough for
+        // pane↔pane drops within mq-dir but not for anyone else.
+        let urls: [URL] = multiURLs.count > 1 ? multiURLs : [primary]
 
-        let draggingItem = NSDraggingItem(pasteboardWriter: item)
-        let icon = NSWorkspace.shared.icon(forFile: primary.path)
         let iconSize = NSSize(width: 32, height: 32)
-        icon.size = iconSize
         let cursorInView = view.convert(event.locationInWindow, from: nil)
-        draggingItem.setDraggingFrame(
-            NSRect(
-                x: cursorInView.x - iconSize.width / 2,
-                y: cursorInView.y - iconSize.height / 2,
-                width: iconSize.width,
-                height: iconSize.height
-            ),
-            contents: icon
-        )
+        var draggingItems: [NSDraggingItem] = []
+
+        for (index, url) in urls.enumerated() {
+            let pbItem = NSPasteboardItem()
+            if let data = url.absoluteString.data(using: .utf8) {
+                pbItem.setData(data, forType: .fileURL)
+            }
+            // Stamp the full multi-selection on the first item so
+            // in-process drops can still grab the whole set in one hop.
+            if index == 0, urls.count > 1,
+               let data = try? JSONEncoder().encode(urls.map(\.absoluteString)) {
+                pbItem.setData(
+                    data,
+                    forType: NSPasteboard.PasteboardType(DragDropSupport.mqdirSelectionTypeIdentifier)
+                )
+            }
+
+            let dragItem = NSDraggingItem(pasteboardWriter: pbItem)
+            let icon = NSWorkspace.shared.icon(forFile: url.path)
+            icon.size = iconSize
+            // Stack the icons with a small offset so a multi-drag reads
+            // visually as "more than one file" instead of overlapping
+            // pixel-perfect on the cursor.
+            let offset = CGFloat(index) * 4
+            dragItem.setDraggingFrame(
+                NSRect(
+                    x: cursorInView.x - iconSize.width / 2 + offset,
+                    y: cursorInView.y - iconSize.height / 2 - offset,
+                    width: iconSize.width,
+                    height: iconSize.height
+                ),
+                contents: icon
+            )
+            draggingItems.append(dragItem)
+        }
 
         view.beginDraggingSession(
-            with: [draggingItem],
+            with: draggingItems,
             event: event,
             source: AppKitFileDragSource.shared
         )
