@@ -25,7 +25,7 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 - ↹ **Per-pane tabs** — Safari-style strip with X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], drag-to-reorder, right-click Close Other / Close to Right / Duplicate, last-tab safety placeholder.
 - 🌳 **VS Code-style tree view** — per-tab toggle, lazy child loading, ⌘-click on a folder opens it as a new tab in the same pane.
 - ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ to step through rows (Shift to extend the selection), Return to open. Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, and Move to Trash. Multi-selection right-clicks act on the whole selection.
-- 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). Quick Look for images, PDF, code, video, audio, office docs; MarkdownUI for `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries.
+- 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). PDFs render through PDFKit with continuous scroll + paging; everything else routes through Quick Look for images, code, video, audio, office docs (DOCX/PPTX/XLSX). MarkdownUI handles `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries. Multi-page navigation for non-PDF documents and formats macOS Quick Look has no generator for (HWP, etc.) is best done with ⎵ to summon the floating Quick Look panel, or ⇧↩ to open in the system default app (e.g. Hancom Office Viewer for HWP).
 - ⭐ **User-editable Favorites sidebar** — drag folders in, right-click Remove or Rename, drag to reorder, ⌘D adds the focused pane's folder. Real Finder folder icons, stale-path styling.
 - 📁 **Projects (workspaces)** — named snapshots of (layout + pane tabs + focus). + button creates one, click switches, right-click Rename / Delete, drag to reorder. Switching auto-saves the outgoing project.
 - 💾 **State persistence** — every pane / tab / favorite / project survives relaunch, force-quit, and even schema upgrades (legacy `state.json` shapes auto-migrate).
@@ -41,7 +41,6 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 **Coming next**
 
 - 3-pane layout option.
-- Spacebar floating Quick Look (Finder-style).
 - Keyboard shortcut customization, settings UI.
 
 ## Status

@@ -25,7 +25,7 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 - ↹ **Pane별 탭** — Safari 스타일 탭 바, X / +, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], 드래그로 재정렬, 우클릭에 Close Other / Close to Right / Duplicate, 마지막 탭 안전장치.
 - 🌳 **VS Code 스타일 트리 뷰** — 탭별 토글, 자식 lazy 로드, 폴더에 ⌘-클릭하면 같은 pane의 새 탭으로 열림.
 - ⌨️ **키보드 네비게이션 + Finder급 우클릭 메뉴** — ↑/↓로 행 이동, Shift로 다중 선택 확장, Return으로 열기. 우클릭 메뉴에는 Open With ▸ (LaunchServices 후보 + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Move to Trash가 들어 있고 다중 선택 시 선택 전체에 적용됩니다.
-- 👀 **탭별 미리보기 패널** — pane 헤더에서 토글 (또는 ⌘⇧P). 이미지·PDF·코드·비디오·오디오·오피스 문서는 Quick Look으로, `.md`는 MarkdownUI로 GFM(테이블, 코드 블록, 리스트) 풀 렌더링. 폴더·다중·빈 선택은 별도 요약을 띄웁니다.
+- 👀 **탭별 미리보기 패널** — pane 헤더에서 토글 (또는 ⌘⇧P). PDF는 PDFKit으로 연속 스크롤 + 페이지 네비게이션, 그 외 이미지·코드·비디오·오디오·오피스 문서(DOCX/PPTX/XLSX)는 Quick Look으로, `.md`는 MarkdownUI로 GFM(테이블, 코드 블록, 리스트) 풀 렌더링. 폴더·다중·빈 선택은 별도 요약을 띄웁니다. 비-PDF 문서나 macOS Quick Look이 generator를 제공하지 않는 포맷(HWP 등)의 다중 페이지 탐색은 ⎵로 floating Quick Look을 띄우거나 ⇧↩으로 시스템 기본 앱(HWP면 한컴 Office Viewer 등)에서 열어 보세요.
 - ⭐ **편집 가능한 즐겨찾기 사이드바** — 폴더 드래그로 추가, 우클릭 Remove / Rename, 드래그로 재정렬, ⌘D로 활성 pane의 폴더를 추가. Finder 폴더 아이콘 그대로, 끊긴 경로는 별도 스타일로 표시.
 - 📁 **프로젝트(워크스페이스)** — (레이아웃 + pane 탭 + 활성 pane)을 이름 붙인 스냅샷으로 저장. + 버튼으로 만들고, 클릭으로 전환, 우클릭에서 Rename / Delete, 드래그로 재정렬. 전환할 때 떠나는 프로젝트는 자동 저장됩니다.
 - 💾 **상태 영구 저장** — 모든 pane / 탭 / 즐겨찾기 / 프로젝트가 재시작·강제 종료, 심지어 스키마 업그레이드(레거시 `state.json` 자동 마이그레이션)까지 거쳐도 그대로 남습니다.
@@ -41,7 +41,6 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 **다음 예정**
 
 - 3-pane 레이아웃 옵션.
-- 스페이스바 floating Quick Look (Finder 스타일).
 - 키보드 단축키 커스터마이즈, 설정 UI.
 
 ## 상태

@@ -1,5 +1,6 @@
 import AppKit
 import MarkdownUI
+import PDFKit
 import QuickLookUI
 import SwiftUI
 
@@ -80,8 +81,16 @@ struct PreviewPanel: View {
                 folderSummary(entry)
             } else if isMarkdown(entry.url) {
                 markdownView(for: entry.url)
+            } else if isPDF(entry.url) {
+                // Embedded QLPreviewView pins multi-page PDFs to the
+                // first page with no scroll/paging — known limitation
+                // of QLPreviewView in SwiftUI hosts. PDFKit's PDFView
+                // gives proper continuous-scroll paging out of the box.
+                PDFPreview(url: entry.url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 QuickLookPreview(url: entry.url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -192,6 +201,10 @@ struct PreviewPanel: View {
         return ext == "md" || ext == "markdown" || ext == "mdown"
     }
 
+    private func isPDF(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "pdf"
+    }
+
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .short
@@ -202,9 +215,48 @@ struct PreviewPanel: View {
 
 // MARK: - Quick Look bridge
 
-/// Wraps `QLPreviewView` so SwiftUI can swap in any URL the system has a
-/// generator for. Using `.compact` style keeps it borderless and lets the
-/// surrounding pane chrome own framing.
+/// PDFKit-based preview specifically for `.pdf` files. We can't keep
+/// PDFs on `QLPreviewView` because that view, when hosted inside a
+/// SwiftUI NSViewRepresentable, pins multi-page PDFs to the first
+/// page and swallows scroll-wheel events — verified against
+/// PDFs in the focused-pane preview pane on macOS 14/15. PDFView
+/// owns its own scroll view, paginates natively, and respects
+/// trackpad / scroll-wheel input out of the box.
+struct PDFPreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.document = PDFDocument(url: url)
+        return view
+    }
+
+    func updateNSView(_ nsView: PDFView, context: Context) {
+        if nsView.document?.documentURL != url {
+            nsView.document = PDFDocument(url: url)
+        }
+    }
+}
+
+/// Plain `.compact` `QLPreviewView` — fit-to-bounds (preserves aspect
+/// ratio, can letterbox on the sides for portrait pages in a wide
+/// pane) but it's the only embed shape that keeps formats *without*
+/// a system QL generator (HWP/HWPX) showing their system-fallback
+/// preview at all. We tried two more aggressive shapes and reverted:
+///
+///   - `.normal` (no wrap) → renders office docs at natural pixel
+///     size, crops mid-paragraph in a half-width pane.
+///   - `.normal` inside an NSScrollView with `autoresizingMask =
+///     .width` → fixes DOCX width-fit but collapses HWP to a 0-height
+///     blank because its intrinsic content size is unknown.
+///
+/// `.compact` accepts the DOCX letterbox in exchange for HWP working
+/// and behaves consistently for every other format the system has a
+/// generator for. Multi-page navigation lives on ⎵ (floating
+/// QLPreviewPanel). PDFs route to `PDFPreview` separately.
 struct QuickLookPreview: NSViewRepresentable {
     let url: URL
 
@@ -216,9 +268,6 @@ struct QuickLookPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: QLPreviewView, context: Context) {
-        // QLPreviewView doesn't notice an unchanged URL, so this is a no-op
-        // for the common case; only updates when SwiftUI re-runs with a
-        // genuinely different URL.
         if (nsView.previewItem as? URL) != url {
             nsView.previewItem = url as NSURL
         }
