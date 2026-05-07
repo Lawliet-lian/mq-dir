@@ -18,8 +18,12 @@ struct MenuCommands: Commands {
             Button("Reopen Closed Tab") { post(.mqdirReopenClosedTabRequested) }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             Divider()
+            // ⌘⇧R is now Edit → Rename (Eagle convention). Reveal in
+            // Finder loses its shortcut and lives on the right-click
+            // menu + the menu bar entry; the alternative would be
+            // double-binding ⌘⇧R, which silently breaks unrelated
+            // menu shortcut routing on macOS.
             Button("Reveal in Finder") { post(.mqdirRevealSelectedRequested) }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
             Divider()
             Button("Add to Favorites") { post(.mqdirAddCurrentFolderToFavoritesRequested) }
                 .keyboardShortcut("d", modifiers: .command)
