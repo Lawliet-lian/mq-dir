@@ -513,6 +513,87 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         selection = Set(entries[lower...upper].map(\.id))
     }
 
+    /// Wipe the selection. Used by the file list when the user clicks
+    /// empty pane background — Finder's deselect-on-empty-click pattern.
+    func clearSelection() {
+        guard !selection.isEmpty else { return }
+        selection.removeAll()
+        selectionAnchor = nil
+    }
+
+    /// Select every row currently visible in the list (`visibleEntries`,
+    /// which honours the active search filter). Anchors on the first
+    /// entry so a follow-up shift-extend has a sensible starting point.
+    func selectAll() {
+        let all = visibleEntries
+        guard !all.isEmpty else { return }
+        selection = Set(all.map(\.id))
+        selectionAnchor = all.first?.id
+    }
+
+    /// Write the currently selected file URLs to the system pasteboard
+    /// in `public.file-url` form so a follow-up ⌘V in Finder, mqdir
+    /// itself, or any other Cocoa file consumer pastes the real files.
+    /// No-op on an empty selection.
+    func copySelectionToPasteboard() {
+        let urls = selectedURLs
+        guard !urls.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects(urls.map { $0 as NSURL })
+    }
+
+    /// Read file URLs off the system pasteboard and copy them into the
+    /// current folder. Mirrors Finder's ⌘V behaviour. Silently skips
+    /// when the pasteboard has no file URLs or no folder is open.
+    func pasteFromPasteboard() {
+        guard let folder = folderURL else { return }
+        let pb = NSPasteboard.general
+        guard let items = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+              !items.isEmpty
+        else { return }
+
+        let fm = FileManager.default
+        for source in items {
+            let target = folder.appendingPathComponent(source.lastPathComponent)
+            do {
+                try fm.copyItem(at: source, to: uniqueDestination(for: target))
+            } catch {
+                FileHandle.standardError.write(
+                    Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
+        }
+        reload()
+    }
+
+    /// Convenience around `moveToTrash` that operates on the live
+    /// selection. Used by the Edit menu's Delete shortcut so the user
+    /// doesn't need to right-click to trash files.
+    func moveSelectionToTrash() {
+        let entries = self.entries.filter { selection.contains($0.id) }
+        guard !entries.isEmpty else { return }
+        moveToTrash(entries)
+    }
+
+    /// If `target` already exists, append " 2", " 3", … before the
+    /// extension until a free slot opens. Mirrors Finder's "untitled
+    /// folder 2" behaviour for paste-into-same-dir.
+    private func uniqueDestination(for target: URL) -> URL {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: target.path) else { return target }
+        let parent = target.deletingLastPathComponent()
+        let ext = target.pathExtension
+        let stem = target.deletingPathExtension().lastPathComponent
+        for i in 2...999 {
+            let candidate = parent.appendingPathComponent(
+                ext.isEmpty ? "\(stem) \(i)" : "\(stem) \(i).\(ext)"
+            )
+            if !fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return target
+    }
+
     /// Move the selection up or down by `offset` rows in `visibleEntries`,
     /// the same set the file list renders. With `extending: true` (Shift
     /// held) grows the selection from the anchor instead of replacing it,

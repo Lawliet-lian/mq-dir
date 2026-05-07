@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct MenuCommands: Commands {
@@ -22,6 +23,25 @@ struct MenuCommands: Commands {
             Divider()
             Button("Add to Favorites") { post(.mqdirAddCurrentFolderToFavoritesRequested) }
                 .keyboardShortcut("d", modifiers: .command)
+        }
+
+        // Replace the system pasteboard group entirely so file-level
+        // Copy/Paste/Delete and Select All actually run on the focused
+        // pane's selection. Each item routes to a `mqdir*` notification
+        // when the first responder isn't a text view; if a TextField
+        // (search box, inline rename) IS the first responder we
+        // forward to its native AppKit action so the user's expected
+        // text-Cmd+C / Cmd+V / Cmd+A still works there.
+        CommandGroup(replacing: .pasteboard) {
+            Button("Copy") { dispatch(text: #selector(NSText.copy(_:)), file: .mqdirCopyRequested) }
+                .keyboardShortcut("c", modifiers: .command)
+            Button("Paste") { dispatch(text: #selector(NSText.paste(_:)), file: .mqdirPasteRequested) }
+                .keyboardShortcut("v", modifiers: .command)
+            Button("Delete") { dispatch(text: #selector(NSText.delete(_:)), file: .mqdirDeleteRequested) }
+                .keyboardShortcut(.delete, modifiers: [])
+            Divider()
+            Button("Select All") { dispatch(text: #selector(NSText.selectAll(_:)), file: .mqdirSelectAllRequested) }
+                .keyboardShortcut("a", modifiers: .command)
         }
 
         CommandGroup(after: .textEditing) {
@@ -90,5 +110,19 @@ struct MenuCommands: Commands {
 
     private func post(_ name: Notification.Name, userInfo: [AnyHashable: Any]? = nil) {
         NotificationCenter.default.post(name: name, object: nil, userInfo: userInfo)
+    }
+
+    /// Edit-menu dispatcher. If the focused responder is a text view
+    /// (search field, inline rename TextField, etc.) forward to its
+    /// native selector so the system text-edit behaviour wins. Anywhere
+    /// else, post the file-level notification so the focused pane's
+    /// view model handles the action.
+    private func dispatch(text selector: Selector, file notification: Notification.Name) {
+        let responder = NSApp.keyWindow?.firstResponder
+        if responder is NSText {
+            NSApp.sendAction(selector, to: responder, from: nil)
+        } else {
+            post(notification)
+        }
     }
 }

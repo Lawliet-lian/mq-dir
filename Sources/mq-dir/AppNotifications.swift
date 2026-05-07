@@ -41,6 +41,22 @@ extension Notification.Name {
         Notification.Name("mqdir.setViewModeListRequested")
     static let mqdirSetViewModeTreeRequested =
         Notification.Name("mqdir.setViewModeTreeRequested")
+    /// Edit → Select All for the focused pane's file list. Dispatched
+    /// via the Edit menu rather than a SwiftUI .onKeyPress on the list,
+    /// because the system's standard Select All menu item intercepts
+    /// ⌘A before it ever reaches a focused View. The MenuCommands
+    /// handler defensively forwards to the system NSText action when a
+    /// text field is the first responder so renames / search input
+    /// keep their normal text-Select-All behaviour.
+    static let mqdirSelectAllRequested =
+        Notification.Name("mqdir.selectAllRequested")
+    /// Edit → Copy / Paste / Delete for file selections. Same dispatcher
+    /// pattern as Select All — the menu item routes here when the
+    /// focused responder isn't a text view, so renames / search input
+    /// keep their native edit behaviour.
+    static let mqdirCopyRequested = Notification.Name("mqdir.copyRequested")
+    static let mqdirPasteRequested = Notification.Name("mqdir.pasteRequested")
+    static let mqdirDeleteRequested = Notification.Name("mqdir.deleteRequested")
     static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
     /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
     /// so the active window can flush a synchronous save before exit.

@@ -525,15 +525,31 @@ struct BrowserPaneView: View {
         // the selected row visible — Finder-style. `.id(entry.id)` on each
         // row makes the proxy able to find rows by FileEntry.ID.
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(viewModel.visibleEntries) { entry in
-                        rowView(for: entry)
-                            .id(entry.id)
+            GeometryReader { geo in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(viewModel.visibleEntries) { entry in
+                                rowView(for: entry)
+                                    .id(entry.id)
+                            }
+                        }
+                        .padding(.vertical, 2)
+
+                        // Fill any empty space below the last row. Clicking
+                        // it clears the selection — Finder parity. Sits
+                        // beneath the rows in the VStack so row gestures
+                        // win when the user actually clicks a file.
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .onTapGesture {
+                                if !isFocused { onFocus() }
+                                viewModel.clearSelection()
+                            }
                     }
+                    .frame(minHeight: geo.size.height, alignment: .top)
                 }
-                .padding(.vertical, 2)
-            }
             .focusable()
             .focused($listFocused)
             .onAppear {
@@ -591,6 +607,7 @@ struct BrowserPaneView: View {
                     }
                 }
                 return true
+            }
             }
         }
     }

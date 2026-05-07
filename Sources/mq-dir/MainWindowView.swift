@@ -74,6 +74,7 @@ struct MainWindowView: View {
                 searchFocused: $searchFocused,
                 sidebar: sidebar
             ))
+            .modifier(EditMenuNotifications(focusedPane: focusedPane))
             .modifier(TabNotifications(focusedPaneVM: focusedPaneVM))
             .modifier(GlobalNotifications(
                 allPanes: [pane0, pane1, pane2, pane3],
@@ -563,6 +564,31 @@ private struct NavigationNotifications: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirSetViewModeTreeRequested)) { _ in
                 focusedPane.viewMode = .tree
+            }
+    }
+}
+
+/// Edit-menu file actions (Select All / Copy / Paste / Delete) split
+/// out of `NavigationNotifications` because adding more `.onReceive`
+/// modifiers in one chain pushes the SwiftUI type-checker over its
+/// expression-complexity ceiling. One small modifier per concern keeps
+/// every `body` cheap to compile.
+private struct EditMenuNotifications: ViewModifier {
+    let focusedPane: FolderBrowserViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirSelectAllRequested)) { _ in
+                focusedPane.selectAll()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyRequested)) { _ in
+                focusedPane.copySelectionToPasteboard()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirPasteRequested)) { _ in
+                focusedPane.pasteFromPasteboard()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirDeleteRequested)) { _ in
+                focusedPane.moveSelectionToTrash()
             }
     }
 }
