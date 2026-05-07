@@ -59,6 +59,9 @@ struct MenuCommands: Commands {
             Button("Copy Folder Path") { post(.mqdirCopyFolderPathRequested) }
                 .keyboardShortcut("c", modifiers: [.command, .option, .shift])
             Button("Copy Name") { post(.mqdirCopyNameRequested) }
+            Divider()
+            Button("Rename") { post(.mqdirRenameRequested) }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
         }
 
         CommandGroup(after: .textEditing) {

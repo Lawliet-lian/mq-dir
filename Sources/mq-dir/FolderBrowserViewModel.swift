@@ -45,6 +45,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// reading a flat date-sorted list in another.
     @Published private(set) var foldersOnTop = true
     @Published var columnWidths = PaneColumnWidths()
+    /// FileEntry.id of the row currently in inline-rename mode (its
+    /// label is showing a TextField instead of static text). nil means
+    /// no row is being renamed. Driven by the Edit menu's Rename
+    /// action, the row context menu, or the future double-click-to-
+    /// rename gesture.
+    @Published var renamingEntryID: FileEntry.ID?
+    /// Live text the rename TextField is bound to. Cleared together
+    /// with `renamingEntryID` on commit / cancel.
+    @Published var renameDraft: String = ""
     /// Per-tab view mode. Switching to `.tree` triggers a lazy enumeration
     /// of the root, then of any folder the user expands.
     @Published var viewMode: PaneViewMode = .list
@@ -780,6 +789,58 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             }.value
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
+    }
+
+    /// Begin inline rename for `entry`. Seeds the draft with the
+    /// current name and selects the row so the TextField that the
+    /// FileEntryRow renders is pointed at the right item.
+    func beginRename(_ entry: FileEntry) {
+        renamingEntryID = entry.id
+        renameDraft = entry.name
+        replaceSelection(entry.id)
+    }
+
+    /// Begin inline rename for the currently-active selection. Used by
+    /// the ⌘⇧R menu shortcut. No-op if nothing is selected.
+    func beginRenameForActiveSelection() {
+        guard let entry = selectedEntry else { return }
+        beginRename(entry)
+    }
+
+    /// Commit the in-progress rename. Trims whitespace, no-ops on
+    /// empty / unchanged names, refuses to overwrite an existing
+    /// sibling, then `FileManager.moveItem` and reloads. Always
+    /// clears the rename mode at the end so the row drops back to
+    /// static text.
+    func commitRename() {
+        defer {
+            renamingEntryID = nil
+            renameDraft = ""
+        }
+        guard let id = renamingEntryID,
+              let entry = entries.first(where: { $0.id == id })
+        else { return }
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != entry.name else { return }
+
+        let dest = entry.url.deletingLastPathComponent().appendingPathComponent(trimmed)
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: dest.path) else {
+            errorMessage = "An item named '\(trimmed)' already exists in this folder."
+            return
+        }
+        do {
+            try fm.moveItem(at: entry.url, to: dest)
+            reload()
+        } catch {
+            errorMessage = "Couldn't rename: \(error.localizedDescription)"
+        }
+    }
+
+    /// Discard the in-progress rename without touching the filesystem.
+    func cancelRename() {
+        renamingEntryID = nil
+        renameDraft = ""
     }
 
     /// Right-click "Move to Trash" → `FileManager.trashItem` per entry.

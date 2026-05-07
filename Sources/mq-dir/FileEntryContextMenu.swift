@@ -65,6 +65,12 @@ struct FileEntryContextMenu: View {
         Button(count > 1 ? "Duplicate \(count) Items" : "Duplicate") {
             viewModel.duplicate(targets)
         }
+        if count == 1, let target = targets.first {
+            // Rename only makes sense for a single row at a time —
+            // multi-rename is its own UX and lives elsewhere.
+            Button("Rename") { viewModel.beginRename(target) }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+        }
         Button(count > 1 ? "Move \(count) Items to Trash" : "Move to Trash") {
             viewModel.moveToTrash(targets)
         }

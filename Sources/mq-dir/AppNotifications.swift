@@ -71,6 +71,10 @@ extension Notification.Name {
         Notification.Name("mqdir.copyFolderPathRequested")
     static let mqdirCopyNameRequested =
         Notification.Name("mqdir.copyNameRequested")
+    /// Edit → Rename. Bound to ⌘⇧R (we kept ⌘R for Reload). Routes
+    /// to the focused pane's active selection.
+    static let mqdirRenameRequested =
+        Notification.Name("mqdir.renameRequested")
     static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
     /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
     /// so the active window can flush a synchronous save before exit.

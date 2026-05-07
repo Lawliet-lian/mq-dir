@@ -766,19 +766,28 @@ struct BrowserPaneView: View {
                 if newValue { listFocused = true }
             }
             .onKeyPress(.downArrow) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
                 handleArrowKey(by: 1, proxy: proxy)
                 return .handled
             }
             .onKeyPress(.upArrow) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
                 handleArrowKey(by: -1, proxy: proxy)
                 return .handled
             }
             .onKeyPress(.return) {
+                // While a row is in inline-rename mode the Return key
+                // belongs to the TextField (commits the rename). Don't
+                // intercept it here or the parent's openSelected() races
+                // the TextField's onSubmit and reorders the events
+                // unpredictably.
+                guard viewModel.renamingEntryID == nil else { return .ignored }
                 if !isFocused { onFocus() }
                 viewModel.openSelected()
                 return .handled
             }
             .onKeyPress(.space) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
                 if !isFocused { onFocus() }
                 let urls = viewModel.selectedURLs
                 guard !urls.isEmpty else { return .ignored }
@@ -854,7 +863,24 @@ struct BrowserPaneView: View {
             paneIsFocused: isFocused,
             isDropTarget: isRowDropTarget,
             columnWidths: viewModel.columnWidths,
-            subtitle: searchSubtitle(for: entry)
+            subtitle: searchSubtitle(for: entry),
+            isRenaming: viewModel.renamingEntryID == entry.id,
+            renameDraft: Binding(
+                get: { viewModel.renameDraft },
+                set: { viewModel.renameDraft = $0 }
+            ),
+            commitRename: {
+                viewModel.commitRename()
+                // Hand keyboard focus back to the list so arrow keys
+                // and Return / Space resume working immediately,
+                // instead of staying parked on the now-unmounted
+                // TextField's @FocusState.
+                listFocused = true
+            },
+            cancelRename: {
+                viewModel.cancelRename()
+                listFocused = true
+            }
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { viewModel.open(entry) }
@@ -935,6 +961,14 @@ private struct FileEntryRow: View {
     /// Optional second line under the name — used by recursive search to show
     /// where in the tree a hit lives. `nil` keeps the row at single-line height.
     let subtitle: String?
+    /// Inline-rename plumbing — non-nil when this row is the active
+    /// rename target. Caller is responsible for showing only one row
+    /// in rename mode at a time.
+    let isRenaming: Bool
+    @Binding var renameDraft: String
+    let commitRename: () -> Void
+    let cancelRename: () -> Void
+    @FocusState private var renameFieldFocused: Bool
 
     var body: some View {
         HStack(spacing: 0) {
@@ -946,11 +980,38 @@ private struct FileEntryRow: View {
                                      : FileIconStyle.tint(for: entry))
                     .frame(width: 14)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(entry.name)
-                        .font(Theme.Font.body)
-                        .foregroundStyle(textColor)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if isRenaming {
+                        TextField("", text: $renameDraft)
+                            .textFieldStyle(.plain)
+                            .font(Theme.Font.body)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Theme.Color.label.opacity(0.08))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(Theme.Color.accent, lineWidth: 1)
+                            )
+                            .focused($renameFieldFocused)
+                            .onAppear {
+                                // Defer focus so the TextField has a
+                                // chance to install before we steal
+                                // it from the file list.
+                                DispatchQueue.main.async {
+                                    renameFieldFocused = true
+                                }
+                            }
+                            .onSubmit { commitRename() }
+                            .onExitCommand { cancelRename() }
+                    } else {
+                        Text(entry.name)
+                            .font(Theme.Font.body)
+                            .foregroundStyle(textColor)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                     if let subtitle {
                         Text(subtitle)
                             .font(.system(size: 9))

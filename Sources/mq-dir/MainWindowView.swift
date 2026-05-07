@@ -644,6 +644,9 @@ private struct EditFileActionsNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyNameRequested)) { _ in
                 focusedPane.copySelectedNamesToPasteboard()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirRenameRequested)) { _ in
+                focusedPane.beginRenameForActiveSelection()
+            }
     }
 }
 
