@@ -75,6 +75,7 @@ struct MainWindowView: View {
                 sidebar: sidebar
             ))
             .modifier(EditMenuNotifications(focusedPane: focusedPane))
+            .modifier(EditFileActionsNotifications(focusedPane: focusedPane))
             .modifier(TabNotifications(focusedPaneVM: focusedPaneVM))
             .modifier(GlobalNotifications(
                 allPanes: [pane0, pane1, pane2, pane3],
@@ -615,6 +616,33 @@ private struct NavigationNotifications: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirSetViewModeTreeRequested)) { _ in
                 focusedPane.viewMode = .tree
+            }
+    }
+}
+
+/// Eagle/Finder-parity file-selection actions (Open with Default App,
+/// Duplicate, Copy File Path / Folder Path / Name) — split into its
+/// own modifier for the same SwiftUI type-checker reason as
+/// `EditMenuNotifications`.
+private struct EditFileActionsNotifications: ViewModifier {
+    let focusedPane: FolderBrowserViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenWithDefaultAppRequested)) { _ in
+                focusedPane.openSelectedWithDefaultApp()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirDuplicateRequested)) { _ in
+                focusedPane.duplicateSelection()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyFilePathsRequested)) { _ in
+                focusedPane.copySelectedFilePathsToPasteboard()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyFolderPathRequested)) { _ in
+                focusedPane.copyCurrentFolderPath()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyNameRequested)) { _ in
+                focusedPane.copySelectedNamesToPasteboard()
             }
     }
 }

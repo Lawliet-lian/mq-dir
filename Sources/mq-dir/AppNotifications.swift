@@ -57,6 +57,20 @@ extension Notification.Name {
     static let mqdirCopyRequested = Notification.Name("mqdir.copyRequested")
     static let mqdirPasteRequested = Notification.Name("mqdir.pasteRequested")
     static let mqdirDeleteRequested = Notification.Name("mqdir.deleteRequested")
+    /// File-selection actions added per Eagle/Finder shortcut parity.
+    /// All operate on the focused pane's current selection except
+    /// `mqdirCopyFolderPathRequested`, which copies the *current
+    /// folder* path instead.
+    static let mqdirOpenWithDefaultAppRequested =
+        Notification.Name("mqdir.openWithDefaultAppRequested")
+    static let mqdirDuplicateRequested =
+        Notification.Name("mqdir.duplicateRequested")
+    static let mqdirCopyFilePathsRequested =
+        Notification.Name("mqdir.copyFilePathsRequested")
+    static let mqdirCopyFolderPathRequested =
+        Notification.Name("mqdir.copyFolderPathRequested")
+    static let mqdirCopyNameRequested =
+        Notification.Name("mqdir.copyNameRequested")
     static let mqdirFileSystemChanged = Notification.Name("mqdir.fileSystemChanged")
     /// Posted by `mqdirApp` when the OS notifies us of imminent termination,
     /// so the active window can flush a synchronous save before exit.

@@ -44,6 +44,23 @@ struct MenuCommands: Commands {
                 .keyboardShortcut("a", modifiers: .command)
         }
 
+        // File-selection actions tucked into the Edit menu just below
+        // the pasteboard group. Eagle / Finder parity for the shortcuts
+        // power users hit reflexively.
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            Button("Open with Default App") { post(.mqdirOpenWithDefaultAppRequested) }
+                .keyboardShortcut(.return, modifiers: .shift)
+            Button("Duplicate") { post(.mqdirDuplicateRequested) }
+                .keyboardShortcut("d", modifiers: .command)
+            Divider()
+            Button("Copy File Path") { post(.mqdirCopyFilePathsRequested) }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+            Button("Copy Folder Path") { post(.mqdirCopyFolderPathRequested) }
+                .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+            Button("Copy Name") { post(.mqdirCopyNameRequested) }
+        }
+
         CommandGroup(after: .textEditing) {
             Button("Find") { post(.mqdirFocusSearchRequested) }
                 .keyboardShortcut("f", modifiers: .command)

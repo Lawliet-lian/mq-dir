@@ -500,6 +500,48 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
     }
 
+    /// Open every currently-selected URL with the system default app
+    /// — including folders, which would otherwise navigate inside the
+    /// pane on a plain Enter. This is what ⇧↩ binds to so users can
+    /// force "open in Finder/Preview/whatever the OS associates" even
+    /// when our pane navigation would have intercepted the click.
+    func openSelectedWithDefaultApp() {
+        let urls = selectedURLs
+        guard !urls.isEmpty else { return }
+        for url in urls { NSWorkspace.shared.open(url) }
+    }
+
+    /// Duplicate every currently-selected entry. Wraps the existing
+    /// `duplicate(_:)` so the Edit-menu ⌘D shortcut and the file
+    /// context menu's "Duplicate" item share one path.
+    func duplicateSelection() {
+        let entries = self.entries.filter { selection.contains($0.id) }
+        guard !entries.isEmpty else { return }
+        duplicate(entries)
+    }
+
+    /// Newline-joined POSIX paths of the current selection on the
+    /// system pasteboard. Bound to ⌘⌥C — Finder's "Copy as Pathname"
+    /// shortcut. Plain text only so a paste in a terminal or text
+    /// editor lands the path strings directly.
+    func copySelectedFilePathsToPasteboard() {
+        let urls = selectedURLs
+        guard !urls.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+    }
+
+    /// Newline-joined filenames (last path components) of the current
+    /// selection on the system pasteboard.
+    func copySelectedNamesToPasteboard() {
+        let urls = selectedURLs
+        guard !urls.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(urls.map(\.lastPathComponent).joined(separator: "\n"), forType: .string)
+    }
+
     /// True when cmux.app is installed under any of its known bundle
     /// identifiers — used to gate the "Open in cmux" menu item so it
     /// hides for users who don't have cmux at all.
