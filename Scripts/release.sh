@@ -180,8 +180,10 @@ rm -f "${DMG_PATH}"
 create-dmg \
     --volname "${APP_NAME}" \
     --window-size 540 380 \
-    --icon "${APP_NAME}.app" 140 200 \
-    --app-drop-link 400 200 \
+    --background "${REPO_ROOT}/Resources/installer/dmg_background.png" \
+    --icon-size 128 \
+    --icon "${APP_NAME}.app" 135 170 \
+    --app-drop-link 385 170 \
     "${DMG_PATH}" \
     "${APP_PATH}"
 

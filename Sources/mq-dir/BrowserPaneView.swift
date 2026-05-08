@@ -286,7 +286,7 @@ struct BrowserPaneView: View {
     /// tab's trailing half.
     private var trailingTabDropZone: some View {
         Color.clear
-            .frame(width: 32, height: Theme.Metrics.tabBarHeight)
+            .frame(width: 1, height: Theme.Metrics.tabBarHeight)
             .contentShape(Rectangle())
             .onDrop(
                 of: [UTType.plainText.identifier],
