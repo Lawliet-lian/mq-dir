@@ -74,6 +74,18 @@ targets:
         COMBINE_HIDPI_IMAGES: YES
         ENABLE_PREVIEWS: YES
       configs:
+        # Debug overrides the project-wide Automatic + DEVELOPMENT_TEAM
+        # signing with an ad-hoc identity ("-") so local Debug builds
+        # don't prompt for keychain access on every CodeSign step
+        # (Sparkle.framework re-signing was the recurring offender).
+        # Release/Sandboxed inherit the base Automatic + team for the
+        # signed/notarized release pipeline.
+        Debug:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "-"
+          DEVELOPMENT_TEAM: ""
+          CODE_SIGNING_REQUIRED: "NO"
+          CODE_SIGNING_ALLOWED: "NO"
         Sandboxed:
           CODE_SIGN_ENTITLEMENTS: Resources/Entitlements/mq-dir-sandboxed.entitlements
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MQDIR_SANDBOXED"
