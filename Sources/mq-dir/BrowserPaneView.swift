@@ -849,7 +849,10 @@ struct BrowserPaneView: View {
         guard selection.contains(clicked.id), selection.count > 1 else {
             return [clicked]
         }
-        return viewModel.visibleEntries.filter { selection.contains($0.id) }
+        // Use the VM's findEntry-backed accessor so tree-mode selections
+        // (children living in `treeChildren`, not `visibleEntries`) are
+        // included in right-click actions.
+        return viewModel.selectedEntries
     }
 
     @ViewBuilder

@@ -455,8 +455,7 @@ struct MainWindowView: View {
         let totalCount = focusedPane.entries.count
         let visibleCount = focusedPane.visibleEntries.count
         let selectedCount = focusedPane.selection.count
-        let selectedSize = focusedPane.entries
-            .filter { focusedPane.selection.contains($0.id) }
+        let selectedSize = focusedPane.selectedEntries
             .compactMap { $0.size }
             .reduce(0, +)
 

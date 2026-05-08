@@ -181,12 +181,12 @@ struct PreviewPanel: View {
 
     // MARK: Selection helpers
 
-    /// All entries currently selected in the focused tab.
+    /// All entries currently selected in the focused tab. Routes through
+    /// `viewModel.selectedEntries` so tree-mode selections (which live in
+    /// `treeChildren`, not `entries`) resolve correctly — otherwise the
+    /// preview pane stays empty for any expanded tree row.
     private var currentlySelectedEntries: [FileEntry] {
-        let visible = viewModel.visibleEntries
-        let allEntries = visible.isEmpty ? viewModel.entries : visible
-        let bySelection = allEntries.filter { viewModel.selection.contains($0.id) }
-        return bySelection
+        viewModel.selectedEntries
     }
 
     /// Single-pick used by the header. Mirrors `currentlySelectedEntries`
