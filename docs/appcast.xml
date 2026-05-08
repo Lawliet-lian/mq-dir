@@ -72,5 +72,13 @@
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.4/mq-dir-v0.1.0-beta.4.dmg" sparkle:edSignature="MAdZlN/Xbhvzt+WJ1lZJQMSZCF5snaUvJZjxcUOwwNMSe0lNWdO357IA1oix/iwqwJeV76AueKNMdfO3+/y3DA==" length="3706794" type="application/octet-stream" />
     </item>
+    <item>
+      <title>Version 0.1.0-beta.5</title>
+      <pubDate>Fri, 08 May 2026 02:31:29 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.5</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.5/mq-dir-v0.1.0-beta.5.dmg" sparkle:edSignature="lT7DHK2ojT1xWow5H4kGl5wMn6UP6mkw9DWyVqGJNW3OGeKUxOuiUFrVcqf+zapf7lgmMiEU747CXqPn3dawAg==" length="3766919" type="application/octet-stream" />
+    </item>
   </channel>
 </rss>
