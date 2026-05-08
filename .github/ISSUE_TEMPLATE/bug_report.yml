@@ -1,0 +1,56 @@
+name: 🐞 Bug Report
+description: Something is broken or behaves unexpectedly. / 동작이 이상하거나 깨집니다.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please include the version and steps to reproduce so we can fix it fast.
+        한국어로 작성하셔도 됩니다 — 버전과 재현 절차만 분명히 적어주시면 됩니다.
+
+  - type: input
+    id: version
+    attributes:
+      label: mq-dir version
+      description: mq-dir → menu bar → mq-dir → About mq-dir, or System Settings → Apps → mq-dir.
+      placeholder: e.g. 0.1.0-beta.5
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description:  → About This Mac. e.g. macOS 15.4 (Sonoma 14.x도 OK)
+      placeholder: e.g. macOS 15.4
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: 1. Open …  2. Click …  3. Press ⌘…
+      placeholder: |
+        1. Open a folder with multi-page PDFs
+        2. Toggle the preview pane (⌘⇧P)
+        3. Try to scroll past page 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      placeholder: |
+        Expected: scrolls to page 2.
+        Actual: stays on page 1, no response.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots / logs / extra context (optional)
+      description: Console logs, screenshots, or anything else that helps.

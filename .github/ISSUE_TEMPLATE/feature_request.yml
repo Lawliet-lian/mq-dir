@@ -1,0 +1,38 @@
+name: 💡 Feature Request
+description: A new feature or improvement. / 기능 추가나 개선 아이디어.
+title: "[Request] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! The clearer the use case, the easier it is to prioritize.
+        한국어로 작성하셔도 됩니다.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the workflow you're trying to do?
+      description: What were you doing in mq-dir when you wished this existed?
+      placeholder: |
+        e.g. "I drag a folder from a pane to cmux but I want to also be
+        able to drag the current path-bar folder without navigating into it first."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would the feature look like?
+      description: A concrete description, mockup, or reference to another app's UI.
+      placeholder: |
+        e.g. "Right-click on the path bar shows Copy Path / Open in Terminal,
+        like Windows File Explorer's address bar context menu."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've tried (optional)
+      description: How are you working around this today?
