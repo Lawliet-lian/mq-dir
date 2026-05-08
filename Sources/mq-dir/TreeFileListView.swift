@@ -84,7 +84,14 @@ struct TreeFileListView: View {
             depth: depth,
             isExpanded: isExpanded,
             isSelected: isSelected,
-            paneIsFocused: isFocused
+            paneIsFocused: isFocused,
+            isRenaming: viewModel.renamingEntryID == entry.id,
+            renameDraft: Binding(
+                get: { viewModel.renameDraft },
+                set: { viewModel.renameDraft = $0 }
+            ),
+            commitRename: { viewModel.commitRename() },
+            cancelRename: { viewModel.cancelRename() }
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -115,6 +122,15 @@ struct TreeFileListView: View {
                 viewModel.toggleExpanded(entry.url)
             }
         })
+        // Right-click selects the clicked row before the menu shows
+        // (Finder parity). Tree view is single-row interaction so we
+        // always replace selection with the clicked row.
+        .background(
+            RightClickAware {
+                viewModel.replaceSelection(entry.id)
+                if !isFocused { onFocus() }
+            }
+        )
         .contextMenu {
             if entry.isDirectory {
                 Button(isExpanded ? "Collapse" : "Expand") {
@@ -149,6 +165,11 @@ private struct TreeRow: View {
     let isExpanded: Bool
     let isSelected: Bool
     let paneIsFocused: Bool
+    let isRenaming: Bool
+    @Binding var renameDraft: String
+    let commitRename: () -> Void
+    let cancelRename: () -> Void
+    @FocusState private var renameFieldFocused: Bool
 
     private static let indentPerDepth: CGFloat = 14
 
@@ -174,11 +195,33 @@ private struct TreeRow: View {
                                  : FileIconStyle.tint(for: entry))
                 .frame(width: 14)
 
-            Text(entry.name)
-                .font(Theme.Font.body)
-                .foregroundStyle(textColor)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            if isRenaming {
+                TextField("", text: $renameDraft)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Font.body)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Theme.Color.label.opacity(0.08))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Theme.Color.accent, lineWidth: 1)
+                    )
+                    .focused($renameFieldFocused)
+                    .onAppear {
+                        DispatchQueue.main.async { renameFieldFocused = true }
+                    }
+                    .onSubmit { commitRename() }
+                    .onExitCommand { cancelRename() }
+            } else {
+                Text(entry.name)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(textColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
             Spacer(minLength: 0)
         }

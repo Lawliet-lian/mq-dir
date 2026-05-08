@@ -907,6 +907,21 @@ struct BrowserPaneView: View {
                 ? viewModel.selectedURLs
                 : []
         )
+        // Right-click should select the clicked row before the menu
+        // shows (Finder parity). The NSEvent monitor fires on every
+        // right-mouse-down anywhere in the window; per-row bounds
+        // checking inside RightClickView decides whether THIS row was
+        // the target. Selection is only replaced when the row isn't
+        // already part of the current selection so a multi-row
+        // right-click still operates on the whole multi-selection.
+        .background(
+            RightClickAware {
+                if !viewModel.selection.contains(entry.id) {
+                    viewModel.replaceSelection(entry.id)
+                }
+                if !isFocused { onFocus() }
+            }
+        )
         // `.contextMenu` MUST sit outside `.onDrag` — SwiftUI on macOS lets
         // the drag gesture eat right-mouse events when the menu is the
         // inner modifier, so the menu only fires on the second right-click.

@@ -212,8 +212,25 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard let selectedID = selection.first else {
             return nil
         }
+        return findEntry(id: selectedID)
+    }
 
-        return entries.first { $0.id == selectedID }
+    /// Look up a `FileEntry` by id across both the flat root listing
+    /// (`entries`) and every cached tree subtree (`treeChildren`). Tree
+    /// view selections live deep in `treeChildren`, never in
+    /// `entries`, so anything that operates on the active selection
+    /// (rename, etc.) needs this wider search to avoid silently
+    /// no-op'ing in tree mode.
+    func findEntry(id: FileEntry.ID) -> FileEntry? {
+        if let hit = entries.first(where: { $0.id == id }) {
+            return hit
+        }
+        for children in treeChildren.values {
+            if let hit = children.first(where: { $0.id == id }) {
+                return hit
+            }
+        }
+        return nil
     }
 
     /// What the file list should render. Recursive `searchResults` while a
@@ -818,7 +835,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             renameDraft = ""
         }
         guard let id = renamingEntryID,
-              let entry = entries.first(where: { $0.id == id })
+              let entry = findEntry(id: id)
         else { return }
         let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != entry.name else { return }
