@@ -13,40 +13,135 @@ struct TreeFileListView: View {
     let isFocused: Bool
     let onFocus: () -> Void
 
+    @FocusState private var treeFocused: Bool
+
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if let root = viewModel.folderURL,
-                   let rootEntries = viewModel.treeChildren[root.path] ?? entriesForRoot()
-                {
-                    ForEach(orderedForTree(rootEntries)) { entry in
-                        treeRow(entry, depth: 0)
+        // ScrollViewReader provides a proxy so arrow-key nav can keep the
+        // moved-to row visible. Each treeRow stamps `.id(entry.id)` so the
+        // proxy can find rows by their FileEntry.ID. Mirrors what the list
+        // mode does in `BrowserPaneView.fileList`.
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if let root = viewModel.folderURL,
+                       let rootEntries = viewModel.treeChildren[root.path] ?? entriesForRoot()
+                    {
+                        ForEach(orderedForTree(rootEntries)) { entry in
+                            treeRow(entry, depth: 0)
+                        }
                     }
                 }
+                .padding(.vertical, 2)
             }
-            .padding(.vertical, 2)
-        }
-        .overlay {
-            if viewModel.isLoading {
-                ProgressView().controlSize(.small)
-            } else if viewModel.entries.isEmpty {
-                Text("No items")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.Color.labelTertiary)
+            .focusable()
+            .focused($treeFocused)
+            .onAppear {
+                if isFocused { treeFocused = true }
+            }
+            .onChange(of: isFocused) { _, newValue in
+                if newValue { treeFocused = true }
+            }
+            .onKeyPress(.downArrow) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
+                handleArrow(by: 1, proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.upArrow) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
+                handleArrow(by: -1, proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
+                handleRightArrow(proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.leftArrow) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
+                handleLeftArrow(proxy: proxy)
+                return .handled
+            }
+            .onKeyPress(.return) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
+                if !isFocused { onFocus() }
+                viewModel.openSelected()
+                return .handled
+            }
+            .onKeyPress(.space) {
+                guard viewModel.renamingEntryID == nil else { return .ignored }
+                if !isFocused { onFocus() }
+                let urls = viewModel.selectedURLs
+                guard !urls.isEmpty else { return .ignored }
+                QuickLookManager.shared.toggle(urls: urls)
+                return .handled
+            }
+            .overlay {
+                if viewModel.isLoading {
+                    ProgressView().controlSize(.small)
+                } else if viewModel.entries.isEmpty {
+                    Text("No items")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.Color.labelTertiary)
+                }
+            }
+            .onAppear {
+                // Populate the root cache the first time we render. The flat
+                // list keeps `entries` in sync, but tree mode reads from
+                // `treeChildren[root]` so the same recursion works at every
+                // depth without a special case for the root.
+                if let root = viewModel.folderURL, viewModel.treeChildren[root.path] == nil {
+                    viewModel.treeChildren[root.path] = orderedForTree(viewModel.entries)
+                }
+            }
+            .onChange(of: viewModel.entries) { _, newEntries in
+                guard let root = viewModel.folderURL else { return }
+                viewModel.treeChildren[root.path] = orderedForTree(newEntries)
             }
         }
-        .onAppear {
-            // Populate the root cache the first time we render. The flat
-            // list keeps `entries` in sync, but tree mode reads from
-            // `treeChildren[root]` so the same recursion works at every
-            // depth without a special case for the root.
-            if let root = viewModel.folderURL, viewModel.treeChildren[root.path] == nil {
-                viewModel.treeChildren[root.path] = orderedForTree(viewModel.entries)
-            }
+    }
+
+    /// ↑/↓: walk the flat DFS of currently-visible tree rows. The VM
+    /// already does the right thing in tree mode; we just need to keep
+    /// the moved-to anchor on screen.
+    private func handleArrow(by offset: Int, proxy: ScrollViewProxy) {
+        if !isFocused { onFocus() }
+        let extending = NSEvent.modifierFlags.contains(.shift)
+        viewModel.moveSelection(by: offset, extending: extending)
+        if let anchor = viewModel.selectionAnchor {
+            proxy.scrollTo(anchor, anchor: .center)
         }
-        .onChange(of: viewModel.entries) { _, newEntries in
-            guard let root = viewModel.folderURL else { return }
-            viewModel.treeChildren[root.path] = orderedForTree(newEntries)
+    }
+
+    /// →: expand a collapsed folder; if already expanded, descend to its
+    /// first child. Files become a no-op. Finder/VS Code convention.
+    private func handleRightArrow(proxy: ScrollViewProxy) {
+        if !isFocused { onFocus() }
+        guard let entry = viewModel.selectedEntry, entry.isDirectory else { return }
+        if !viewModel.isExpanded(entry.url) {
+            viewModel.toggleExpanded(entry.url)
+        } else if let firstChild = viewModel.treeChildren[entry.url.path]
+            .flatMap({ orderedForTree($0).first })
+        {
+            viewModel.replaceSelection(firstChild.id)
+            proxy.scrollTo(firstChild.id, anchor: .center)
+        }
+    }
+
+    /// ←: collapse an expanded folder; otherwise jump to the parent row.
+    /// Parent = the directory entry whose URL matches the selected
+    /// entry's parent path (anywhere in `entries` or `treeChildren`).
+    private func handleLeftArrow(proxy: ScrollViewProxy) {
+        if !isFocused { onFocus() }
+        guard let entry = viewModel.selectedEntry else { return }
+        if entry.isDirectory, viewModel.isExpanded(entry.url) {
+            viewModel.toggleExpanded(entry.url)
+            return
+        }
+        let parentURL = entry.url.deletingLastPathComponent()
+        let candidates = viewModel.entries + viewModel.treeChildren.values.flatMap { $0 }
+        if let parent = candidates.first(where: { $0.url == parentURL }) {
+            viewModel.replaceSelection(parent.id)
+            proxy.scrollTo(parent.id, anchor: .center)
         }
     }
 
@@ -146,6 +241,9 @@ struct TreeFileListView: View {
                 primaryName: entry.name
             )
         }
+        // ScrollViewProxy.scrollTo(id) needs each row tagged so arrow-key
+        // nav can keep the moved-to row visible.
+        .id(entry.id)
 
         if isExpanded,
            let children = viewModel.treeChildren[entry.url.path]

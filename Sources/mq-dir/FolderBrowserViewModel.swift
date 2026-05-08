@@ -241,6 +241,33 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         isFiltering ? searchResults : entries
     }
 
+    /// Flat top-to-bottom sequence of every row currently rendered by
+    /// `TreeFileListView` (root → expanded children → expanded
+    /// grandchildren …). Used by arrow-key navigation so ↑/↓ in tree mode
+    /// walks the same visual order the user sees, not just the root level.
+    /// Mirrors `TreeFileListView.orderedForTree` (folders first, files
+    /// after).
+    var visibleTreeEntries: [FileEntry] {
+        guard let root = folderURL else { return [] }
+        let rootEntries = treeChildren[root.path] ?? entries
+        return flattenTree(rootEntries)
+    }
+
+    private func flattenTree(_ entries: [FileEntry]) -> [FileEntry] {
+        let folders = entries.filter { $0.isDirectory }
+        let files = entries.filter { !$0.isDirectory }
+        var result: [FileEntry] = []
+        for entry in folders + files {
+            result.append(entry)
+            if entry.isDirectory,
+               isExpanded(entry.url),
+               let children = treeChildren[entry.url.path] {
+                result.append(contentsOf: flattenTree(children))
+            }
+        }
+        return result
+    }
+
     var isFiltering: Bool {
         !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -786,7 +813,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// held) grows the selection from the anchor instead of replacing it,
     /// matching Finder's arrow-key behavior. No-op on an empty list.
     func moveSelection(by offset: Int, extending: Bool) {
-        let visible = visibleEntries
+        // In tree mode walk the flat DFS of expanded rows (matches what
+        // the user sees). In list mode keep the existing flat-listing
+        // walk so search-result navigation also works.
+        let visible = viewMode == .tree ? visibleTreeEntries : visibleEntries
         guard !visible.isEmpty else { return }
 
         let currentIdx: Int
