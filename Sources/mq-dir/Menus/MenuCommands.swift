@@ -37,6 +37,8 @@ struct MenuCommands: Commands {
         // forward to its native AppKit action so the user's expected
         // text-Cmd+C / Cmd+V / Cmd+A still works there.
         CommandGroup(replacing: .pasteboard) {
+            Button("Cut") { dispatch(text: #selector(NSText.cut(_:)), file: .mqdirCutRequested) }
+                .keyboardShortcut("x", modifiers: .command)
             Button("Copy") { dispatch(text: #selector(NSText.copy(_:)), file: .mqdirCopyRequested) }
                 .keyboardShortcut("c", modifiers: .command)
             Button("Paste") { dispatch(text: #selector(NSText.paste(_:)), file: .mqdirPasteRequested) }

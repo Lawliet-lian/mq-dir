@@ -541,9 +541,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// `duplicate(_:)` so the Edit-menu ⌘D shortcut and the file
     /// context menu's "Duplicate" item share one path.
     func duplicateSelection() {
-        let entries = self.entries.filter { selection.contains($0.id) }
-        guard !entries.isEmpty else { return }
-        duplicate(entries)
+        let targets = selectedEntries
+        guard !targets.isEmpty else { return }
+        duplicate(targets)
     }
 
     /// Newline-joined POSIX paths of the current selection on the
@@ -689,9 +689,32 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         pb.writeObjects(urls.map { $0 as NSURL })
     }
 
-    /// Read file URLs off the system pasteboard and copy them into the
-    /// current folder. Mirrors Finder's ⌘V behaviour. Silently skips
-    /// when the pasteboard has no file URLs or no folder is open.
+    /// Cut: same as copy but marks the pasteboard so a subsequent
+    /// `pasteFromPasteboard()` *moves* the files instead of copying.
+    /// macOS doesn't have a standard "cut" pasteboard convention so
+    /// we mark with a private type that only mq-dir reads. Other apps
+    /// (Finder, terminals) see the file URLs and treat the operation
+    /// as a regular copy on their end — there's no way around that
+    /// without OS-level cut, and matching Windows cut semantics
+    /// inside mq-dir is the user-facing requirement.
+    func cutSelectionToPasteboard() {
+        let urls = selectedURLs
+        guard !urls.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects(urls.map { $0 as NSURL })
+        pb.setData(Data(), forType: Self.cutMarkerType)
+    }
+
+    /// Pasteboard type that marks a cut operation. Empty data — only
+    /// the type's presence matters.
+    static let cutMarkerType = NSPasteboard.PasteboardType("com.mqdir.cut.urls")
+
+    /// Read file URLs off the system pasteboard and copy (or move,
+    /// when the pasteboard carries our cut marker) them into the
+    /// current folder. Mirrors Finder's ⌘V (copy) and Windows
+    /// File Explorer's ⌘V-after-⌘X (move). Silently skips when the
+    /// pasteboard has no file URLs or no folder is open.
     func pasteFromPasteboard() {
         guard let folder = folderURL else { return }
         let pb = NSPasteboard.general
@@ -699,27 +722,45 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
               !items.isEmpty
         else { return }
 
+        let isCut = pb.types?.contains(Self.cutMarkerType) == true
         let fm = FileManager.default
         for source in items {
-            let target = folder.appendingPathComponent(source.lastPathComponent)
+            let target = uniqueDestination(for: folder.appendingPathComponent(source.lastPathComponent))
             do {
-                try fm.copyItem(at: source, to: uniqueDestination(for: target))
+                if isCut {
+                    try fm.moveItem(at: source, to: target)
+                } else {
+                    try fm.copyItem(at: source, to: target)
+                }
             } catch {
                 FileHandle.standardError.write(
                     Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
                 )
             }
         }
+        // After a cut+paste the source URLs are gone, so wipe the
+        // pasteboard to avoid a follow-up paste silently failing on
+        // missing files. Plain-copy paste leaves the clipboard alone
+        // so the user can paste the same set into multiple folders.
+        if isCut {
+            pb.clearContents()
+        }
         reload()
+        // Tell every other pane/tab to refresh — the source folder
+        // (potentially open in another pane after a cross-pane
+        // cut+paste) and any pane viewing the destination both need
+        // to drop the stale entries / pick up the new ones. Same
+        // broadcast pattern moveToTrash / acceptDrop / duplicate use.
+        NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
     }
 
     /// Convenience around `moveToTrash` that operates on the live
     /// selection. Used by the Edit menu's Delete shortcut so the user
     /// doesn't need to right-click to trash files.
     func moveSelectionToTrash() {
-        let entries = self.entries.filter { selection.contains($0.id) }
-        guard !entries.isEmpty else { return }
-        moveToTrash(entries)
+        let targets = selectedEntries
+        guard !targets.isEmpty else { return }
+        moveToTrash(targets)
     }
 
     /// If `target` already exists, append " 2", " 3", … before the
@@ -778,9 +819,19 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
     }
 
-    /// URLs of every currently-selected entry, in row order.
+    /// Every currently-selected entry, resolved across the flat root
+    /// listing AND every cached tree subtree. Tree-mode selections
+    /// live in `treeChildren`, never in `entries`, so list-only walks
+    /// silently miss them — hence the `findEntry`-driven path.
+    var selectedEntries: [FileEntry] {
+        selection.compactMap { findEntry(id: $0) }
+    }
+
+    /// URLs of every currently-selected entry. Order is set-iteration
+    /// order — fine for cut/copy/move where the destination handles
+    /// each independently.
     var selectedURLs: [URL] {
-        entries.filter { selection.contains($0.id) }.map(\.url)
+        selectedEntries.map(\.url)
     }
 
     /// Right-click "Duplicate" → for each entry, copy in place with a

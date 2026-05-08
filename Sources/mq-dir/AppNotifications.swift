@@ -55,6 +55,7 @@ extension Notification.Name {
     /// focused responder isn't a text view, so renames / search input
     /// keep their native edit behaviour.
     static let mqdirCopyRequested = Notification.Name("mqdir.copyRequested")
+    static let mqdirCutRequested = Notification.Name("mqdir.cutRequested")
     static let mqdirPasteRequested = Notification.Name("mqdir.pasteRequested")
     static let mqdirDeleteRequested = Notification.Name("mqdir.deleteRequested")
     /// File-selection actions added per Eagle/Finder shortcut parity.

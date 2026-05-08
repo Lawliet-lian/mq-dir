@@ -666,6 +666,9 @@ private struct EditMenuNotifications: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyRequested)) { _ in
                 focusedPane.copySelectionToPasteboard()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCutRequested)) { _ in
+                focusedPane.cutSelectionToPasteboard()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirPasteRequested)) { _ in
                 focusedPane.pasteFromPasteboard()
             }
