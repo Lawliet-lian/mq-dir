@@ -4,6 +4,7 @@ import SwiftUI
 struct MainWindowView: View {
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject var updateManager: UpdateManager
+    @ObservedObject var repoCallout: RepoCalloutController
     @StateObject private var cmux = CmuxSidebarModel()
 
     @StateObject private var pane0: PaneTabsViewModel
@@ -28,9 +29,14 @@ struct MainWindowView: View {
     /// reload pane state in place.
     private let projectID: UUID
 
-    init(workspace: WorkspaceManager, updateManager: UpdateManager) {
+    init(
+        workspace: WorkspaceManager,
+        updateManager: UpdateManager,
+        repoCallout: RepoCalloutController
+    ) {
         self.workspace = workspace
         self.updateManager = updateManager
+        self.repoCallout = repoCallout
         let project = workspace.activeProject
         self.projectID = project.id
         let state = project.state
@@ -89,6 +95,10 @@ struct MainWindowView: View {
                 // and gets re-instantiated, so the coordinator gets
                 // fresh references for the active project).
                 TabDragCoordinator.shared.register(panes: [pane0, pane1, pane2, pane3])
+                // Once-per-process launch counter for the repo callout
+                // gate. The controller guards against re-fires on
+                // project switch.
+                repoCallout.recordLaunch()
             }
     }
 
@@ -98,6 +108,7 @@ struct MainWindowView: View {
                 viewModel: sidebar,
                 workspace: workspace,
                 updateManager: updateManager,
+                repoCallout: repoCallout,
                 cmux: cmux,
                 selectedURL: $sidebarSelection
             ) { url in
@@ -736,6 +747,10 @@ private struct GlobalNotifications: ViewModifier {
 }
 
 #Preview {
-    MainWindowView(workspace: WorkspaceManager(), updateManager: UpdateManager())
+    MainWindowView(
+        workspace: WorkspaceManager(),
+        updateManager: UpdateManager(),
+        repoCallout: RepoCalloutController()
+    )
         .frame(width: 1100, height: 700)
 }

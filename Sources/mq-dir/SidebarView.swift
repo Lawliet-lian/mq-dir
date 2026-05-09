@@ -6,6 +6,7 @@ struct SidebarView: View {
     @ObservedObject var viewModel: SidebarViewModel
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject var updateManager: UpdateManager
+    @ObservedObject var repoCallout: RepoCalloutController
     @ObservedObject var cmux: CmuxSidebarModel
     @Binding var selectedURL: URL?
     let onSelect: (URL) -> Void
@@ -60,7 +61,7 @@ struct SidebarView: View {
         }
         .background(Theme.Color.sidebarBg)
         .sheet(isPresented: $showingFeedback) {
-            FeedbackSheet()
+            FeedbackSheet(repoCallout: repoCallout)
         }
     }
 
@@ -73,6 +74,9 @@ struct SidebarView: View {
             helpMenu
             if updateManager.updateAvailable {
                 updatePill
+            }
+            if repoCallout.shouldShowPill {
+                repoPill
             }
             Spacer(minLength: 0)
         }
@@ -87,7 +91,9 @@ struct SidebarView: View {
         Menu {
             Button("Welcome to mq-dir") { openURL("https://mqdir.com") }
             Button("Send Feedback") { showingFeedback = true }
-            Button("GitHub") { openURL("https://github.com/h5nam/mq-dir") }
+            Button("⭐ Star on GitHub") {
+                repoCallout.openRepo()
+            }
             Divider()
             Button("Check for Updates") {
                 updateManager.checkForUpdatesAndShowUI()
@@ -132,6 +138,37 @@ struct SidebarView: View {
             return "Update Available: \(version)"
         }
         return "Update Available"
+    }
+
+    /// Repo callout. Mirrors `updatePill`'s capsule style with a yellow
+    /// tint so the two pills read as a related but distinct "quiet CTA"
+    /// family. Right-click is the explicit anti-nag escape hatch —
+    /// once dismissed, never returns.
+    private var repoPill: some View {
+        Button {
+            repoCallout.openRepo()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Star mq-dir")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.black)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(Color.yellow)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Open the mq-dir GitHub repo")
+        .contextMenu {
+            Button("Don't show this again") {
+                repoCallout.dismissPermanently()
+            }
+        }
     }
 
     private func openURL(_ string: String) {

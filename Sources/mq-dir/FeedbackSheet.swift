@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 /// leakage is rotated channel-side, not by code change.
 struct FeedbackSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var repoCallout: RepoCalloutController
 
     @State private var email: String = ""
     @State private var message: String = ""
@@ -169,6 +170,16 @@ struct FeedbackSheet: View {
                     .foregroundStyle(.secondary)
             }
             HStack {
+                if !repoCallout.hasOpenedRepo {
+                    Button {
+                        repoCallout.openRepo()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill")
+                            Text("Star on GitHub")
+                        }
+                    }
+                }
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
