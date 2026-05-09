@@ -460,6 +460,7 @@ struct BrowserPaneView: View {
             .contentShape(Rectangle())
             .help(url.path)
             .appKitFileDrag(primary: url)
+            .inactiveDragSource(primary: url)
         } else {
             Text("No folder open")
                 .foregroundStyle(Theme.Color.labelTertiary)
@@ -909,6 +910,31 @@ struct BrowserPaneView: View {
             multiURLs: (isSelected && viewModel.selection.count > 1)
                 ? viewModel.selectedURLs
                 : []
+        )
+        // Mirrors the SwiftUI tap + drag gestures above for the
+        // inactive-window path: when mq-dir is in the background, the
+        // overlay claims left-mouse-down so the window doesn't raise,
+        // forwards click selection back here, and starts the AppKit
+        // drag itself.
+        .inactiveDragSource(
+            primary: entry.url,
+            multiURLs: (isSelected && viewModel.selection.count > 1)
+                ? viewModel.selectedURLs
+                : [],
+            onClick: { event in
+                if !isFocused { onFocus() }
+                let mods = event.modifierFlags
+                if mods.contains(.shift) {
+                    viewModel.extendSelection(to: entry.id)
+                } else if mods.contains(.command) {
+                    viewModel.toggleSelection(entry.id)
+                } else {
+                    viewModel.replaceSelection(entry.id)
+                }
+            },
+            onDoubleClick: { _ in
+                viewModel.open(entry)
+            }
         )
         // Right-click should select the clicked row before the menu
         // shows (Finder parity). The NSEvent monitor fires on every
