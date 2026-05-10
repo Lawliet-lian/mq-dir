@@ -264,7 +264,11 @@ jobs:
           git fetch origin main
           git checkout -B post-release origin/main
 
-          # Splice <item> just above </channel>. Mirrors Scripts/release.sh.
+          # Splice <item> immediately below the APPCAST-PREPEND-MARKER anchor
+          # so the newest release is the first <item> Sparkle parses. Sparkle
+          # 2 falls back to RSS order when its version comparator can't rank
+          # prerelease (alpha/beta) semver tags, so appending at </channel>
+          # silently makes the oldest release look like "newest available".
           TMP_APPCAST="$(mktemp)"
           APPCAST_VER="${VERSION}" \
           APPCAST_URL="${DMG_URL}" \
@@ -277,7 +281,8 @@ jobs:
               sig = ENVIRON["APPCAST_SIG"]
               pub = ENVIRON["APPCAST_PUB"]
           }
-          /<\/channel>/ {
+          /APPCAST-PREPEND-MARKER/ {
+              print
               print "    <item>"
               print "      <title>Version " ver "</title>"
               print "      <pubDate>" pub "</pubDate>"
@@ -286,13 +291,14 @@ jobs:
               print "      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>"
               print "      <enclosure url=\"" url "\" " sig " type=\"application/octet-stream\" />"
               print "    </item>"
+              next
           }
           { print }
           ' docs/appcast.xml > "$TMP_APPCAST"
           mv "$TMP_APPCAST" docs/appcast.xml
 
           grep -q "<sparkle:version>${VERSION}</sparkle:version>" docs/appcast.xml \
-            || { echo "appcast splice missed — check </channel> regex" >&2; exit 1; }
+            || { echo "appcast splice missed — check APPCAST-PREPEND-MARKER anchor" >&2; exit 1; }
           if command -v xmllint >/dev/null; then
             xmllint --noout docs/appcast.xml
           fi

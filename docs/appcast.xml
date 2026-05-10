@@ -7,86 +7,22 @@
     <link>https://github.com/h5nam/mq-dir</link>
     <description>Most recent changes to mq-dir, served as a Sparkle appcast.</description>
     <language>en</language>
-    <!-- Scripts/release.sh injects new <item> entries directly above this comment. -->
+    <!-- New <item> entries must be inserted at the top of the list (immediately below this comment). Sparkle 2 surfaces the first <item> as "newest available" when its version comparator can't unambiguously rank prerelease (alpha/beta) tags, so newest-first ordering is load-bearing for the up-to-date dialog. APPCAST-PREPEND-MARKER -->
     <item>
-      <title>Version 0.1.0-alpha.9</title>
-      <pubDate>Sun, 03 May 2026 10:38:15 +0000</pubDate>
-      <sparkle:version>0.1.0-alpha.9</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-alpha.9</sparkle:shortVersionString>
+      <title>Version 0.1.0-beta.9</title>
+      <pubDate>Sat, 09 May 2026 12:33:24 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.9</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.9</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.9/mq-dir-v0.1.0-alpha.9.dmg" sparkle:edSignature="G1zJ1A4w5bAk/ZLj9Mv8Ba+ER3cx4FFuXUziCb5yjxII5C924Nw8eisnZDlG+psbpohybJ4PdxWlO//wfQPJDQ==" length="3250158" type="application/octet-stream" />
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.9/mq-dir-v0.1.0-beta.9.dmg" sparkle:edSignature="ZEg0PHjdCcowB6KkhHFN808PaGhxC3r1UFB87SN4ev7ocSnUQmBJkBJ/O2GHmiZLSA4cncxq8SyEMZle4YbPBg==" length="2895024" type="application/octet-stream" />
     </item>
     <item>
-      <title>Version 0.1.0-alpha.10</title>
-      <pubDate>Mon, 04 May 2026 03:02:37 +0000</pubDate>
-      <sparkle:version>0.1.0-alpha.10</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-alpha.10</sparkle:shortVersionString>
+      <title>Version 0.1.0-beta.8</title>
+      <pubDate>Fri, 08 May 2026 12:44:07 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.8</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.8</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.10/mq-dir-v0.1.0-alpha.10.dmg" sparkle:edSignature="djUs15EapXGZDXnJ7gCr8W1CVB1hyeRF2zzuae1UFf25RLp0YfEdWzxXAoe9B73salirl6WiJR+qnSDPHtrYBQ==" length="3355344" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-alpha.11</title>
-      <pubDate>Mon, 04 May 2026 04:38:51 +0000</pubDate>
-      <sparkle:version>0.1.0-alpha.11</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-alpha.11</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.11/mq-dir-v0.1.0-alpha.11.dmg" sparkle:edSignature="yl0qNXVDxAaLMJKaRN4dWg/bC+DaywkF7dlrbiHtpK0XPLm9OAXhn/vmM0plMfWhf8U6VvN2OvjFX1fYkd6HAQ==" length="6105066" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-alpha.12</title>
-      <pubDate>Mon, 04 May 2026 05:54:13 +0000</pubDate>
-      <sparkle:version>0.1.0-alpha.12</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-alpha.12</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.12/mq-dir-v0.1.0-alpha.12.dmg" sparkle:edSignature="svoVC+F95obT+CADx2YO2xlQcGEqpto32lOiFmLIKzq974fh62npAdpEvfvn2H55cvDz9QdU6Ov3HGwILj6nCQ==" length="5535362" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-beta.1</title>
-      <pubDate>Tue, 05 May 2026 12:21:03 +0000</pubDate>
-      <sparkle:version>0.1.0-beta.1</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-beta.1</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.1/mq-dir-v0.1.0-beta.1.dmg" sparkle:edSignature="zvvHjue8wL840yaZzmtSv6q4Dj8o+mokxSD9mLtgsqAnihjR5LXXiYVYIolrf2z+opsMINBE1EPaC2tUny7KAQ==" length="3412606" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-beta.2</title>
-      <pubDate>Wed, 06 May 2026 03:26:03 +0000</pubDate>
-      <sparkle:version>0.1.0-beta.2</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-beta.2</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.2/mq-dir-v0.1.0-beta.2.dmg" sparkle:edSignature="faBbY2eYpWL09UGm4dXU+3JA8b2LlOCq0vNKcPEF3YKFGhTHXbj8wVoRaorQEpnODj8v6TDmCXtTAMulojeVAQ==" length="3527658" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-beta.3</title>
-      <pubDate>Wed, 06 May 2026 05:55:55 +0000</pubDate>
-      <sparkle:version>0.1.0-beta.3</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-beta.3</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.3/mq-dir-v0.1.0-beta.3.dmg" sparkle:edSignature="Pq3nIPXese99Xkh1w82c2bfCvj0JbknD5vjVNfvO6QTYrMS88JMA4u1OK5hQJu7XZWLJD/jFnCfUwsaoh1SzDw==" length="3569606" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-beta.4</title>
-      <pubDate>Thu, 07 May 2026 13:59:28 +0000</pubDate>
-      <sparkle:version>0.1.0-beta.4</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-beta.4</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.4/mq-dir-v0.1.0-beta.4.dmg" sparkle:edSignature="MAdZlN/Xbhvzt+WJ1lZJQMSZCF5snaUvJZjxcUOwwNMSe0lNWdO357IA1oix/iwqwJeV76AueKNMdfO3+/y3DA==" length="3706794" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-beta.5</title>
-      <pubDate>Fri, 08 May 2026 02:31:29 +0000</pubDate>
-      <sparkle:version>0.1.0-beta.5</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-beta.5</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.5/mq-dir-v0.1.0-beta.5.dmg" sparkle:edSignature="lT7DHK2ojT1xWow5H4kGl5wMn6UP6mkw9DWyVqGJNW3OGeKUxOuiUFrVcqf+zapf7lgmMiEU747CXqPn3dawAg==" length="3766919" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>Version 0.1.0-beta.6</title>
-      <pubDate>Fri, 08 May 2026 07:13:22 +0000</pubDate>
-      <sparkle:version>0.1.0-beta.6</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-beta.6</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.6/mq-dir-v0.1.0-beta.6.dmg" sparkle:edSignature="n4qtrXc6EO2f2WhmJW1G7YBFZngz3rjAfM15+8T8f0QlR+VjOuIIMlnf0QAqcwjZNUGGXRzhcSTQowUparghAw==" length="3784325" type="application/octet-stream" />
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.8/mq-dir-v0.1.0-beta.8.dmg" sparkle:edSignature="aJ+R44u9UjTHBakU8z/h1f4bFtuK9FMcNUaKZTsuwVwD+mvC1sywGfEdnFCxQtEIw77/Fyf7746nApzcesWKBw==" length="2868917" type="application/octet-stream" />
     </item>
     <item>
       <title>Version 0.1.0-beta.7</title>
@@ -97,12 +33,84 @@
       <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.7/mq-dir-v0.1.0-beta.7.dmg" sparkle:edSignature="tkJ5o0TN/H9V4rsYKyL3FMiNbLzu1XmuWqO0df4rr6p/JhcjHcJ4ivE1fPKBw+Ohtc9yQcPg3olQNDm24XF1Ag==" length="3853388" type="application/octet-stream" />
     </item>
     <item>
-      <title>Version 0.1.0-beta.8</title>
-      <pubDate>Fri, 08 May 2026 12:44:07 +0000</pubDate>
-      <sparkle:version>0.1.0-beta.8</sparkle:version>
-      <sparkle:shortVersionString>0.1.0-beta.8</sparkle:shortVersionString>
+      <title>Version 0.1.0-beta.6</title>
+      <pubDate>Fri, 08 May 2026 07:13:22 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.6</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.6</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.8/mq-dir-v0.1.0-beta.8.dmg" sparkle:edSignature="aJ+R44u9UjTHBakU8z/h1f4bFtuK9FMcNUaKZTsuwVwD+mvC1sywGfEdnFCxQtEIw77/Fyf7746nApzcesWKBw==" length="2868917" type="application/octet-stream" />
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.6/mq-dir-v0.1.0-beta.6.dmg" sparkle:edSignature="n4qtrXc6EO2f2WhmJW1G7YBFZngz3rjAfM15+8T8f0QlR+VjOuIIMlnf0QAqcwjZNUGGXRzhcSTQowUparghAw==" length="3784325" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-beta.5</title>
+      <pubDate>Fri, 08 May 2026 02:31:29 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.5</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.5/mq-dir-v0.1.0-beta.5.dmg" sparkle:edSignature="lT7DHK2ojT1xWow5H4kGl5wMn6UP6mkw9DWyVqGJNW3OGeKUxOuiUFrVcqf+zapf7lgmMiEU747CXqPn3dawAg==" length="3766919" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-beta.4</title>
+      <pubDate>Thu, 07 May 2026 13:59:28 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.4</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.4/mq-dir-v0.1.0-beta.4.dmg" sparkle:edSignature="MAdZlN/Xbhvzt+WJ1lZJQMSZCF5snaUvJZjxcUOwwNMSe0lNWdO357IA1oix/iwqwJeV76AueKNMdfO3+/y3DA==" length="3706794" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-beta.3</title>
+      <pubDate>Wed, 06 May 2026 05:55:55 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.3</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.3/mq-dir-v0.1.0-beta.3.dmg" sparkle:edSignature="Pq3nIPXese99Xkh1w82c2bfCvj0JbknD5vjVNfvO6QTYrMS88JMA4u1OK5hQJu7XZWLJD/jFnCfUwsaoh1SzDw==" length="3569606" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-beta.2</title>
+      <pubDate>Wed, 06 May 2026 03:26:03 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.2</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.2/mq-dir-v0.1.0-beta.2.dmg" sparkle:edSignature="faBbY2eYpWL09UGm4dXU+3JA8b2LlOCq0vNKcPEF3YKFGhTHXbj8wVoRaorQEpnODj8v6TDmCXtTAMulojeVAQ==" length="3527658" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-beta.1</title>
+      <pubDate>Tue, 05 May 2026 12:21:03 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.1</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.1/mq-dir-v0.1.0-beta.1.dmg" sparkle:edSignature="zvvHjue8wL840yaZzmtSv6q4Dj8o+mokxSD9mLtgsqAnihjR5LXXiYVYIolrf2z+opsMINBE1EPaC2tUny7KAQ==" length="3412606" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-alpha.12</title>
+      <pubDate>Mon, 04 May 2026 05:54:13 +0000</pubDate>
+      <sparkle:version>0.1.0-alpha.12</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-alpha.12</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.12/mq-dir-v0.1.0-alpha.12.dmg" sparkle:edSignature="svoVC+F95obT+CADx2YO2xlQcGEqpto32lOiFmLIKzq974fh62npAdpEvfvn2H55cvDz9QdU6Ov3HGwILj6nCQ==" length="5535362" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-alpha.11</title>
+      <pubDate>Mon, 04 May 2026 04:38:51 +0000</pubDate>
+      <sparkle:version>0.1.0-alpha.11</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-alpha.11</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.11/mq-dir-v0.1.0-alpha.11.dmg" sparkle:edSignature="yl0qNXVDxAaLMJKaRN4dWg/bC+DaywkF7dlrbiHtpK0XPLm9OAXhn/vmM0plMfWhf8U6VvN2OvjFX1fYkd6HAQ==" length="6105066" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-alpha.10</title>
+      <pubDate>Mon, 04 May 2026 03:02:37 +0000</pubDate>
+      <sparkle:version>0.1.0-alpha.10</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-alpha.10</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.10/mq-dir-v0.1.0-alpha.10.dmg" sparkle:edSignature="djUs15EapXGZDXnJ7gCr8W1CVB1hyeRF2zzuae1UFf25RLp0YfEdWzxXAoe9B73salirl6WiJR+qnSDPHtrYBQ==" length="3355344" type="application/octet-stream" />
+    </item>
+    <item>
+      <title>Version 0.1.0-alpha.9</title>
+      <pubDate>Sun, 03 May 2026 10:38:15 +0000</pubDate>
+      <sparkle:version>0.1.0-alpha.9</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-alpha.9</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-alpha.9/mq-dir-v0.1.0-alpha.9.dmg" sparkle:edSignature="G1zJ1A4w5bAk/ZLj9Mv8Ba+ER3cx4FFuXUziCb5yjxII5C924Nw8eisnZDlG+psbpohybJ4PdxWlO//wfQPJDQ==" length="3250158" type="application/octet-stream" />
     </item>
     <item>
       <title>Version 0.1.0-beta.9</title>
