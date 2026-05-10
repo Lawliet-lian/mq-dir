@@ -41,7 +41,7 @@ struct mqdirApp: App {
         }
         .windowResizability(.contentMinSize)
         .commands {
-            MenuCommands()
+            MenuCommands(workspace: workspace)
         }
 
         // Standard macOS Preferences window (⌘,). Phase 3 ships the

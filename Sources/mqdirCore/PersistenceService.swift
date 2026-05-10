@@ -197,19 +197,68 @@ enum ColorSchemeOption: String, Codable, Sendable, CaseIterable {
 /// `state.json` files come back without a re-seed pop.
 struct WorkspaceSettings: Codable, Equatable, Sendable {
     var colorScheme: ColorSchemeOption
+    /// Per-action user overrides for the customisable shortcut set.
+    /// Missing entries inherit `ShortcutAction.defaultBinding`. The
+    /// menu wiring resolves the live binding via
+    /// `WorkspaceSettings.binding(for:)` rather than reading this
+    /// dictionary directly.
+    var shortcutOverrides: [ShortcutAction: ShortcutBinding]
 
-    init(colorScheme: ColorSchemeOption = .system) {
+    init(
+        colorScheme: ColorSchemeOption = .system,
+        shortcutOverrides: [ShortcutAction: ShortcutBinding] = [:]
+    ) {
         self.colorScheme = colorScheme
+        self.shortcutOverrides = shortcutOverrides
     }
 
-    private enum CodingKeys: String, CodingKey { case colorScheme }
+    /// Live binding for `action` — user override if present,
+    /// `defaultBinding` otherwise. Single source of truth for both
+    /// the menu attach and the Settings row preview.
+    func binding(for action: ShortcutAction) -> ShortcutBinding {
+        shortcutOverrides[action] ?? action.defaultBinding
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case colorScheme
+        case shortcutOverrides
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            colorScheme: (try? c.decodeIfPresent(ColorSchemeOption.self, forKey: .colorScheme)) ?? .system
-        )
+        let colorScheme = (try? c.decodeIfPresent(ColorSchemeOption.self, forKey: .colorScheme)) ?? .system
+
+        // Decode shortcutOverrides per-entry through an AnyCodingKey
+        // container so a future build's added action (or a renamed
+        // case) doesn't take the whole override dictionary down with
+        // it on a downgrade — known keys still decode, unknown keys
+        // skip silently.
+        var overrides: [ShortcutAction: ShortcutBinding] = [:]
+        if let overrideContainer = try? c.nestedContainer(
+            keyedBy: AnyCodingKey.self,
+            forKey: .shortcutOverrides
+        ) {
+            for key in overrideContainer.allKeys {
+                guard let action = ShortcutAction(rawValue: key.stringValue) else { continue }
+                if let binding = try? overrideContainer.decode(ShortcutBinding.self, forKey: key) {
+                    overrides[action] = binding
+                }
+            }
+        }
+
+        self.init(colorScheme: colorScheme, shortcutOverrides: overrides)
     }
+}
+
+/// Generic string-keyed `CodingKey` used to walk an arbitrary
+/// JSON object's keys without committing to a fixed enum. Used by
+/// `WorkspaceSettings.init(from:)` so a per-entry decode can skip
+/// unknown action names instead of failing the entire dictionary.
+private struct AnyCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init?(intValue: Int) { return nil }
+    init(stringValue: String) { self.stringValue = stringValue }
 }
 
 /// Top-level persisted state. Holds cross-project surface (favorites)

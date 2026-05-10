@@ -2,19 +2,29 @@ import AppKit
 import SwiftUI
 
 struct MenuCommands: Commands {
+    @ObservedObject var workspace: WorkspaceManager
+
+    /// Resolved binding for a customisable action — user override
+    /// from `WorkspaceSettings`, falling back to the default. Used
+    /// by every menu item whose shortcut is exposed in Settings →
+    /// Shortcuts so the menu re-attaches when the user remaps.
+    private func binding(_ action: ShortcutAction) -> ShortcutBinding {
+        workspace.workspace.settings.binding(for: action)
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") { stub("File → New Window") }
                 .keyboardShortcut("n", modifiers: .command)
             Button("New Tab") { post(.mqdirNewTabRequested) }
-                .keyboardShortcut("t", modifiers: .command)
+                .keyboardShortcut(binding(.newTab))
             Divider()
             Button("Open Folder...") { post(.mqdirOpenFolderRequested) }
-                .keyboardShortcut("o", modifiers: .command)
+                .keyboardShortcut(binding(.openFolder))
             Button("Open Selected") { post(.mqdirOpenSelectedRequested) }
                 .keyboardShortcut(.return, modifiers: [])
             Button("Close Tab") { post(.mqdirCloseTabRequested) }
-                .keyboardShortcut("w", modifiers: .command)
+                .keyboardShortcut(binding(.closeTab))
             Button("Reopen Closed Tab") { post(.mqdirReopenClosedTabRequested) }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             Divider()
@@ -26,7 +36,7 @@ struct MenuCommands: Commands {
             Button("Reveal in Finder") { post(.mqdirRevealSelectedRequested) }
             Divider()
             Button("Add to Favorites") { post(.mqdirAddCurrentFolderToFavoritesRequested) }
-                .keyboardShortcut("d", modifiers: .command)
+                .keyboardShortcut(binding(.addToFavorites))
         }
 
         // Replace the system pasteboard group entirely so file-level
@@ -49,11 +59,11 @@ struct MenuCommands: Commands {
             // macOS and harmlessly invokes NSText.delete(_:) on a
             // selected range.
             Button("Move to Trash") { dispatch(text: #selector(NSText.delete(_:)), file: .mqdirDeleteRequested) }
-                .keyboardShortcut(.delete, modifiers: .command)
+                .keyboardShortcut(binding(.moveToTrash))
             // Permanent delete bypasses the trash — confirmed via
             // NSAlert in the focused pane's view model.
             Button("Delete Immediately\u{2026}") { post(.mqdirPermanentDeleteRequested) }
-                .keyboardShortcut(.delete, modifiers: [.command, .option])
+                .keyboardShortcut(binding(.deleteImmediately))
             Divider()
             Button("Select All") { dispatch(text: #selector(NSText.selectAll(_:)), file: .mqdirSelectAllRequested) }
                 .keyboardShortcut("a", modifiers: .command)
@@ -81,9 +91,9 @@ struct MenuCommands: Commands {
 
         CommandGroup(after: .textEditing) {
             Button("Find") { post(.mqdirFocusSearchRequested) }
-                .keyboardShortcut("f", modifiers: .command)
+                .keyboardShortcut(binding(.find))
             Button("Show Preview") { post(.mqdirTogglePreviewRequested) }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .keyboardShortcut(binding(.togglePreview))
         }
 
         CommandGroup(after: .toolbar) {
@@ -92,9 +102,9 @@ struct MenuCommands: Commands {
             Button("Forward") { post(.mqdirGoForwardRequested) }
                 .keyboardShortcut("]", modifiers: .command)
             Button("Reload") { post(.mqdirReloadRequested) }
-                .keyboardShortcut("r", modifiers: .command)
+                .keyboardShortcut(binding(.reload))
             Button("Parent Folder") { post(.mqdirParentFolderRequested) }
-                .keyboardShortcut(.upArrow, modifiers: .command)
+                .keyboardShortcut(binding(.parentFolder))
             Button("Toggle Hidden Files") { post(.mqdirToggleHiddenFilesRequested) }
                 .keyboardShortcut(".", modifiers: [.command, .shift])
             Divider()

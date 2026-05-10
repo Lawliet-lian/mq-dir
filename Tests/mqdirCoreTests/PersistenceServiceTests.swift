@@ -263,6 +263,135 @@ final class PersistenceServiceTests: XCTestCase {
                        "an explicit .light preference must survive a save/load cycle")
     }
 
+    func testWorkspaceSettingsDefaultShortcutOverridesAreEmpty() {
+        let settings = WorkspaceSettings()
+        XCTAssertTrue(settings.shortcutOverrides.isEmpty,
+                      "fresh settings must carry no overrides; default bindings come from ShortcutAction")
+        XCTAssertEqual(settings.binding(for: .moveToTrash),
+                       ShortcutAction.moveToTrash.defaultBinding,
+                       "binding(for:) must fall back to the action's default when no override is set")
+    }
+
+    func testWorkspaceSettingsShortcutOverrideRoundTrips() throws {
+        var workspace = WorkspaceState.empty
+        let custom = ShortcutBinding(key: .character("k"), modifiers: [.command, .control])
+        workspace.settings.shortcutOverrides[.moveToTrash] = custom
+
+        let data = try JSONEncoder().encode(workspace)
+        let decoded = try JSONDecoder().decode(WorkspaceState.self, from: data)
+
+        XCTAssertEqual(decoded.settings.shortcutOverrides[.moveToTrash], custom,
+                       "user override must survive a save/load cycle byte-for-byte")
+        XCTAssertEqual(decoded.settings.binding(for: .moveToTrash), custom,
+                       "binding(for:) must prefer the override over the default after restore")
+    }
+
+    func testWorkspaceSettingsShortcutOverridesUseObjectShape() throws {
+        // Phase 4 expectation: shortcutOverrides serialises as a
+        // JSON object keyed by action rawValue (CodingKeyRepresentable),
+        // not a positional array. This is what makes hand-edited
+        // state.json tractable and forward-compatible.
+        var workspace = WorkspaceState.empty
+        workspace.settings.shortcutOverrides[.find] = ShortcutBinding(
+            key: .character("k"),
+            modifiers: [.command, .shift]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(workspace)
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertTrue(
+            json.contains("\"shortcutOverrides\":{\"find\":"),
+            "expected object-shape encoding (\\\"find\\\":...) but got: \(json)"
+        )
+    }
+
+    func testWorkspaceSettingsSkipsUnknownShortcutActionKeys() throws {
+        // Forward-compat: a state.json written by a future build
+        // that ships a new ShortcutAction case must not nuke the
+        // override dictionary on this older build. Known keys
+        // survive; unknown keys silently skip.
+        let pre = """
+        {
+          "favorites": [],
+          "favoritesSeeded": true,
+          "activeProjectID": "00000000-0000-0000-0000-000000000001",
+          "projects": [
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "name": "Default",
+              "state": {
+                "layout": 4,
+                "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 }
+                ]
+              }
+            }
+          ],
+          "settings": {
+            "colorScheme": "dark",
+            "shortcutOverrides": {
+              "find": { "key": { "kind": "character", "character": "k" }, "modifiers": 1 },
+              "futureUnknownAction": { "key": { "kind": "character", "character": "x" }, "modifiers": 1 }
+            }
+          }
+        }
+        """
+        let workspace = try JSONDecoder().decode(WorkspaceState.self, from: Data(pre.utf8))
+        XCTAssertEqual(workspace.settings.colorScheme, .dark,
+                       "colorScheme must survive the unknown-key entry")
+        XCTAssertEqual(
+            workspace.settings.shortcutOverrides[.find],
+            ShortcutBinding(key: .character("k"), modifiers: .command),
+            "the known .find override must decode normally"
+        )
+        XCTAssertEqual(
+            workspace.settings.shortcutOverrides.count,
+            1,
+            "the unknown action key must be skipped silently, leaving only the known override"
+        )
+    }
+
+    func testWorkspaceStateMigratesMissingShortcutOverridesAsEmpty() throws {
+        // A state.json from before Phase 4 has no `shortcutOverrides`
+        // key — every action must still resolve via its default
+        // binding.
+        let pre = """
+        {
+          "favorites": [],
+          "favoritesSeeded": true,
+          "activeProjectID": "00000000-0000-0000-0000-000000000001",
+          "projects": [
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "name": "Default",
+              "state": {
+                "layout": 4,
+                "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 }
+                ]
+              }
+            }
+          ],
+          "settings": { "colorScheme": "system" }
+        }
+        """
+        let workspace = try JSONDecoder().decode(WorkspaceState.self, from: Data(pre.utf8))
+        XCTAssertTrue(workspace.settings.shortcutOverrides.isEmpty,
+                      "missing shortcutOverrides field must default to an empty dictionary, not nil")
+        XCTAssertEqual(workspace.settings.binding(for: .find),
+                       ShortcutAction.find.defaultBinding,
+                       "actions must resolve via default binding when no override is persisted")
+    }
+
     // MARK: - Default-state shape
 
     func testEmptyWorkspaceHasOneDefaultProject() {

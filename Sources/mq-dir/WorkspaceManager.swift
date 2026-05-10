@@ -135,6 +135,41 @@ final class WorkspaceManager: ObservableObject {
         scheduleSave()
     }
 
+    /// Persist a user override for the given action. Passing `nil`
+    /// for `binding` removes the override so the action falls back
+    /// to its default. Settings → Shortcuts uses this for both Edit
+    /// and Reset.
+    func setShortcutBinding(_ binding: ShortcutBinding?, for action: ShortcutAction) {
+        // A user override that happens to equal the default is
+        // indistinguishable from "no override" everywhere except
+        // the Settings UI's reset arrow, where it would otherwise
+        // suggest the action is customised when it isn't. Collapse
+        // to nil so the override dictionary stays minimal.
+        let normalised: ShortcutBinding?
+        if let binding, binding == action.defaultBinding {
+            normalised = nil
+        } else {
+            normalised = binding
+        }
+        if let normalised {
+            guard workspace.settings.shortcutOverrides[action] != normalised else { return }
+            workspace.settings.shortcutOverrides[action] = normalised
+        } else {
+            guard workspace.settings.shortcutOverrides[action] != nil else { return }
+            workspace.settings.shortcutOverrides.removeValue(forKey: action)
+        }
+        scheduleSave()
+    }
+
+    /// Drop every user override so all 10 customisable shortcuts
+    /// snap back to their defaults at once. Wired to the Settings
+    /// "Restore Defaults" button.
+    func resetAllShortcutOverrides() {
+        guard !workspace.settings.shortcutOverrides.isEmpty else { return }
+        workspace.settings.shortcutOverrides.removeAll()
+        scheduleSave()
+    }
+
     // MARK: Persistence
 
     private func scheduleSave() {
