@@ -9,6 +9,14 @@
     <language>en</language>
     <!-- New <item> entries must be inserted at the top of the list (immediately below this comment). Sparkle 2 surfaces the first <item> as "newest available" when its version comparator can't unambiguously rank prerelease (alpha/beta) tags, so newest-first ordering is load-bearing for the up-to-date dialog. APPCAST-PREPEND-MARKER -->
     <item>
+      <title>Version 0.1.0-beta.10</title>
+      <pubDate>Sun, 10 May 2026 12:16:08 +0000</pubDate>
+      <sparkle:version>0.1.0-beta.10</sparkle:version>
+      <sparkle:shortVersionString>0.1.0-beta.10</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/h5nam/mq-dir/releases/download/v0.1.0-beta.10/mq-dir-v0.1.0-beta.10.dmg" sparkle:edSignature="0s2Yrp20VjiPyFx1+NcBOCmzBTROddQMa0jA54aFrefbDcy7Fr9agFz9Ke2AbGNUZiSdUZbV2aT92ffqllttBA==" length="3116798" type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 0.1.0-beta.9</title>
       <pubDate>Sat, 09 May 2026 12:33:24 +0000</pubDate>
       <sparkle:version>0.1.0-beta.9</sparkle:version>
