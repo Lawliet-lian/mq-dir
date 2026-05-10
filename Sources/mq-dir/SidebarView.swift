@@ -9,6 +9,15 @@ struct SidebarView: View {
     @ObservedObject var repoCallout: RepoCalloutController
     @ObservedObject var cmux: CmuxSidebarModel
     @Binding var selectedURL: URL?
+    /// Distinct Finder tags observed in the focused tab's current
+    /// listing. Empty when the focused folder has no tagged items.
+    /// MainWindowView recomputes this on every focused-tab change so
+    /// the sidebar always mirrors what's visible in the active pane.
+    let tagsSummary: [TagSummary]
+    /// Tap handler for a sidebar tag row. The owning view typically
+    /// pushes the name into the focused tab's `searchQuery` so the
+    /// list filters down to matching items.
+    let onTagSelected: (String) -> Void
     let onSelect: (URL) -> Void
 
     /// Custom drag-payload identifier for project rows. Distinct from the
@@ -45,6 +54,9 @@ struct SidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     favoritesSection
+                        .padding(.bottom, 8)
+
+                    tagsSection
                         .padding(.bottom, 8)
 
                     projectsSection
@@ -213,6 +225,55 @@ struct SidebarView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: Tags (read-only view of Finder tags in the focused tab)
+
+    private var tagsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Tags")
+            if tagsSummary.isEmpty {
+                Text("No tags in this folder")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.Color.labelTertiary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(tagsSummary) { summary in
+                    tagRow(summary)
+                }
+            }
+        }
+    }
+
+    private func tagRow(_ summary: TagSummary) -> some View {
+        Button {
+            onTagSelected(summary.name)
+        } label: {
+            HStack(spacing: 8) {
+                if let color = TagColor.color(forLabel: summary.labelNumber) {
+                    Circle()
+                        .fill(color)
+                        .frame(width: 8, height: 8)
+                } else {
+                    Circle()
+                        .strokeBorder(Theme.Color.labelTertiary, lineWidth: 1)
+                        .frame(width: 8, height: 8)
+                }
+                Text(summary.name)
+                    .font(Theme.Font.sidebarItem)
+                    .foregroundStyle(Theme.Color.label)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Filter the focused tab by \u{201C}\(summary.name)\u{201D}")
     }
 
     @ViewBuilder

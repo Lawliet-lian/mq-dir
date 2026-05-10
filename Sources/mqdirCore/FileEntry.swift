@@ -8,6 +8,40 @@ struct FileEntry: Identifiable, Hashable, Sendable {
     let modificationDate: Date?
     let kind: String
     let isHidden: Bool
+    /// Finder tags attached to this URL (`URLResourceKey.tagNamesKey`).
+    /// Localised to the user's system language — "Red" vs "빨강" for
+    /// the same colour tag — which is why the dot rendering keys off
+    /// `labelNumber` instead of matching tag-name strings.
+    let tagNames: [String]
+    /// Finder colour-label index (`URLResourceKey.labelNumberKey`).
+    /// `0` means "no label", `1...7` map to gray/green/purple/blue/
+    /// yellow/red/orange in macOS's Finder palette. Only the most
+    /// recent system label survives in this field — multi-tag rows
+    /// drop their non-primary labels here but still carry the
+    /// per-name tags in `tagNames`.
+    let labelNumber: Int
+
+    init(
+        url: URL,
+        name: String,
+        isDirectory: Bool,
+        size: Int64?,
+        modificationDate: Date?,
+        kind: String,
+        isHidden: Bool,
+        tagNames: [String] = [],
+        labelNumber: Int = 0
+    ) {
+        self.url = url
+        self.name = name
+        self.isDirectory = isDirectory
+        self.size = size
+        self.modificationDate = modificationDate
+        self.kind = kind
+        self.isHidden = isHidden
+        self.tagNames = tagNames
+        self.labelNumber = labelNumber
+    }
 
     // URL-based id avoids collisions on case-insensitive APFS volumes where
     // `url.path` would normalize "Foo.txt" and "foo.txt" to the same string.

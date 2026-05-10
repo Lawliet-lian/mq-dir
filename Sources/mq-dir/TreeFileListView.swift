@@ -319,6 +319,7 @@ private struct TreeRow: View {
                     .foregroundStyle(textColor)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                TagDotView(entry: entry)
             }
 
             Spacer(minLength: 0)

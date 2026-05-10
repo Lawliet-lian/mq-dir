@@ -13,6 +13,8 @@ struct FileSystemService {
             .fileSizeKey,
             .isDirectoryKey,
             .isHiddenKey,
+            .tagNamesKey,
+            .labelNumberKey,
         ]
 
         var options: FileManager.DirectoryEnumerationOptions = []
@@ -38,7 +40,9 @@ struct FileSystemService {
                 size: isDirectory ? nil : values.fileSize.map(Int64.init),
                 modificationDate: values.contentModificationDate,
                 kind: kind(for: childURL, isDirectory: isDirectory),
-                isHidden: values.isHidden ?? name.hasPrefix(".")
+                isHidden: values.isHidden ?? name.hasPrefix("."),
+                tagNames: values.tagNames ?? [],
+                labelNumber: values.labelNumber ?? 0
             )
         }
     }
@@ -62,6 +66,8 @@ struct FileSystemService {
             .fileSizeKey,
             .isDirectoryKey,
             .isHiddenKey,
+            .tagNamesKey,
+            .labelNumberKey,
         ]
 
         var options: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
@@ -87,9 +93,24 @@ struct FileSystemService {
             if visited & 0xFF == 0, isCancelled() { return results }
 
             let name = childURL.lastPathComponent
-            guard name.localizedCaseInsensitiveContains(query) else { continue }
-
+            // Match name first (cheap) so the resourceValues fetch
+            // only fires for non-name candidates that still might
+            // match by Finder tag. Tag-name matching covers the
+            // sidebar's "click a tag" path on systems where the
+            // tag is localised (e.g. "초록색") and so never appears
+            // inside Latin-named files.
+            let nameMatches = name.localizedCaseInsensitiveContains(query)
             let values = try? childURL.resourceValues(forKeys: keys)
+            let tagMatches: Bool
+            if nameMatches {
+                tagMatches = false
+            } else {
+                tagMatches = (values?.tagNames ?? []).contains {
+                    $0.localizedCaseInsensitiveContains(query)
+                }
+            }
+            guard nameMatches || tagMatches else { continue }
+
             let isDirectory = values?.isDirectory ?? false
             results.append(FileEntry(
                 url: childURL,
@@ -98,7 +119,9 @@ struct FileSystemService {
                 size: isDirectory ? nil : (values?.fileSize).map(Int64.init),
                 modificationDate: values?.contentModificationDate,
                 kind: kind(for: childURL, isDirectory: isDirectory),
-                isHidden: values?.isHidden ?? name.hasPrefix(".")
+                isHidden: values?.isHidden ?? name.hasPrefix("."),
+                tagNames: values?.tagNames ?? [],
+                labelNumber: values?.labelNumber ?? 0
             ))
         }
 

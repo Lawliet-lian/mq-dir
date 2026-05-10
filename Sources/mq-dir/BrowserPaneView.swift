@@ -1050,11 +1050,14 @@ private struct FileEntryRow: View {
                             .onSubmit { commitRename() }
                             .onExitCommand { cancelRename() }
                     } else {
-                        Text(entry.name)
-                            .font(Theme.Font.body)
-                            .foregroundStyle(textColor)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        HStack(spacing: 5) {
+                            Text(entry.name)
+                                .font(Theme.Font.body)
+                                .foregroundStyle(textColor)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            TagDotView(entry: entry)
+                        }
                     }
                     if let subtitle {
                         Text(subtitle)

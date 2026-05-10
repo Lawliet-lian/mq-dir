@@ -111,7 +111,16 @@ struct MainWindowView: View {
                 updateManager: updateManager,
                 repoCallout: repoCallout,
                 cmux: cmux,
-                selectedURL: $sidebarSelection
+                selectedURL: $sidebarSelection,
+                tagsSummary: focusedPane.entries.uniqueTagSummaries(),
+                onTagSelected: { tag in
+                    // Phase 3B 1차: substring search via the existing
+                    // searchQuery path. A dedicated tag-aware match mode
+                    // ships with the tag-write sprint; this filters by
+                    // tag-name substring for now and is good enough when
+                    // tag names are unique words.
+                    focusedPane.searchQuery = tag
+                }
             ) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
                 focusedPane.openFolder(url)
