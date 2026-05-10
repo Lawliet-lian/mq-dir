@@ -217,6 +217,52 @@ final class PersistenceServiceTests: XCTestCase {
         XCTAssertEqual(tab.selectedURLPaths, ["/a/b.txt"])
     }
 
+    func testWorkspaceStateMigratesMissingSettingsAsSystem() throws {
+        // A state.json from before Phase 3 has no `settings` key. The
+        // decoder must default the workspace to `.system` so existing
+        // users don't get force-flipped to dark just because the field
+        // is absent.
+        let pre = """
+        {
+          "favorites": [],
+          "favoritesSeeded": true,
+          "activeProjectID": "00000000-0000-0000-0000-000000000001",
+          "projects": [
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "name": "Default",
+              "state": {
+                "layout": 4,
+                "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 }
+                ]
+              }
+            }
+          ]
+        }
+        """
+        let workspace = try JSONDecoder().decode(WorkspaceState.self, from: Data(pre.utf8))
+        XCTAssertEqual(workspace.settings.colorScheme, .system,
+                       "missing settings field must default to .system, not .dark")
+        XCTAssertEqual(workspace.projects.count, 1)
+        XCTAssertEqual(workspace.activeProjectID, workspace.projects[0].id)
+    }
+
+    func testWorkspaceSettingsColorSchemeRoundTrips() throws {
+        var workspace = WorkspaceState.empty
+        workspace.settings.colorScheme = .light
+
+        let data = try JSONEncoder().encode(workspace)
+        let decoded = try JSONDecoder().decode(WorkspaceState.self, from: data)
+
+        XCTAssertEqual(decoded.settings.colorScheme, .light,
+                       "an explicit .light preference must survive a save/load cycle")
+    }
+
     // MARK: - Default-state shape
 
     func testEmptyWorkspaceHasOneDefaultProject() {

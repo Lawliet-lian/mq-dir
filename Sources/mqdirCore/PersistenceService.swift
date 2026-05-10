@@ -182,6 +182,36 @@ struct Project: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// User-facing colour scheme preference. Persisted as a stable raw
+/// string so the JSON survives a Swift enum reorder; `system` means
+/// "follow macOS Appearance" by binding `.preferredColorScheme(nil)`.
+enum ColorSchemeOption: String, Codable, Sendable, CaseIterable {
+    case system
+    case light
+    case dark
+}
+
+/// Workspace-level user settings. Lives next to favourites and the
+/// project list because it's cross-project; defaults are written
+/// through `WorkspaceState.init(from:)`'s `decodeIfPresent` so old
+/// `state.json` files come back without a re-seed pop.
+struct WorkspaceSettings: Codable, Equatable, Sendable {
+    var colorScheme: ColorSchemeOption
+
+    init(colorScheme: ColorSchemeOption = .system) {
+        self.colorScheme = colorScheme
+    }
+
+    private enum CodingKeys: String, CodingKey { case colorScheme }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            colorScheme: (try? c.decodeIfPresent(ColorSchemeOption.self, forKey: .colorScheme)) ?? .system
+        )
+    }
+}
+
 /// Top-level persisted state. Holds cross-project surface (favorites)
 /// alongside the project list and which one is active. Old `state.json`
 /// files from before this struct existed get migrated by the custom
@@ -195,22 +225,25 @@ struct WorkspaceState: Codable, Equatable, Sendable {
     var favoritesSeeded: Bool
     var activeProjectID: UUID
     var projects: [Project]
+    var settings: WorkspaceSettings
 
     init(
         favorites: [Favorite] = [],
         favoritesSeeded: Bool = false,
         activeProjectID: UUID,
-        projects: [Project]
+        projects: [Project],
+        settings: WorkspaceSettings = WorkspaceSettings()
     ) {
         precondition(!projects.isEmpty, "WorkspaceState always carries at least one project")
         self.favorites = favorites
         self.favoritesSeeded = favoritesSeeded
         self.activeProjectID = activeProjectID
         self.projects = projects
+        self.settings = settings
     }
 
     private enum CodingKeys: String, CodingKey {
-        case favorites, favoritesSeeded, activeProjectID, projects
+        case favorites, favoritesSeeded, activeProjectID, projects, settings
         // Legacy keys (pre-projects schema)
         case layout, focusedPaneIndex, panes
     }
@@ -229,7 +262,8 @@ struct WorkspaceState: Codable, Equatable, Sendable {
                 favorites: (try? c.decodeIfPresent([Favorite].self, forKey: .favorites)) ?? [],
                 favoritesSeeded: (try? c.decodeIfPresent(Bool.self, forKey: .favoritesSeeded)) ?? false,
                 activeProjectID: resolved,
-                projects: projects
+                projects: projects,
+                settings: (try? c.decodeIfPresent(WorkspaceSettings.self, forKey: .settings)) ?? WorkspaceSettings()
             )
             return
         }
@@ -266,6 +300,7 @@ struct WorkspaceState: Codable, Equatable, Sendable {
         try c.encode(favoritesSeeded, forKey: .favoritesSeeded)
         try c.encode(activeProjectID, forKey: .activeProjectID)
         try c.encode(projects, forKey: .projects)
+        try c.encode(settings, forKey: .settings)
     }
 
     static var empty: WorkspaceState {

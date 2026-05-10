@@ -123,6 +123,18 @@ final class WorkspaceManager: ObservableObject {
         scheduleSave()
     }
 
+    // MARK: Settings passthrough
+
+    /// Update the workspace-level colour scheme preference. Drives
+    /// `mqdirApp`'s `.preferredColorScheme` binding so the change
+    /// takes effect immediately, with the standard 500 ms debounced
+    /// save persisting across launches.
+    func setColorScheme(_ option: ColorSchemeOption) {
+        guard workspace.settings.colorScheme != option else { return }
+        workspace.settings.colorScheme = option
+        scheduleSave()
+    }
+
     // MARK: Persistence
 
     private func scheduleSave() {

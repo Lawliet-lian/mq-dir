@@ -37,11 +37,19 @@ struct mqdirApp: App {
             )
                 .id(workspace.workspace.activeProjectID)
                 .frame(minWidth: 900, minHeight: 600)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(workspace.workspace.settings.colorScheme.preferred)
         }
         .windowResizability(.contentMinSize)
         .commands {
             MenuCommands()
+        }
+
+        // Standard macOS Preferences window (⌘,). Phase 3 ships the
+        // appearance picker; future settings — keyboard customizer,
+        // archive handler — will land as additional Form sections.
+        Settings {
+            SettingsView(workspace: workspace)
+                .preferredColorScheme(workspace.workspace.settings.colorScheme.preferred)
         }
     }
 }
