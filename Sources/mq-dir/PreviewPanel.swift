@@ -88,6 +88,13 @@ struct PreviewPanel: View {
                 // gives proper continuous-scroll paging out of the box.
                 PDFPreview(url: entry.url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if isZip(entry.url) {
+                // Quick Look has no zip generator on macOS, so the
+                // default fallthrough rendered a generic icon. The
+                // zip-aware path runs `unzip -Z -1` for the listing
+                // and `unzip -p` for in-pane single-entry preview.
+                ZipPreviewView(url: entry.url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 QuickLookPreview(url: entry.url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -203,6 +210,10 @@ struct PreviewPanel: View {
 
     private func isPDF(_ url: URL) -> Bool {
         url.pathExtension.lowercased() == "pdf"
+    }
+
+    private func isZip(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "zip"
     }
 
     private static let dateFormatter: DateFormatter = {
