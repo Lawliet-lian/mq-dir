@@ -74,6 +74,28 @@ struct FileEntryContextMenu: View {
         Button(count > 1 ? "Move \(count) Items to Trash" : "Move to Trash") {
             viewModel.moveToTrash(targets)
         }
+        Button(count > 1 ? "Delete \(count) Items Immediately\u{2026}" : "Delete Immediately\u{2026}") {
+            viewModel.permanentlyDelete(targets)
+        }
+
+        Divider()
+        Button(compressLabel(for: targets)) {
+            viewModel.compress(targets)
+        }
+        if FolderBrowserViewModel.canExtract(targets) {
+            Button(count > 1 ? "Extract \(count) Archives" : "Extract") {
+                viewModel.extractArchives(targets)
+            }
+        }
+    }
+
+    /// Finder-style label for the Compress action: single selection
+    /// uses the item name in quotes, multi-selection shows the count.
+    private func compressLabel(for entries: [FileEntry]) -> String {
+        if entries.count == 1, let only = entries.first {
+            return "Compress \u{201C}\(only.name)\u{201D}"
+        }
+        return "Compress \(entries.count) Items"
     }
 
     // MARK: Open With

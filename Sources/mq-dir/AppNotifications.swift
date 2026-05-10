@@ -35,8 +35,9 @@ extension Notification.Name {
     /// tab. Bound to ⌘⇧P, matching Finder's "Show/Hide Preview" hotkey.
     static let mqdirTogglePreviewRequested =
         Notification.Name("mqdir.togglePreviewRequested")
-    /// View → As List / As Tree. Bound to ⌘⌥1 / ⌘⌥2 (Finder's ⌘1/⌘2
-    /// already belong to tab switching here, Safari-style).
+    /// View → As List / As Tree. No keyboard shortcut — ⌥⌘1–4 are
+    /// reserved for Window → Focus Pane, and toggling list/tree is rare
+    /// enough to live on the menu and the toolbar's segmented control.
     static let mqdirSetViewModeListRequested =
         Notification.Name("mqdir.setViewModeListRequested")
     static let mqdirSetViewModeTreeRequested =
@@ -58,6 +59,15 @@ extension Notification.Name {
     static let mqdirCutRequested = Notification.Name("mqdir.cutRequested")
     static let mqdirPasteRequested = Notification.Name("mqdir.pasteRequested")
     static let mqdirDeleteRequested = Notification.Name("mqdir.deleteRequested")
+    /// Posted by Edit → Delete Immediately (⌘⌥⌫). The receiver shows a
+    /// destructive NSAlert and, on confirm, calls
+    /// `FileManager.removeItem(at:)` per URL — bypassing the trash.
+    static let mqdirPermanentDeleteRequested =
+        Notification.Name("mqdir.permanentDeleteRequested")
+    /// Posted by Window → Focus Pane N (⌥⌘1–4). `userInfo["paneIndex"]`
+    /// is the zero-based pane index; MainWindowView ignores values
+    /// outside the active layout's pane count.
+    static let mqdirFocusPane = Notification.Name("mqdir.focusPane")
     /// File-selection actions added per Eagle/Finder shortcut parity.
     /// All operate on the focused pane's current selection except
     /// `mqdirCopyFolderPathRequested`, which copies the *current

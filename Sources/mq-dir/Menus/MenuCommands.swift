@@ -43,8 +43,17 @@ struct MenuCommands: Commands {
                 .keyboardShortcut("c", modifiers: .command)
             Button("Paste") { dispatch(text: #selector(NSText.paste(_:)), file: .mqdirPasteRequested) }
                 .keyboardShortcut("v", modifiers: .command)
-            Button("Delete") { dispatch(text: #selector(NSText.delete(_:)), file: .mqdirDeleteRequested) }
-                .keyboardShortcut(.delete, modifiers: [])
+            // ⌘⌫ matches Finder's "Move to Trash". The dispatch helper
+            // forwards plain Delete (text-edit selector) when a TextField
+            // is the first responder, but ⌘⌫ in a TextField is rare on
+            // macOS and harmlessly invokes NSText.delete(_:) on a
+            // selected range.
+            Button("Move to Trash") { dispatch(text: #selector(NSText.delete(_:)), file: .mqdirDeleteRequested) }
+                .keyboardShortcut(.delete, modifiers: .command)
+            // Permanent delete bypasses the trash — confirmed via
+            // NSAlert in the focused pane's view model.
+            Button("Delete Immediately\u{2026}") { post(.mqdirPermanentDeleteRequested) }
+                .keyboardShortcut(.delete, modifiers: [.command, .option])
             Divider()
             Button("Select All") { dispatch(text: #selector(NSText.selectAll(_:)), file: .mqdirSelectAllRequested) }
                 .keyboardShortcut("a", modifiers: .command)
@@ -89,10 +98,12 @@ struct MenuCommands: Commands {
             Button("Toggle Hidden Files") { post(.mqdirToggleHiddenFilesRequested) }
                 .keyboardShortcut(".", modifiers: [.command, .shift])
             Divider()
+            // As List / As Tree intentionally have no keyboard shortcut:
+            // ⌥⌘1–4 are claimed by Window → Focus Pane and view-mode
+            // toggling is rare enough to live on the menu and the
+            // toolbar's segmented control.
             Button("As List") { post(.mqdirSetViewModeListRequested) }
-                .keyboardShortcut("1", modifiers: [.command, .option])
             Button("As Tree") { post(.mqdirSetViewModeTreeRequested) }
-                .keyboardShortcut("2", modifiers: [.command, .option])
         }
 
         // Tab navigation lives under the standard Window menu, matching
@@ -115,6 +126,14 @@ struct MenuCommands: Commands {
             selectTabButton(index: 6, key: "7")
             selectTabButton(index: 7, key: "8")
             selectTabButton(index: 8, key: "9")
+            Divider()
+            // ⌥⌘1–4 move keyboard focus between the four panes in the
+            // current layout. Indices outside the active layout's pane
+            // count are silently dropped by MainWindowView.
+            focusPaneButton(index: 0, key: "1")
+            focusPaneButton(index: 1, key: "2")
+            focusPaneButton(index: 2, key: "3")
+            focusPaneButton(index: 3, key: "4")
         }
 
         CommandGroup(replacing: .help) {
@@ -128,6 +147,13 @@ struct MenuCommands: Commands {
             post(.mqdirSelectTabAtIndexRequested, userInfo: ["index": index])
         }
         .keyboardShortcut(key, modifiers: .command)
+    }
+
+    private func focusPaneButton(index: Int, key: KeyEquivalent) -> some View {
+        Button("Focus Pane \(index + 1)") {
+            post(.mqdirFocusPane, userInfo: ["paneIndex": index])
+        }
+        .keyboardShortcut(key, modifiers: [.command, .option])
     }
 
     private func stub(_ label: String) {

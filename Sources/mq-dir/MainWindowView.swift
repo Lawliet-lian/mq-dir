@@ -82,6 +82,7 @@ struct MainWindowView: View {
             ))
             .modifier(EditMenuNotifications(focusedPane: focusedPane))
             .modifier(EditFileActionsNotifications(focusedPane: focusedPane))
+            .modifier(PaneFocusNotifications(layout: layout, focusedPaneIndex: $focusedPaneIndex))
             .modifier(TabNotifications(focusedPaneVM: focusedPaneVM))
             .modifier(GlobalNotifications(
                 allPanes: [pane0, pane1, pane2, pane3],
@@ -684,6 +685,26 @@ private struct EditMenuNotifications: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirDeleteRequested)) { _ in
                 focusedPane.moveSelectionToTrash()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirPermanentDeleteRequested)) { _ in
+                focusedPane.permanentlyDeleteSelection()
+            }
+    }
+}
+
+/// ⌥⌘1–4 → focus pane index 0–3. Indices outside the active layout's
+/// pane count are silently ignored so a ⌥⌘4 in single-pane layout is a
+/// no-op rather than a hidden focus jump into a stashed pane.
+private struct PaneFocusNotifications: ViewModifier {
+    let layout: PaneLayout
+    @Binding var focusedPaneIndex: Int
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirFocusPane)) { note in
+                guard let index = note.userInfo?["paneIndex"] as? Int else { return }
+                guard index >= 0, index < layout.paneCount else { return }
+                focusedPaneIndex = index
             }
     }
 }

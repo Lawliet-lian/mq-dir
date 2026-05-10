@@ -101,6 +101,12 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// so we propagate via a Sendable flag instead of relying on Task.isCancelled.
     private var searchCancelToken: SearchCancelToken?
 
+    /// FSEvents-backed watcher for the active `folderURL`. Recreated
+    /// whenever the user navigates; the watcher's own `deinit` stops
+    /// the underlying stream, so dropping the reference is enough to
+    /// tear it down. ARC handles the final release on VM deinit.
+    private var directoryWatcher: DirectoryWatcher?
+
     /// Default initializer — fresh, empty pane (used by previews and the
     /// first launch when no persisted state exists).
     init() {}
@@ -129,6 +135,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             }
             self.folderURL = resolved
             reload()
+            updateDirectoryWatcher()
             // Pre-warm any expanded subtrees so the tree view doesn't
             // spend its first render flickering placeholders.
             for path in expandedPaths {
@@ -344,6 +351,24 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // User-driven navigation supersedes any pending restored selection.
         pendingRestoredSelection = []
         reload()
+        updateDirectoryWatcher()
+    }
+
+    /// Spin up (or replace) the FSEvents watcher for the active folder.
+    /// Called whenever `folderURL` changes — `init(state:)` post-restore
+    /// and every `navigate(to:)`. The watcher's `onChange` hops back to
+    /// the main actor and calls `reload()`, so external changes (a `cp`
+    /// finishing in Terminal, a download landing) appear without the
+    /// user pressing ⌘R.
+    private func updateDirectoryWatcher() {
+        directoryWatcher?.stop()
+        directoryWatcher = nil
+        guard let url = folderURL else { return }
+        directoryWatcher = DirectoryWatcher(url: url) { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.reload()
+            }
+        }
     }
 
     /// Debounced trigger fired by the `searchQuery` setter. Cancels any
@@ -788,6 +813,331 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let targets = selectedEntries
         guard !targets.isEmpty else { return }
         moveToTrash(targets)
+    }
+
+    /// Permanent delete with a destructive NSAlert confirmation.
+    /// Bypasses the trash via `FileManager.removeItem(at:)`. Used by
+    /// Edit → Delete Immediately (⌘⌥⌫) and the file context menu.
+    /// Failures are surfaced in a follow-up alert listing the items
+    /// that could not be removed so the operation is never silently
+    /// partial.
+    func permanentlyDelete(_ entries: [FileEntry]) {
+        guard !entries.isEmpty else { return }
+        let urls = entries.map(\.url)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = urls.count == 1
+            ? "Delete \u{201C}\(urls[0].lastPathComponent)\u{201D} permanently?"
+            : "Delete \(urls.count) items permanently?"
+        alert.informativeText = "These items will be deleted immediately. You can't undo this action."
+        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        Task {
+            let failures: [(URL, String)] = await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                var failed: [(URL, String)] = []
+                for url in urls {
+                    do {
+                        try fm.removeItem(at: url)
+                    } catch {
+                        failed.append((url, error.localizedDescription))
+                    }
+                }
+                return failed
+            }.value
+
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+
+            if !failures.isEmpty {
+                let report = NSAlert()
+                report.alertStyle = .warning
+                report.messageText = failures.count == 1
+                    ? "Couldn't delete \u{201C}\(failures[0].0.lastPathComponent)\u{201D}"
+                    : "Couldn't delete \(failures.count) items"
+                report.informativeText = failures
+                    .prefix(8)
+                    .map { "• \($0.0.lastPathComponent): \($0.1)" }
+                    .joined(separator: "\n")
+                report.addButton(withTitle: "OK")
+                report.runModal()
+            }
+        }
+    }
+
+    /// Selection wrapper for `permanentlyDelete(_:)` so the Edit menu
+    /// shortcut and the context menu share one path.
+    func permanentlyDeleteSelection() {
+        let targets = selectedEntries
+        guard !targets.isEmpty else { return }
+        permanentlyDelete(targets)
+    }
+
+    /// Compress every entry in `entries` into a single .zip in their
+    /// shared parent folder via /usr/bin/zip. Mirrors Finder's
+    /// "Compress N items": single selection becomes "<name>.zip"
+    /// (folder keeps its name; file drops its extension); multi-
+    /// selection becomes "Archive.zip". Collisions auto-rename to
+    /// "<name> 2.zip" / "Archive 2.zip" / … (Finder convention).
+    /// Cross-folder selections are rejected because zip's relative
+    /// pathing assumes a single working directory.
+    func compress(_ entries: [FileEntry]) {
+        let urls = entries.map(\.url)
+        guard !urls.isEmpty else { return }
+        guard let parent = urls.first?.deletingLastPathComponent() else { return }
+        let sameParent = urls.allSatisfy { $0.deletingLastPathComponent() == parent }
+        guard sameParent else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Can't compress items from different folders"
+            alert.informativeText = "Select items from one folder to compress them together."
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let stem: String
+        if entries.count == 1 {
+            let only = entries[0]
+            stem = only.isDirectory
+                ? only.url.lastPathComponent
+                : only.url.deletingPathExtension().lastPathComponent
+        } else {
+            stem = "Archive"
+        }
+        let destination = Self.uniqueZipDestination(in: parent, stem: stem)
+        let sourceNames = urls.map(\.lastPathComponent)
+
+        Task {
+            let failure: String? = await Task.detached(priority: .utility) {
+                do {
+                    try Self.runCompression(
+                        parent: parent,
+                        sources: sourceNames,
+                        destination: destination
+                    )
+                    return nil
+                } catch {
+                    return error.localizedDescription
+                }
+            }.value
+
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+
+            if let failure {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "Couldn't compress \u{201C}\(destination.lastPathComponent)\u{201D}"
+                alert.informativeText = failure
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+    }
+
+    /// Pick a non-existing `<stem>.zip` under `parent`, falling back
+    /// to "<stem> 2.zip", "<stem> 3.zip", … on collision (Finder
+    /// convention). Same shape as `uniqueExtractionDirectory`.
+    nonisolated static func uniqueZipDestination(in parent: URL, stem: String) -> URL {
+        let fm = FileManager.default
+        let primary = parent.appendingPathComponent("\(stem).zip")
+        if !fm.fileExists(atPath: primary.path) { return primary }
+        for n in 2...999 {
+            let candidate = parent.appendingPathComponent("\(stem) \(n).zip")
+            if !fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+        let stamp = Int(Date().timeIntervalSince1970)
+        return parent.appendingPathComponent("\(stem) \(stamp).zip")
+    }
+
+    /// Drive /usr/bin/zip with `currentDirectoryURL = parent` so the
+    /// archive stores relative paths (`foo/bar` rather than absolute
+    /// `/Users/…/foo/bar`). `-r` recurses into directories, `-y`
+    /// preserves symlinks rather than chasing them, `-q` silences
+    /// per-file progress so stderr only carries real errors.
+    nonisolated static func runCompression(
+        parent: URL,
+        sources: [String],
+        destination: URL
+    ) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        process.arguments = ["-r", "-y", "-q", destination.path] + sources
+        process.currentDirectoryURL = parent
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
+            let trimmed = String(data: stderrData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
+            throw NSError(
+                domain: "mq-dir.compress",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: summary]
+            )
+        }
+    }
+
+    /// True when every entry in `entries` is an archive we know how
+    /// to extract (case-insensitive .zip / .tar / .tgz / .tar.gz).
+    /// Used by the context menu to decide whether the "Extract"
+    /// item is enabled. An empty list returns false so the entry is
+    /// hidden when no rows are selected.
+    nonisolated static func canExtract(_ entries: [FileEntry]) -> Bool {
+        guard !entries.isEmpty else { return false }
+        return entries.allSatisfy { entry in
+            archiveKind(for: entry.url) != nil && !entry.isDirectory
+        }
+    }
+
+    /// Extract every supported archive in `entries` into a sibling
+    /// folder named after the archive stem. Each archive runs through
+    /// /usr/bin/ditto (zip) or /usr/bin/tar (tar/tgz/tar.gz) on a
+    /// detached utility task. After the batch finishes the VM hops
+    /// back to the main actor, broadcasts a filesystem change so any
+    /// open pane on the same folder picks up the new directory, and
+    /// surfaces a single NSAlert with the archives that failed.
+    func extractArchives(_ entries: [FileEntry]) {
+        let archives: [(URL, ArchiveKind)] = entries.compactMap { entry in
+            guard !entry.isDirectory,
+                  let kind = Self.archiveKind(for: entry.url) else { return nil }
+            return (entry.url, kind)
+        }
+        guard !archives.isEmpty else { return }
+
+        Task {
+            let failures: [(URL, String)] = await Task.detached(priority: .utility) {
+                var failed: [(URL, String)] = []
+                for (url, kind) in archives {
+                    let parent = url.deletingLastPathComponent()
+                    let stem = Self.archiveStem(for: url, kind: kind)
+                    let dest = Self.uniqueExtractionDirectory(in: parent, stem: stem)
+                    do {
+                        try Self.runExtraction(kind: kind, archive: url, destination: dest)
+                    } catch {
+                        failed.append((url, error.localizedDescription))
+                    }
+                }
+                return failed
+            }.value
+
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+
+            if !failures.isEmpty {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = failures.count == 1
+                    ? "Couldn't extract \u{201C}\(failures[0].0.lastPathComponent)\u{201D}"
+                    : "Couldn't extract \(failures.count) archives"
+                alert.informativeText = failures
+                    .prefix(8)
+                    .map { "• \($0.0.lastPathComponent): \($0.1)" }
+                    .joined(separator: "\n")
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+    }
+
+    /// Archive kinds we recognize; drives both the extension test in
+    /// `archiveKind(for:)` and the tool/argument selection in
+    /// `runExtraction`.
+    enum ArchiveKind {
+        case zip
+        case tar
+        case tarGz
+    }
+
+    /// Map a URL's extension to a known archive kind, case-insensitive.
+    /// Treats `.tgz` as gzip-compressed tar; `.tar.gz` is detected by
+    /// looking at the full filename, not just the last extension.
+    nonisolated static func archiveKind(for url: URL) -> ArchiveKind? {
+        let name = url.lastPathComponent.lowercased()
+        if name.hasSuffix(".zip") { return .zip }
+        if name.hasSuffix(".tar.gz") || name.hasSuffix(".tgz") { return .tarGz }
+        if name.hasSuffix(".tar") { return .tar }
+        return nil
+    }
+
+    /// Strip the archive extension from a filename so we can name the
+    /// extraction folder after the contents. ".tar.gz" gets both
+    /// extensions trimmed; everything else loses the last one.
+    nonisolated static func archiveStem(for url: URL, kind: ArchiveKind) -> String {
+        let base = url.lastPathComponent
+        switch kind {
+        case .tarGz where base.lowercased().hasSuffix(".tar.gz"):
+            return String(base.dropLast(".tar.gz".count))
+        case .zip, .tar, .tarGz:
+            return url.deletingPathExtension().lastPathComponent
+        }
+    }
+
+    /// Pick a non-existing folder under `parent` named `stem`, falling
+    /// back to "stem 2", "stem 3", … on collision (Finder convention).
+    /// Caps at 999 attempts and finally appends a timestamp so the
+    /// extraction never silently overwrites.
+    nonisolated static func uniqueExtractionDirectory(in parent: URL, stem: String) -> URL {
+        let fm = FileManager.default
+        let primary = parent.appendingPathComponent(stem)
+        if !fm.fileExists(atPath: primary.path) { return primary }
+        for n in 2...999 {
+            let candidate = parent.appendingPathComponent("\(stem) \(n)")
+            if !fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+        let stamp = Int(Date().timeIntervalSince1970)
+        return parent.appendingPathComponent("\(stem) \(stamp)")
+    }
+
+    /// Drive ditto/tar against the archive. ditto's -x -k handles zip
+    /// (preserves resource forks); tar's -xf handles plain tar and
+    /// transparently picks up gzip via -xzf for .tar.gz/.tgz.
+    /// `destination` must NOT exist yet — both tools create it with
+    /// the right mode bits when given a fresh path.
+    nonisolated static func runExtraction(
+        kind: ArchiveKind,
+        archive: URL,
+        destination: URL
+    ) throws {
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let process = Process()
+        let stderr = Pipe()
+        process.standardError = stderr
+        process.standardOutput = Pipe()
+        switch kind {
+        case .zip:
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            process.arguments = ["-x", "-k", archive.path, destination.path]
+        case .tar:
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+            process.arguments = ["-xf", archive.path, "-C", destination.path]
+        case .tarGz:
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+            process.arguments = ["-xzf", archive.path, "-C", destination.path]
+        }
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            // readToEnd() is throws -> Data?, so try? wraps it as
+            // Data??; flatten with ?? nil before falling back to
+            // an empty Data() so the next String(data:) sees a
+            // single-level optional.
+            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
+            let trimmed = String(data: stderrData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
+            throw NSError(
+                domain: "mq-dir.extract",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: summary]
+            )
+        }
     }
 
     /// If `target` already exists, append " 2", " 3", … before the

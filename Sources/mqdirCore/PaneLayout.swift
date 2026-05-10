@@ -32,10 +32,10 @@ enum PaneLayout: Int, CaseIterable, Identifiable, Codable, Sendable {
 
     var help: String {
         switch self {
-        case .one:  "Single pane (⌥⌘1)"
-        case .twoH: "Two panes — side by side (⌥⌘2)"
-        case .twoV: "Two panes — stacked (⌥⌘3)"
-        case .four: "Four panes — 2×2 grid (⌥⌘4)"
+        case .one:  "Single pane"
+        case .twoH: "Two panes — side by side"
+        case .twoV: "Two panes — stacked"
+        case .four: "Four panes — 2×2 grid"
         }
     }
 }
