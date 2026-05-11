@@ -298,12 +298,11 @@ private struct TreeRow: View {
             }
             .frame(width: 10, height: 10)
 
-            Image(systemName: FileIconStyle.symbol(for: entry))
-                .font(.system(size: 11))
-                .foregroundStyle(isSelected && paneIsFocused
-                                 ? Color.white
-                                 : FileIconStyle.tint(for: entry))
-                .frame(width: 14)
+            FileRowIcon(
+                entry: entry,
+                isSelected: isSelected,
+                paneIsFocused: paneIsFocused
+            )
 
             if isRenaming {
                 TextField("", text: $renameDraft)

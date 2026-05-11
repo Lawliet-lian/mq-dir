@@ -31,28 +31,56 @@ enum TagColor {
     }
 }
 
-/// Compact dot rendered next to file names when a Finder colour
-/// label is set. ~7 pt diameter so it sits inline without growing
-/// the row height. Renders nothing for entries without a label.
+/// Compact swatches rendered next to file names for every Finder
+/// colour tag a row carries. ~7 pt diameter so a single swatch sits
+/// inline; multi-coloured rows stack horizontally with a 2 pt gap,
+/// matching Finder's column-view treatment. Renders nothing when no
+/// tag has a colour assigned — uncoloured custom tags still surface
+/// through the tooltip so the user can see they exist.
 struct TagDotView: View {
     let entry: FileEntry
 
     var body: some View {
-        if let color = TagColor.color(for: entry) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-                .help(entry.tagNames.joined(separator: ", "))
+        let swatches = colouredSwatches
+        if !swatches.isEmpty {
+            HStack(spacing: 2) {
+                ForEach(Array(swatches.enumerated()), id: \.offset) { _, color in
+                    Circle()
+                        .fill(color)
+                        .frame(width: 7, height: 7)
+                }
+            }
+            .help(entry.tagNames.joined(separator: ", "))
         }
+    }
+
+    /// Resolve every per-tag colour the row carries, in declaration
+    /// order, deduplicating consecutive same-colour entries so two
+    /// "Red"-tagged rows don't show two identical dots. Falls back to
+    /// `labelNumber` when `tagColors` is empty — covers entries that
+    /// somehow lack the parsed xattr but still carry a primary label.
+    private var colouredSwatches: [Color] {
+        let indices: [Int]
+        if entry.tagColors.isEmpty {
+            indices = entry.labelNumber > 0 ? [entry.labelNumber] : []
+        } else {
+            indices = entry.tagColors
+        }
+        var seen = Set<Int>()
+        var colours: [Color] = []
+        for index in indices {
+            guard index > 0, seen.insert(index).inserted,
+                  let colour = TagColor.color(forLabel: index)
+            else { continue }
+            colours.append(colour)
+        }
+        return colours
     }
 }
 
 /// Lightweight projection used by the sidebar's "Tags" section —
 /// one entry per unique tag *name* observed in a folder, paired
-/// with the colour-label index of the first row that carried that
-/// name. macOS attaches a single primary label per file, so a
-/// row's second/third tag names land here with `labelNumber: 0`
-/// (no swatch) until the user explicitly recolours them.
+/// with the colour-label index from that name's own xattr entry.
 struct TagSummary: Hashable, Identifiable {
     let name: String
     let labelNumber: Int
@@ -61,16 +89,25 @@ struct TagSummary: Hashable, Identifiable {
 
 extension Sequence where Element == FileEntry {
     /// Walk the sequence, collecting unique tag names in first-
-    /// appearance order. Pairs the leading tag of each entry with
-    /// `entry.labelNumber` so the swatch beside that tag matches
-    /// what Finder draws for the row.
+    /// appearance order. The swatch index comes from `tagColors`
+    /// (parsed from the per-tag xattr) so a tag like "Red"
+    /// appearing as a row's second tag still gets its real swatch
+    /// instead of dropping to zero like the old labelNumber-only
+    /// path used to.
     func uniqueTagSummaries() -> [TagSummary] {
         var seen = Set<String>()
         var result: [TagSummary] = []
         for entry in self {
             for (offset, name) in entry.tagNames.enumerated() {
                 guard seen.insert(name).inserted else { continue }
-                let label = offset == 0 ? entry.labelNumber : 0
+                let label: Int
+                if offset < entry.tagColors.count {
+                    label = entry.tagColors[offset]
+                } else if offset == 0 {
+                    label = entry.labelNumber
+                } else {
+                    label = 0
+                }
                 result.append(TagSummary(name: name, labelNumber: label))
             }
         }

@@ -33,10 +33,7 @@ struct PreviewPanel: View {
     private var header: some View {
         HStack(spacing: 6) {
             if let entry = focusedEntry {
-                Image(systemName: FileIconStyle.symbol(for: entry))
-                    .font(.system(size: 11))
-                    .foregroundStyle(FileIconStyle.tint(for: entry))
-                    .frame(width: 14)
+                FileRowIcon(entry: entry)
                 Text(entry.name)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.Color.label)

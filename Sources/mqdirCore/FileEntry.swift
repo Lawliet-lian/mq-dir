@@ -20,6 +20,23 @@ struct FileEntry: Identifiable, Hashable, Sendable {
     /// drop their non-primary labels here but still carry the
     /// per-name tags in `tagNames`.
     let labelNumber: Int
+    /// Per-tag colour indices aligned with `tagNames` — `tagColors[i]`
+    /// is the Finder colour of `tagNames[i]`. macOS stores these as
+    /// "Name\n<0-7>" entries inside the
+    /// `com.apple.metadata:_kMDItemUserTags` xattr; this field is the
+    /// parsed projection. `0` here means "no colour", same convention
+    /// as `labelNumber`. When the array is empty the row carries no
+    /// tags at all; when it has the same count as `tagNames` the
+    /// dot-renderer paints one swatch per entry.
+    let tagColors: [Int]
+    /// True when a folder carries a custom icon set via Finder's
+    /// Get Info → drag image flow (which writes an `Icon\r` file
+    /// inside the folder). The row icon view swaps the SF Symbol for
+    /// `NSWorkspace.shared.icon(forFile:)` when this is set so the
+    /// user's chosen image actually appears. Always `false` for
+    /// non-directory entries — file custom icons live in the resource
+    /// fork and aren't covered yet.
+    let hasCustomIcon: Bool
 
     init(
         url: URL,
@@ -30,7 +47,9 @@ struct FileEntry: Identifiable, Hashable, Sendable {
         kind: String,
         isHidden: Bool,
         tagNames: [String] = [],
-        labelNumber: Int = 0
+        labelNumber: Int = 0,
+        tagColors: [Int] = [],
+        hasCustomIcon: Bool = false
     ) {
         self.url = url
         self.name = name
@@ -41,6 +60,8 @@ struct FileEntry: Identifiable, Hashable, Sendable {
         self.isHidden = isHidden
         self.tagNames = tagNames
         self.labelNumber = labelNumber
+        self.tagColors = tagColors
+        self.hasCustomIcon = hasCustomIcon
     }
 
     // URL-based id avoids collisions on case-insensitive APFS volumes where

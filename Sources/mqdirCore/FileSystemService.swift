@@ -32,6 +32,9 @@ struct FileSystemService {
             let values = try childURL.resourceValues(forKeys: keys)
             let isDirectory = values.isDirectory ?? false
             let name = childURL.lastPathComponent
+            let tagNames = values.tagNames ?? []
+            let tagColors = Self.tagColors(for: childURL, names: tagNames)
+            let hasCustomIcon = isDirectory && Self.folderHasCustomIcon(at: childURL)
 
             return FileEntry(
                 url: childURL,
@@ -41,8 +44,10 @@ struct FileSystemService {
                 modificationDate: values.contentModificationDate,
                 kind: kind(for: childURL, isDirectory: isDirectory),
                 isHidden: values.isHidden ?? name.hasPrefix("."),
-                tagNames: values.tagNames ?? [],
-                labelNumber: values.labelNumber ?? 0
+                tagNames: tagNames,
+                labelNumber: values.labelNumber ?? 0,
+                tagColors: tagColors,
+                hasCustomIcon: hasCustomIcon
             )
         }
     }
@@ -112,6 +117,9 @@ struct FileSystemService {
             guard nameMatches || tagMatches else { continue }
 
             let isDirectory = values?.isDirectory ?? false
+            let tagNames = values?.tagNames ?? []
+            let tagColors = Self.tagColors(for: childURL, names: tagNames)
+            let hasCustomIcon = isDirectory && Self.folderHasCustomIcon(at: childURL)
             results.append(FileEntry(
                 url: childURL,
                 name: name,
@@ -120,12 +128,74 @@ struct FileSystemService {
                 modificationDate: values?.contentModificationDate,
                 kind: kind(for: childURL, isDirectory: isDirectory),
                 isHidden: values?.isHidden ?? name.hasPrefix("."),
-                tagNames: values?.tagNames ?? [],
-                labelNumber: values?.labelNumber ?? 0
+                tagNames: tagNames,
+                labelNumber: values?.labelNumber ?? 0,
+                tagColors: tagColors,
+                hasCustomIcon: hasCustomIcon
             ))
         }
 
         return results
+    }
+
+    /// Pull per-tag colour indices from `com.apple.metadata:_kMDItemUserTags`.
+    /// macOS stores Finder tags there as a binary plist of strings, each
+    /// either `"TagName"` (no colour) or `"TagName\n<0-7>"` (coloured).
+    /// `URLResourceKey.labelNumber` only surfaces the file's *primary*
+    /// colour, which is why a row tagged Red+Blue used to render two
+    /// identical grey dots — the second tag's colour was lost. Returns
+    /// an array aligned with `names` so the dot renderer can paint each
+    /// tag in its real Finder swatch.
+    static func tagColors(for url: URL, names: [String]) -> [Int] {
+        guard !names.isEmpty else { return [] }
+        let parsed = parseUserTagsXattr(for: url)
+        guard !parsed.isEmpty else {
+            return Array(repeating: 0, count: names.count)
+        }
+        let colourByName = Dictionary(parsed, uniquingKeysWith: { first, _ in first })
+        return names.map { colourByName[$0] ?? 0 }
+    }
+
+    /// Decode the raw xattr into `(name, colourIndex)` pairs. Defensive
+    /// against malformed data — an unparseable index collapses to `0`
+    /// (no colour) rather than blowing up the whole enumeration.
+    private static func parseUserTagsXattr(for url: URL) -> [(String, Int)] {
+        let path = url.path
+        let key = "com.apple.metadata:_kMDItemUserTags"
+        let length = getxattr(path, key, nil, 0, 0, 0)
+        guard length > 0 else { return [] }
+        var data = Data(count: length)
+        let read = data.withUnsafeMutableBytes { buf -> ssize_t in
+            guard let base = buf.baseAddress else { return -1 }
+            return getxattr(path, key, base, length, 0, 0)
+        }
+        guard read == length else { return [] }
+        guard let raw = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let entries = raw as? [String]
+        else { return [] }
+        return entries.map { entry -> (String, Int) in
+            // Split once on the first newline. macOS only ever stores
+            // a single trailing "\n<digit>"; treating the join as the
+            // tag name keeps custom names containing newlines intact
+            // even though Finder's UI doesn't expose that path.
+            guard let newline = entry.firstIndex(of: "\n") else {
+                return (entry, 0)
+            }
+            let name = String(entry[..<newline])
+            let suffix = entry[entry.index(after: newline)...]
+            let colour = Int(suffix).flatMap { (0...7).contains($0) ? $0 : nil } ?? 0
+            return (name, colour)
+        }
+    }
+
+    /// Cheap presence check for the `Icon\r` sentinel macOS writes inside
+    /// any folder whose icon the user changed via Get Info → drag image.
+    /// One `stat(2)` per folder; we deliberately don't load the actual
+    /// icon here — that work belongs to the row view via
+    /// `NSWorkspace.shared.icon(forFile:)`, which caches internally.
+    static func folderHasCustomIcon(at url: URL) -> Bool {
+        let iconPath = url.appendingPathComponent("Icon\r").path
+        return FileManager.default.fileExists(atPath: iconPath)
     }
 
     private func kind(for url: URL, isDirectory: Bool) -> String {

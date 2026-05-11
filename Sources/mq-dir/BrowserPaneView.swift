@@ -1038,12 +1038,11 @@ private struct FileEntryRow: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 7) {
-                Image(systemName: FileIconStyle.symbol(for: entry))
-                    .font(.system(size: 11))
-                    .foregroundStyle(isSelected && paneIsFocused
-                                     ? Color.white
-                                     : FileIconStyle.tint(for: entry))
-                    .frame(width: 14)
+                FileRowIcon(
+                    entry: entry,
+                    isSelected: isSelected,
+                    paneIsFocused: paneIsFocused
+                )
                 VStack(alignment: .leading, spacing: 1) {
                     if isRenaming {
                         TextField("", text: $renameDraft)
