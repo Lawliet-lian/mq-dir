@@ -135,9 +135,17 @@ struct BrowserPaneView: View {
         .onTapGesture { onFocus() }
         .onChange(of: tabDragCoordinator.sourceTabID) { _, new in
             // Drag finished (drop or cancel) → wipe any leftover
-            // insertion marker, no matter which delegate's events fired
-            // last.
-            if new == nil { tabDropInsertionIndex = nil }
+            // insertion marker AND restore the dragged tab's opacity.
+            // The `draggingTabID = nil` reset used to live only inside
+            // `TabReorderDropDelegate.performDrop`, so a drop landing
+            // on a non-tab target (e.g. Favorites in the sidebar)
+            // left the source tab stuck at 0.35 opacity. The
+            // coordinator's `sourceTabID` is now the single source of
+            // truth that every drop target clears via `clear()`.
+            if new == nil {
+                tabDropInsertionIndex = nil
+                draggingTabID = nil
+            }
         }
     }
 
@@ -379,6 +387,13 @@ struct BrowserPaneView: View {
         // `TabDragCoordinator.shared` (which knows source pane +
         // tab id) rather than the pasteboard payload — the string is
         // only here to satisfy SwiftUI's drop-type matching.
+        //
+        // The tab's folder URL also rides along (same `.ownProcess`
+        // visibility) so dropping a tab onto the sidebar's Favorites
+        // section adds that folder — Favorites' existing drop handler
+        // already accepts `public.file-url`. Tab-reorder drop targets
+        // only match `plainText`, so the extra URL representation is
+        // a no-op for them.
         .onDrag {
             draggingTabID = id
             TabDragCoordinator.shared.begin(sourcePaneIndex: index, tabID: id)
@@ -387,6 +402,14 @@ struct BrowserPaneView: View {
                 String(describing: id) as NSString,
                 visibility: .ownProcess
             )
+            if let folderURL = tab.folderURL {
+                // Default `.all` visibility so external destinations
+                // (Finder, Terminal, etc.) can also receive the URL
+                // when the user drags a tab outside the window — the
+                // tab id NSString above stays `.ownProcess` so the
+                // raw `ObjectIdentifier(0x…)` literal never escapes.
+                provider.registerObject(folderURL as NSURL, visibility: .all)
+            }
             return provider
         }
         .background(

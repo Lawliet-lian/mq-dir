@@ -709,37 +709,43 @@ struct SidebarView: View {
 
     // MARK: Drop dispatch
 
-    /// Routes incoming drops. Plain-text payloads are treated as a favorite
-    /// reorder (the dragged row's UUID); file URLs are treated as a new
-    /// favorite to add at the given insertion point.
+    /// Routes incoming drops. Resolves URLs first so tab drags (which
+    /// carry both a `.ownProcess` plain-text id *and* a file-URL) land
+    /// on the add-favorite path; the UUID-string fallback only fires
+    /// when no URL is present, which keeps favorite-row reorder
+    /// working. The previous order checked plain-text first and would
+    /// silently swallow tab drops because `UUID(uuidString:)` rejected
+    /// the `ObjectIdentifier(0x…)` literal.
     private func handleDrop(providers: [NSItemProvider], before targetID: Favorite.ID?) {
-        // Try internal reorder first — if any provider has plain text,
-        // assume it's our UUID payload and skip the file-URL path.
-        if let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) }) {
-            provider.loadObject(ofClass: NSString.self) { obj, _ in
-                guard let str = obj as? String,
-                      let uuid = UUID(uuidString: str)
-                else { return }
-                Task { @MainActor in
-                    viewModel.move(sourceID: uuid, before: targetID)
-                }
-            }
-            return
-        }
-
-        // External folder drop → resolve URLs and append (or insert before
-        // `targetID` once added; we always append here for simplicity, then
-        // reorder so the newest entry lands at the requested slot).
         Task {
             let urls = await DragDropSupport.resolveURLs(from: providers)
-            await MainActor.run {
-                for url in urls {
-                    viewModel.add(url: url)
-                    if let targetID,
-                       let newest = viewModel.favorites.last,
-                       newest.id != targetID
-                    {
-                        viewModel.move(sourceID: newest.id, before: targetID)
+            if !urls.isEmpty {
+                await MainActor.run {
+                    for url in urls {
+                        viewModel.add(url: url)
+                        if let targetID,
+                           let newest = viewModel.favorites.last,
+                           newest.id != targetID
+                        {
+                            viewModel.move(sourceID: newest.id, before: targetID)
+                        }
+                    }
+                    // No-op when the drop didn't originate from a tab;
+                    // when it did, clearing here flips
+                    // `BrowserPaneView`'s opacity overlay back on so
+                    // the source tab stops looking disabled.
+                    TabDragCoordinator.shared.clear()
+                }
+                return
+            }
+            // No URLs — fall back to favorite reorder via UUID payload.
+            if let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) }) {
+                provider.loadObject(ofClass: NSString.self) { obj, _ in
+                    guard let str = obj as? String,
+                          let uuid = UUID(uuidString: str)
+                    else { return }
+                    Task { @MainActor in
+                        viewModel.move(sourceID: uuid, before: targetID)
                     }
                 }
             }
