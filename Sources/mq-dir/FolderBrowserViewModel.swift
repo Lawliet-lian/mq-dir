@@ -15,7 +15,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     @Published private(set) var folderURL: URL?
-    @Published private(set) var entries: [FileEntry] = []
+    @Published private(set) var entries: [FileEntry] = [] {
+        didSet { rebuildEntriesIndex() }
+    }
     @Published var selection: Set<FileEntry.ID> = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
@@ -68,7 +70,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// because the user only expands what they actively browse. The
     /// setter is open so `TreeFileListView` can mirror the root entries
     /// into the cache without a dedicated method on the VM.
-    @Published var treeChildren: [String: [FileEntry]] = [:]
+    @Published var treeChildren: [String: [FileEntry]] = [:] {
+        didSet { rebuildEntriesIndex() }
+    }
     @Published private(set) var backStack: [URL] = []
     @Published private(set) var forwardStack: [URL] = []
     @Published private(set) var selectionAnchor: FileEntry.ID?
@@ -222,6 +226,12 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         return findEntry(id: selectedID)
     }
 
+    /// O(1) lookup index over `entries` plus every cached `treeChildren`
+    /// subtree. Rebuilt by `rebuildEntriesIndex()` on every mutation of
+    /// either source. The previous linear scan turned bulk-selection
+    /// (`Cmd+A` on ~1000 entries) into O(M×N) and hung the app.
+    private var entriesByID: [FileEntry.ID: FileEntry] = [:]
+
     /// Look up a `FileEntry` by id across both the flat root listing
     /// (`entries`) and every cached tree subtree (`treeChildren`). Tree
     /// view selections live deep in `treeChildren`, never in
@@ -229,15 +239,21 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// (rename, etc.) needs this wider search to avoid silently
     /// no-op'ing in tree mode.
     func findEntry(id: FileEntry.ID) -> FileEntry? {
-        if let hit = entries.first(where: { $0.id == id }) {
-            return hit
+        entriesByID[id]
+    }
+
+    private func rebuildEntriesIndex() {
+        var index: [FileEntry.ID: FileEntry] = [:]
+        index.reserveCapacity(entries.count)
+        for entry in entries {
+            index[entry.id] = entry
         }
         for children in treeChildren.values {
-            if let hit = children.first(where: { $0.id == id }) {
-                return hit
+            for entry in children {
+                index[entry.id] = entry
             }
         }
-        return nil
+        entriesByID = index
     }
 
     /// What the file list should render. Recursive `searchResults` while a

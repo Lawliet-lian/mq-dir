@@ -31,9 +31,13 @@ extension View {
     /// the existing `appKitFileDrag(...)` modifier — that one drives
     /// the active-window path via SwiftUI gestures; this one takes
     /// over only when the window is in the background.
+    ///
+    /// `multiURLs` is a provider closure so the row body never has to
+    /// build the full multi-selection up-front — that array gets
+    /// resolved lazily at drag-start, keeping per-row body cost flat.
     func inactiveDragSource(
         primary: URL,
-        multiURLs: [URL] = [],
+        multiURLs: @escaping () -> [URL] = { [] },
         onClick: ((NSEvent) -> Void)? = nil,
         onDoubleClick: ((NSEvent) -> Void)? = nil
     ) -> some View {
@@ -50,7 +54,7 @@ extension View {
 
 private struct InactiveDragSourceRepresentable: NSViewRepresentable {
     let primary: URL
-    let multiURLs: [URL]
+    let multiURLs: () -> [URL]
     let onClick: ((NSEvent) -> Void)?
     let onDoubleClick: ((NSEvent) -> Void)?
 
@@ -77,7 +81,7 @@ private struct InactiveDragSourceRepresentable: NSViewRepresentable {
 
 private final class InactiveDragSourceNSView: NSView, NSDraggingSource {
     private var primary: URL = URL(fileURLWithPath: "/")
-    private var multiURLs: [URL] = []
+    private var multiURLsProvider: () -> [URL] = { [] }
     private var onClick: ((NSEvent) -> Void)?
     private var onDoubleClick: ((NSEvent) -> Void)?
 
@@ -86,12 +90,12 @@ private final class InactiveDragSourceNSView: NSView, NSDraggingSource {
 
     func configure(
         primary: URL,
-        multiURLs: [URL],
+        multiURLs: @escaping () -> [URL],
         onClick: ((NSEvent) -> Void)?,
         onDoubleClick: ((NSEvent) -> Void)?
     ) {
         self.primary = primary
-        self.multiURLs = multiURLs
+        self.multiURLsProvider = multiURLs
         self.onClick = onClick
         self.onDoubleClick = onDoubleClick
     }
@@ -147,7 +151,8 @@ private final class InactiveDragSourceNSView: NSView, NSDraggingSource {
     }
 
     private func startDrag(with event: NSEvent) {
-        let urls: [URL] = multiURLs.count > 1 ? multiURLs : [primary]
+        let resolvedMulti = multiURLsProvider()
+        let urls: [URL] = resolvedMulti.count > 1 ? resolvedMulti : [primary]
         let cursorInView = convert(event.locationInWindow, from: nil)
         let iconSize = NSSize(width: 32, height: 32)
         var items: [NSDraggingItem] = []

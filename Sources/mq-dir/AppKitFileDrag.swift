@@ -15,14 +15,18 @@ import UniformTypeIdentifiers
 // AppKit `NSDraggingSession` driven by an `NSPasteboardItem` we own,
 // with no promise types, so receivers see the real file URL.
 extension View {
-    func appKitFileDrag(primary: URL, multiURLs: [URL] = []) -> some View {
+    /// `multiURLs` is a provider rather than a `[URL]` so the row's view
+    /// body never has to materialise the whole multi-selection just to
+    /// hand it to a drag modifier that is dormant 99% of the time. The
+    /// closure runs at drag-start, off the SwiftUI render hot path.
+    func appKitFileDrag(primary: URL, multiURLs: @escaping () -> [URL] = { [] }) -> some View {
         modifier(AppKitFileDragModifier(primary: primary, multiURLs: multiURLs))
     }
 }
 
 private struct AppKitFileDragModifier: ViewModifier {
     let primary: URL
-    let multiURLs: [URL]
+    let multiURLs: () -> [URL]
 
     @State private var dragInFlight = false
 
@@ -49,7 +53,8 @@ private struct AppKitFileDragModifier: ViewModifier {
         // files" if we put one NSPasteboardItem per file. Stuffing the
         // extra URLs into the private mqdirSelection type is enough for
         // pane↔pane drops within mq-dir but not for anyone else.
-        let urls: [URL] = multiURLs.count > 1 ? multiURLs : [primary]
+        let resolvedMulti = multiURLs()
+        let urls: [URL] = resolvedMulti.count > 1 ? resolvedMulti : [primary]
 
         let iconSize = NSSize(width: 32, height: 32)
         let cursorInView = view.convert(event.locationInWindow, from: nil)

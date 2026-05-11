@@ -907,9 +907,17 @@ struct BrowserPaneView: View {
         // of a multi-selection (internal pane↔pane).
         .appKitFileDrag(
             primary: entry.url,
-            multiURLs: (isSelected && viewModel.selection.count > 1)
-                ? viewModel.selectedURLs
-                : []
+            // Lazy: resolving `selectedURLs` is O(M) at drag-start, and
+            // doing it inside the row body would run it for every
+            // selected visible row on every selection change. Cmd+A on
+            // a ~1000-entry folder used to lock the main actor here.
+            multiURLs: { [weak viewModel] in
+                guard let viewModel,
+                      isSelected,
+                      viewModel.selection.count > 1
+                else { return [] }
+                return viewModel.selectedURLs
+            }
         )
         // Mirrors the SwiftUI tap + drag gestures above for the
         // inactive-window path: when mq-dir is in the background, the
@@ -918,9 +926,13 @@ struct BrowserPaneView: View {
         // drag itself.
         .inactiveDragSource(
             primary: entry.url,
-            multiURLs: (isSelected && viewModel.selection.count > 1)
-                ? viewModel.selectedURLs
-                : [],
+            multiURLs: { [weak viewModel] in
+                guard let viewModel,
+                      isSelected,
+                      viewModel.selection.count > 1
+                else { return [] }
+                return viewModel.selectedURLs
+            },
             onClick: { event in
                 if !isFocused { onFocus() }
                 let mods = event.modifierFlags
