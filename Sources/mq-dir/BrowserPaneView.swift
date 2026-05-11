@@ -771,14 +771,19 @@ struct BrowserPaneView: View {
                 // currently-focused pane's list claims keyboard input.
                 if newValue { listFocused = true }
             }
-            .onKeyPress(.downArrow) {
+            // Read Shift off the captured `KeyPress` instead of
+            // `NSEvent.modifierFlags` — the latter is "modifiers right
+            // now" and races the key handler, so Shift+↑/↓ range
+            // selection was unreliable. The `phases: [.down]` filter
+            // keeps repeats from re-firing per-keystroke.
+            .onKeyPress(.downArrow, phases: [.down]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
-                handleArrowKey(by: 1, proxy: proxy)
+                handleArrowKey(by: 1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
             }
-            .onKeyPress(.upArrow) {
+            .onKeyPress(.upArrow, phases: [.down]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
-                handleArrowKey(by: -1, proxy: proxy)
+                handleArrowKey(by: -1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
             }
             .onKeyPress(.return) {
@@ -832,13 +837,11 @@ struct BrowserPaneView: View {
         }
     }
 
-    /// Shared body for ↑/↓ key presses on the file list. Honors Shift to
-    /// extend the selection, focuses this pane if it wasn't already, and
-    /// scrolls the new anchor into view so keyboard nav off-screen still
-    /// keeps the user oriented.
-    private func handleArrowKey(by offset: Int, proxy: ScrollViewProxy) {
+    /// Shared body for ↑/↓ key presses on the file list. `extending`
+    /// comes from the `KeyPress.modifiers` captured by `onKeyPress` so
+    /// Shift+arrow walks reliably without polling `NSEvent` post hoc.
+    private func handleArrowKey(by offset: Int, extending: Bool, proxy: ScrollViewProxy) {
         if !isFocused { onFocus() }
-        let extending = NSEvent.modifierFlags.contains(.shift)
         viewModel.moveSelection(by: offset, extending: extending)
         if let anchor = viewModel.selectionAnchor {
             proxy.scrollTo(anchor, anchor: .center)

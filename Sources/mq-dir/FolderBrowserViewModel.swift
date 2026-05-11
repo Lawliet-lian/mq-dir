@@ -73,9 +73,28 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     @Published var treeChildren: [String: [FileEntry]] = [:] {
         didSet { rebuildEntriesIndex() }
     }
-    @Published private(set) var backStack: [URL] = []
-    @Published private(set) var forwardStack: [URL] = []
+    @Published private(set) var backStack: [NavigationFrame] = []
+    @Published private(set) var forwardStack: [NavigationFrame] = []
     @Published private(set) var selectionAnchor: FileEntry.ID?
+    /// Trailing edge of the active range-selection — Finder calls this
+    /// the "cursor". Shift+arrow / Shift-click advance the cursor while
+    /// the anchor stays put, so `selection = range[anchor, cursor]`.
+    /// Splitting it from `selectionAnchor` is what makes successive
+    /// Shift+↓ presses *grow* the selection instead of capping at two
+    /// rows (`currentIdx` would otherwise stay glued to the anchor).
+    @Published private(set) var selectionCursor: FileEntry.ID?
+
+    /// One entry in the back/forward history. Carries the folder URL
+    /// the user was on AND the selection they had at the time, so
+    /// `goBack()`/`goForward()` restores both. The selection lives as
+    /// `[String]` paths (not `Set<FileEntry.ID>`) because IDs change
+    /// across re-enumerations — paths survive a fresh `reload()` via
+    /// the same `pendingRestoredSelection` matching the launch
+    /// restore uses.
+    struct NavigationFrame: Equatable, Sendable {
+        let url: URL
+        let selectionPaths: [String]
+    }
 
     /// Restored selection paths waiting to be matched against the next
     /// successful `entries` enumeration. Cleared after the match runs.
@@ -321,39 +340,55 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// latest folder reference without a separate "save bookmark" step.
     func openFolder(_ url: URL) {
         if let current = folderURL, current != url {
-            backStack.append(current)
+            backStack.append(currentFrame())
         }
         forwardStack.removeAll()
         // Refresh the durable bookmark for persistence. A failure here is
         // non-fatal — we just won't be able to restore this folder across
         // launches in sandboxed builds, which matches non-sandboxed today.
         currentBookmark = try? PersistenceService.makeBookmark(for: url)
-        navigate(to: url)
+        navigate(to: url, restoring: [])
     }
 
     func goBack() {
         guard let previous = backStack.popLast() else { return }
-        if let current = folderURL {
-            forwardStack.append(current)
+        if folderURL != nil {
+            forwardStack.append(currentFrame())
         }
-        navigate(to: previous)
+        navigate(to: previous.url, restoring: previous.selectionPaths)
     }
 
     func goForward() {
         guard let next = forwardStack.popLast() else { return }
-        if let current = folderURL {
-            backStack.append(current)
+        if folderURL != nil {
+            backStack.append(currentFrame())
         }
-        navigate(to: next)
+        navigate(to: next.url, restoring: next.selectionPaths)
+    }
+
+    /// Snapshot of the current folder + selection for the back/forward
+    /// stacks. `selectedURLs` already resolves through the O(1) entry
+    /// index added for the bulk-select perf fix, so capturing it here
+    /// stays cheap even on large multi-selections.
+    private func currentFrame() -> NavigationFrame {
+        NavigationFrame(
+            url: folderURL ?? URL(fileURLWithPath: "/"),
+            selectionPaths: selectedURLs.map(\.path)
+        )
     }
 
     /// Bare navigation that does NOT touch back/forward stacks. Used by
     /// `goBack`, `goForward`, and the initial `openFolder` after stack
     /// bookkeeping. Resets selection and triggers a reload.
     ///
+    /// `restoring` queues a per-path selection set for the next
+    /// successful enumeration so back/forward navigation lands the
+    /// user back on the rows they had picked — empty for a fresh
+    /// `openFolder()` so user-driven nav still starts clean.
+    ///
     /// Balances any outstanding security-scope access on the previous URL
     /// before assigning the new one — required for sandboxed builds.
-    private func navigate(to url: URL) {
+    private func navigate(to url: URL, restoring selectionPaths: [String]) {
         if hasSecurityScopeAccess, let previous = folderURL, previous != url {
             previous.stopAccessingSecurityScopedResource()
             hasSecurityScopeAccess = false
@@ -364,8 +399,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // Drop the per-folder filter so a query typed in the previous folder
         // doesn't bleed into the new listing (matches Finder).
         searchQuery = ""
-        // User-driven navigation supersedes any pending restored selection.
-        pendingRestoredSelection = []
+        pendingRestoredSelection = selectionPaths
         reload()
         updateDirectoryWatcher()
     }
@@ -486,6 +520,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                         entries.filter { savedPaths.contains($0.url.path) }.map(\.id)
                     )
                     selectionAnchor = selection.first
+                    selectionCursor = selection.first
                     pendingRestoredSelection = []
                 } else {
                     selection = selection.filter { selectedID in
@@ -703,6 +738,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func replaceSelection(_ id: FileEntry.ID) {
         selection = [id]
         selectionAnchor = id
+        selectionCursor = id
     }
 
     func toggleSelection(_ id: FileEntry.ID) {
@@ -712,19 +748,36 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             selection.insert(id)
         }
         selectionAnchor = id
+        selectionCursor = id
     }
 
     func extendSelection(to id: FileEntry.ID) {
+        // Tree mode's anchor + target both live inside `treeChildren`,
+        // not the flat `entries` array — using `entries` for the
+        // range walk made Shift+click silently collapse to a single-
+        // row replace whenever either endpoint sat in an expanded
+        // subtree. `selectionOrderedRows` picks the right axis for
+        // the current view mode.
+        let ordered = selectionOrderedRows
         guard let anchor = selectionAnchor,
-              let anchorIdx = entries.firstIndex(where: { $0.id == anchor }),
-              let targetIdx = entries.firstIndex(where: { $0.id == id })
+              let anchorIdx = ordered.firstIndex(where: { $0.id == anchor }),
+              let targetIdx = ordered.firstIndex(where: { $0.id == id })
         else {
             replaceSelection(id)
             return
         }
         let lower = min(anchorIdx, targetIdx)
         let upper = max(anchorIdx, targetIdx)
-        selection = Set(entries[lower...upper].map(\.id))
+        selection = Set(ordered[lower...upper].map(\.id))
+        selectionCursor = id
+    }
+
+    /// Row sequence Shift-range selection should walk over. Tree mode
+    /// uses the flattened DFS of every visible (expanded) row;
+    /// list mode uses the standard flat enumeration (or search
+    /// results when a filter is active).
+    private var selectionOrderedRows: [FileEntry] {
+        viewMode == .tree ? visibleTreeEntries : visibleEntries
     }
 
     /// Wipe the selection. Used by the file list when the user clicks
@@ -733,6 +786,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard !selection.isEmpty else { return }
         selection.removeAll()
         selectionAnchor = nil
+        selectionCursor = nil
     }
 
     /// Select every row currently visible in the list (`visibleEntries`,
@@ -743,6 +797,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard !all.isEmpty else { return }
         selection = Set(all.map(\.id))
         selectionAnchor = all.first?.id
+        selectionCursor = all.last?.id
     }
 
     /// Write the currently selected file URLs to the system pasteboard
@@ -1185,9 +1240,18 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let visible = viewMode == .tree ? visibleTreeEntries : visibleEntries
         guard !visible.isEmpty else { return }
 
+        // `currentIdx` is the row the keypress moves *from*. When
+        // extending we step the cursor (the trailing edge), keeping
+        // the anchor fixed; without extending we step from the
+        // anchor, which then becomes the new cursor via
+        // `replaceSelection`. The previous code stepped from the
+        // anchor in both branches, which capped Shift+↓ at two rows
+        // because each press recomputed `anchor + 1` instead of
+        // `cursor + 1`.
+        let pivotID: FileEntry.ID? = extending ? (selectionCursor ?? selectionAnchor) : selectionAnchor
         let currentIdx: Int
-        if let anchor = selectionAnchor,
-           let idx = visible.firstIndex(where: { $0.id == anchor }) {
+        if let pivot = pivotID,
+           let idx = visible.firstIndex(where: { $0.id == pivot }) {
             currentIdx = idx
         } else if let firstID = selection.first,
                   let idx = visible.firstIndex(where: { $0.id == firstID }) {
@@ -1210,6 +1274,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             let lower = min(anchorIdx, newIdx)
             let upper = max(anchorIdx, newIdx)
             selection = Set(visible[lower...upper].map(\.id))
+            selectionCursor = target.id
         } else {
             replaceSelection(target.id)
         }

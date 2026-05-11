@@ -41,14 +41,18 @@ struct TreeFileListView: View {
             .onChange(of: isFocused) { _, newValue in
                 if newValue { treeFocused = true }
             }
-            .onKeyPress(.downArrow) {
+            // KeyPress carries the modifier state captured at the press
+            // moment, where `NSEvent.modifierFlags` only reflects "now"
+            // and races key-handling on macOS — that's what broke
+            // Shift+↑/↓ range selection in tree mode.
+            .onKeyPress(.downArrow, phases: [.down]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
-                handleArrow(by: 1, proxy: proxy)
+                handleArrow(by: 1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
             }
-            .onKeyPress(.upArrow) {
+            .onKeyPress(.upArrow, phases: [.down]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
-                handleArrow(by: -1, proxy: proxy)
+                handleArrow(by: -1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
             }
             .onKeyPress(.rightArrow) {
@@ -102,10 +106,11 @@ struct TreeFileListView: View {
 
     /// ↑/↓: walk the flat DFS of currently-visible tree rows. The VM
     /// already does the right thing in tree mode; we just need to keep
-    /// the moved-to anchor on screen.
-    private func handleArrow(by offset: Int, proxy: ScrollViewProxy) {
+    /// the moved-to anchor on screen. `extending` is read off the
+    /// captured `KeyPress` so Shift+arrow growth doesn't race the
+    /// global modifier state.
+    private func handleArrow(by offset: Int, extending: Bool, proxy: ScrollViewProxy) {
         if !isFocused { onFocus() }
-        let extending = NSEvent.modifierFlags.contains(.shift)
         viewModel.moveSelection(by: offset, extending: extending)
         if let anchor = viewModel.selectionAnchor {
             proxy.scrollTo(anchor, anchor: .center)
@@ -185,6 +190,10 @@ struct TreeFileListView: View {
                 get: { viewModel.renameDraft },
                 set: { viewModel.renameDraft = $0 }
             ),
+            onChevronTap: {
+                if !isFocused { onFocus() }
+                viewModel.toggleExpanded(entry.url)
+            },
             commitRename: {
                 viewModel.commitRename()
                 // Same deferred-focus reason as the list view's
@@ -212,10 +221,9 @@ struct TreeFileListView: View {
             if !isFocused { onFocus() }
             let mods = NSEvent.modifierFlags
             // ⌘-click on a folder = open it in a new tab in this pane
-            // (Finder convention). Don't expand/select — that'd double
-            // the user's intent. Files fall through to the selection
-            // branch; new-tab semantics for files would just duplicate
-            // the row's primary action without adding value.
+            // (Finder convention). On files, ⌘-click flips the
+            // toggle-in-selection branch below so multi-select still
+            // works — only folders shortcut to new-tab here.
             if entry.isDirectory && mods.contains(.command) {
                 NotificationCenter.default.post(
                     name: .mqdirOpenURLInNewTabRequested,
@@ -224,11 +232,37 @@ struct TreeFileListView: View {
                 )
                 return
             }
-            viewModel.replaceSelection(entry.id)
-            if entry.isDirectory {
-                viewModel.toggleExpanded(entry.url)
+            if mods.contains(.shift) {
+                viewModel.extendSelection(to: entry.id)
+            } else if mods.contains(.command) {
+                viewModel.toggleSelection(entry.id)
+            } else {
+                viewModel.replaceSelection(entry.id)
             }
+            // Plain row click no longer auto-toggles the chevron —
+            // the chevron has its own hit target now (VS Code parity)
+            // so users can select a folder without forcing it open.
         })
+        // Drag SOURCE — same AppKit-driven pasteboard path the list
+        // view uses, so dragging a tree row into Terminal / cmux /
+        // another app yields the real file URL (not a SwiftUI
+        // drag-promise cache copy). Tree view is single-row so
+        // `multiURLs` stays empty; the primary URL is enough.
+        .appKitFileDrag(primary: entry.url)
+        .inactiveDragSource(
+            primary: entry.url,
+            onClick: { _ in
+                if !isFocused { onFocus() }
+                viewModel.replaceSelection(entry.id)
+            },
+            onDoubleClick: { _ in
+                if entry.isDirectory {
+                    viewModel.openFolder(entry.url)
+                } else {
+                    viewModel.open(entry)
+                }
+            }
+        )
         // Right-click selects the clicked row before the menu shows
         // (Finder parity). Tree view is single-row interaction so we
         // always replace selection with the clicked row.
@@ -277,6 +311,11 @@ private struct TreeRow: View {
     let paneIsFocused: Bool
     let isRenaming: Bool
     @Binding var renameDraft: String
+    /// Fired when the user clicks the disclosure chevron only.
+    /// The row-level tap gesture handles selection — VS Code-style
+    /// separation so clicking a folder's name selects without
+    /// auto-expanding it.
+    let onChevronTap: () -> Void
     let commitRename: () -> Void
     let cancelRename: () -> Void
     @FocusState private var renameFieldFocused: Bool
@@ -287,16 +326,31 @@ private struct TreeRow: View {
         HStack(spacing: 4) {
             // Disclosure chevron — fixed slot for files too so names align
             // vertically across folder/file rows at the same depth.
+            // Folders carry their own tap target so name-clicks select
+            // without forcing the folder open / closed.
             Group {
                 if entry.isDirectory {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.Color.labelSecondary)
+                    // Button intercepts the click reliably; `.onTapGesture`
+                    // on the chevron used to lose the event when the
+                    // parent row's `.simultaneousGesture(TapGesture)`
+                    // and `.onTapGesture(count: 2)` both competed for
+                    // the same hit. `.buttonStyle(.plain)` keeps the
+                    // visual identical to the previous bare Image.
+                    Button {
+                        onChevronTap()
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.Color.labelSecondary)
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 } else {
                     Color.clear
+                        .frame(width: 16, height: 16)
                 }
             }
-            .frame(width: 10, height: 10)
 
             FileRowIcon(
                 entry: entry,
