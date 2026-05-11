@@ -875,15 +875,19 @@ struct BrowserPaneView: View {
             ),
             commitRename: {
                 viewModel.commitRename()
-                // Hand keyboard focus back to the list so arrow keys
-                // and Return / Space resume working immediately,
-                // instead of staying parked on the now-unmounted
-                // TextField's @FocusState.
-                listFocused = true
+                // `commitRename()` reloads `entries`, which makes
+                // SwiftUI unmount the rename TextField in the same
+                // turn — assigning `listFocused = true` synchronously
+                // races that teardown and leaves the focus chain
+                // orphaned (arrow keys silently no-op until the user
+                // clicks). Hop one runloop turn so the unmount + list
+                // re-render settles first; mirrors the same trick
+                // search focus uses in MainWindowView.
+                DispatchQueue.main.async { listFocused = true }
             },
             cancelRename: {
                 viewModel.cancelRename()
-                listFocused = true
+                DispatchQueue.main.async { listFocused = true }
             }
         )
         .contentShape(Rectangle())

@@ -185,8 +185,20 @@ struct TreeFileListView: View {
                 get: { viewModel.renameDraft },
                 set: { viewModel.renameDraft = $0 }
             ),
-            commitRename: { viewModel.commitRename() },
-            cancelRename: { viewModel.cancelRename() }
+            commitRename: {
+                viewModel.commitRename()
+                // Same deferred-focus reason as the list view's
+                // commit path (`BrowserPaneView.swift`): the row's
+                // TextField unmounts as `entries` reload, so we
+                // hop one runloop turn before restoring keyboard
+                // focus to the tree list — otherwise ↑/↓ silently
+                // no-op until the user clicks.
+                DispatchQueue.main.async { treeFocused = true }
+            },
+            cancelRename: {
+                viewModel.cancelRename()
+                DispatchQueue.main.async { treeFocused = true }
+            }
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
