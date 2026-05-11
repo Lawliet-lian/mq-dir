@@ -34,6 +34,7 @@ struct MenuCommands: Commands {
             // double-binding ⌘⇧R, which silently breaks unrelated
             // menu shortcut routing on macOS.
             Button("Reveal in Finder") { post(.mqdirRevealSelectedRequested) }
+                .keyboardShortcut(binding(.revealInFinder))
             Divider()
             Button("Add to Favorites") { post(.mqdirAddCurrentFolderToFavoritesRequested) }
                 .keyboardShortcut(binding(.addToFavorites))
@@ -75,9 +76,9 @@ struct MenuCommands: Commands {
         CommandGroup(after: .pasteboard) {
             Divider()
             Button("Open with Default App") { post(.mqdirOpenWithDefaultAppRequested) }
-                .keyboardShortcut(.return, modifiers: .shift)
+                .keyboardShortcut(binding(.openWithDefaultApp))
             Button("Duplicate") { post(.mqdirDuplicateRequested) }
-                .keyboardShortcut("d", modifiers: .command)
+                .keyboardShortcut(binding(.duplicate))
             Divider()
             Button("Copy File Path") { post(.mqdirCopyFilePathsRequested) }
                 .keyboardShortcut("c", modifiers: [.command, .option])
@@ -86,7 +87,7 @@ struct MenuCommands: Commands {
             Button("Copy Name") { post(.mqdirCopyNameRequested) }
             Divider()
             Button("Rename") { post(.mqdirRenameRequested) }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keyboardShortcut(binding(.rename))
         }
 
         CommandGroup(after: .textEditing) {
@@ -98,15 +99,15 @@ struct MenuCommands: Commands {
 
         CommandGroup(after: .toolbar) {
             Button("Back") { post(.mqdirGoBackRequested) }
-                .keyboardShortcut("[", modifiers: .command)
+                .keyboardShortcut(binding(.back))
             Button("Forward") { post(.mqdirGoForwardRequested) }
-                .keyboardShortcut("]", modifiers: .command)
+                .keyboardShortcut(binding(.forward))
             Button("Reload") { post(.mqdirReloadRequested) }
                 .keyboardShortcut(binding(.reload))
             Button("Parent Folder") { post(.mqdirParentFolderRequested) }
                 .keyboardShortcut(binding(.parentFolder))
             Button("Toggle Hidden Files") { post(.mqdirToggleHiddenFilesRequested) }
-                .keyboardShortcut(".", modifiers: [.command, .shift])
+                .keyboardShortcut(binding(.toggleHiddenFiles))
             Divider()
             // As List / As Tree intentionally have no keyboard shortcut:
             // ⌥⌘1–4 are claimed by Window → Focus Pane and view-mode

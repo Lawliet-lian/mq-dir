@@ -76,6 +76,11 @@ private struct TabReorderDropDelegate: DropDelegate {
 struct BrowserPaneView: View {
     let index: Int
     @ObservedObject var paneVM: PaneTabsViewModel
+    /// Resolved via the app-level `.environmentObject(workspace)` so
+    /// the pane's empty-area context menu can show the user's
+    /// current Toggle Hidden Files binding (Settings → Shortcuts)
+    /// instead of a stale `⌘⇧.` literal.
+    @EnvironmentObject private var workspace: WorkspaceManager
     let isFocused: Bool
     let onFocus: () -> Void
 
@@ -176,7 +181,7 @@ struct BrowserPaneView: View {
         Button(viewModel.includeHidden ? "✓ Show Hidden Files" : "Show Hidden Files") {
             viewModel.toggleHiddenFiles()
         }
-        .keyboardShortcut(".", modifiers: [.command, .shift])
+        .keyboardShortcut(workspace.workspace.settings.binding(for: .toggleHiddenFiles))
 
         Divider()
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The 10 actions exposed to the Settings → Shortcuts customiser.
+/// The actions exposed to the Settings → Shortcuts customiser.
 /// Each carries a stable `rawValue` so persisted overrides survive
 /// case reorders. Adding a new customisable shortcut here drives
 /// both `WorkspaceSettings.shortcutOverrides` and the Settings UI
@@ -16,38 +16,63 @@ public enum ShortcutAction: String, Codable, Sendable, CaseIterable, Hashable, C
     case parentFolder
     case togglePreview
     case addToFavorites
+    case rename
+    case duplicate
+    case revealInFinder
+    case toggleHiddenFiles
+    case back
+    case forward
+    case openWithDefaultApp
 
     /// Human-readable label rendered in the Settings list.
     public var label: String {
         switch self {
-        case .moveToTrash:       return "Move to Trash"
-        case .deleteImmediately: return "Delete Immediately"
-        case .newTab:            return "New Tab"
-        case .closeTab:          return "Close Tab"
-        case .reload:            return "Reload"
-        case .find:              return "Find"
-        case .openFolder:        return "Open Folder"
-        case .parentFolder:      return "Parent Folder"
-        case .togglePreview:     return "Show Preview"
-        case .addToFavorites:    return "Add to Favorites"
+        case .moveToTrash:        return "Move to Trash"
+        case .deleteImmediately:  return "Delete Immediately"
+        case .newTab:             return "New Tab"
+        case .closeTab:           return "Close Tab"
+        case .reload:             return "Reload"
+        case .find:               return "Find"
+        case .openFolder:         return "Open Folder"
+        case .parentFolder:       return "Parent Folder"
+        case .togglePreview:      return "Show Preview"
+        case .addToFavorites:     return "Add to Favorites"
+        case .rename:             return "Rename"
+        case .duplicate:          return "Duplicate"
+        case .revealInFinder:     return "Reveal in Finder"
+        case .toggleHiddenFiles:  return "Toggle Hidden Files"
+        case .back:               return "Back"
+        case .forward:            return "Forward"
+        case .openWithDefaultApp: return "Open with Default App"
         }
     }
 
     /// Out-of-the-box binding for this action — what the menu shows
     /// when the user has not overridden it. Source of truth for the
     /// "Restore Defaults" button in Settings.
+    ///
+    /// `addToFavorites` shifted off `⌘D` to `⌘⇧D` so the more
+    /// frequently-used `Duplicate` can claim Finder's idiomatic
+    /// `⌘D`. Users with a saved override keep what they chose.
     public var defaultBinding: ShortcutBinding {
         switch self {
-        case .moveToTrash:       return ShortcutBinding(key: .delete,  modifiers: .command)
-        case .deleteImmediately: return ShortcutBinding(key: .delete,  modifiers: [.command, .option])
-        case .newTab:            return ShortcutBinding(key: .character("t"), modifiers: .command)
-        case .closeTab:          return ShortcutBinding(key: .character("w"), modifiers: .command)
-        case .reload:            return ShortcutBinding(key: .character("r"), modifiers: .command)
-        case .find:              return ShortcutBinding(key: .character("f"), modifiers: .command)
-        case .openFolder:        return ShortcutBinding(key: .character("o"), modifiers: .command)
-        case .parentFolder:      return ShortcutBinding(key: .upArrow, modifiers: .command)
-        case .togglePreview:     return ShortcutBinding(key: .character("p"), modifiers: [.command, .shift])
-        case .addToFavorites:    return ShortcutBinding(key: .character("d"), modifiers: .command)
+        case .moveToTrash:        return ShortcutBinding(key: .delete,  modifiers: .command)
+        case .deleteImmediately:  return ShortcutBinding(key: .delete,  modifiers: [.command, .option])
+        case .newTab:             return ShortcutBinding(key: .character("t"), modifiers: .command)
+        case .closeTab:           return ShortcutBinding(key: .character("w"), modifiers: .command)
+        case .reload:             return ShortcutBinding(key: .character("r"), modifiers: .command)
+        case .find:               return ShortcutBinding(key: .character("f"), modifiers: .command)
+        case .openFolder:         return ShortcutBinding(key: .character("o"), modifiers: .command)
+        case .parentFolder:       return ShortcutBinding(key: .upArrow, modifiers: .command)
+        case .togglePreview:      return ShortcutBinding(key: .character("p"), modifiers: [.command, .shift])
+        case .addToFavorites:     return ShortcutBinding(key: .character("d"), modifiers: [.command, .shift])
+        case .rename:             return ShortcutBinding(key: .character("r"), modifiers: [.command, .shift])
+        case .duplicate:          return ShortcutBinding(key: .character("d"), modifiers: .command)
+        case .revealInFinder:     return ShortcutBinding(key: .character("f"), modifiers: [.command, .shift])
+        case .toggleHiddenFiles:  return ShortcutBinding(key: .character("."), modifiers: [.command, .shift])
+        case .back:               return ShortcutBinding(key: .character("["), modifiers: .command)
+        case .forward:            return ShortcutBinding(key: .character("]"), modifiers: .command)
+        case .openWithDefaultApp: return ShortcutBinding(key: .return, modifiers: .shift)
         }
     }
 }

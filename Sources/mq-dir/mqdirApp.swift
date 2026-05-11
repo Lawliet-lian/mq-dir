@@ -35,6 +35,12 @@ struct mqdirApp: App {
                 updateManager: updateManager,
                 repoCallout: repoCallout
             )
+                // Drop the workspace into the environment so deep
+                // descendants (e.g. `FileEntryContextMenu`) can pick
+                // up customised shortcut bindings without an
+                // ObservedObject parameter threaded through every
+                // intermediate view.
+                .environmentObject(workspace)
                 .id(workspace.workspace.activeProjectID)
                 .frame(minWidth: 900, minHeight: 600)
                 .preferredColorScheme(workspace.workspace.settings.colorScheme.preferred)

@@ -15,6 +15,11 @@ struct FileEntryContextMenu: View {
     let viewModel: FolderBrowserViewModel
     let targets: [FileEntry]
     let primaryName: String
+    /// Resolved via `@EnvironmentObject` so the menu's Rename row
+    /// always reflects the user's current shortcut override (Settings
+    /// → Shortcuts → Rename). The app injects this at the
+    /// `WindowGroup` level in `mqdirApp.swift`.
+    @EnvironmentObject private var workspace: WorkspaceManager
 
     private var count: Int { targets.count }
 
@@ -69,7 +74,7 @@ struct FileEntryContextMenu: View {
             // Rename only makes sense for a single row at a time —
             // multi-rename is its own UX and lives elsewhere.
             Button("Rename") { viewModel.beginRename(target) }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keyboardShortcut(workspace.workspace.settings.binding(for: .rename))
         }
         Button(count > 1 ? "Move \(count) Items to Trash" : "Move to Trash") {
             viewModel.moveToTrash(targets)
