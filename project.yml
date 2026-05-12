@@ -46,6 +46,17 @@ targets:
         CFBundleIdentifier: com.mqdir.app
         CFBundleDisplayName: mq-dir
         CFBundleShortVersionString: "0.1.0-beta.11"
+        # Monotonic build number — `Scripts/release.sh` increments this
+        # alongside MARKETING_VERSION on every release. Sparkle's
+        # SUStandardVersionComparator compares the appcast item's
+        # `<sparkle:version>` against the host's CFBundleVersion;
+        # pre-beta.12 we shipped every release with CFBundleVersion="1",
+        # so the comparator decided "0.1.0-beta.N" < "1" (tokenization
+        # ranks the leading 0 below 1) and silently reported "up to
+        # date" on every Check for Updates. Keeping this an integer
+        # that climbs per release restores Sparkle's ordering on every
+        # install — including the broken builds in the wild, since
+        # their next appcast fetch will see a larger integer.
         CFBundleVersion: "1"
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "14.0"

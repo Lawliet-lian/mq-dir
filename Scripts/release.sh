@@ -60,17 +60,30 @@ fi
 # 2. Bump version. Both MARKETING_VERSION (Xcode setting) and
 #    CFBundleShortVersionString (Info.plist) must move together so the
 #    bundle's reported version matches the appcast/tag.
+#    CFBundleVersion is the monotonic build number Sparkle compares
+#    against — it climbs by 1 each release. The appcast generator
+#    in `.github/workflows/release.yml` reads this value to emit
+#    `<sparkle:version>N</sparkle:version>`.
 step "Bumping project.yml to ${VERSION}"
 sed -i '' "s/MARKETING_VERSION: \".*\"/MARKETING_VERSION: \"${VERSION}\"/" "${PROJECT_YML}"
 sed -i '' "s/CFBundleShortVersionString: \".*\"/CFBundleShortVersionString: \"${VERSION}\"/" "${PROJECT_YML}"
+
+CURRENT_BUILD="$(grep -E 'CFBundleVersion: "[0-9]+"' "${PROJECT_YML}" | sed -E 's/.*CFBundleVersion: "([0-9]+)".*/\1/')"
+[[ -n "${CURRENT_BUILD}" ]] || err "Couldn't read CFBundleVersion from ${PROJECT_YML} — expected an integer in double quotes."
+NEXT_BUILD=$(( CURRENT_BUILD + 1 ))
+sed -i '' "s/CFBundleVersion: \"[0-9]*\"/CFBundleVersion: \"${NEXT_BUILD}\"/" "${PROJECT_YML}"
+
 # sed silently no-ops when the pattern doesn't match. If project.yml ever
 # gets reformatted (e.g. single-quoted values), the bump would vanish and
 # we'd ship a binary whose CFBundleShortVersionString disagrees with the
-# tag/appcast/DMG name. Verify both keys actually moved before pushing.
+# tag/appcast/DMG name. Verify all three keys actually moved before pushing.
 grep -q "MARKETING_VERSION: \"${VERSION}\"" "${PROJECT_YML}" \
     || err "MARKETING_VERSION bump didn't take in ${PROJECT_YML} — check formatting"
 grep -q "CFBundleShortVersionString: \"${VERSION}\"" "${PROJECT_YML}" \
     || err "CFBundleShortVersionString bump didn't take in ${PROJECT_YML} — check formatting"
+grep -q "CFBundleVersion: \"${NEXT_BUILD}\"" "${PROJECT_YML}" \
+    || err "CFBundleVersion bump didn't take in ${PROJECT_YML} — check formatting"
+step "CFBundleVersion ${CURRENT_BUILD} → ${NEXT_BUILD}"
 
 # 3. Refresh Info.plist via xcodegen so the tagged commit's bundle metadata
 #    matches the new MARKETING_VERSION (the .xcodeproj is gitignored, but

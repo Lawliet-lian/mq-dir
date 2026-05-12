@@ -257,6 +257,20 @@ jobs:
           PUBDATE="$(LC_TIME=C date -u +"%a, %d %b %Y %H:%M:%S +0000")"
           DMG_SHA="$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)"
 
+          # Read the monotonic build number `Scripts/release.sh` wrote
+          # into project.yml. The appcast emits this as `<sparkle:version>`
+          # so SUStandardVersionComparator picks the latest item by
+          # comparing integers against the host's CFBundleVersion. Pre-
+          # beta.12 builds shipped with CFBundleVersion="1", which made
+          # the comparator decide "0.1.0-beta.N" < "1" and silently
+          # report "up to date" — feeding the integer instead fixes
+          # those installs retroactively the next time they check.
+          BUILD_NUMBER="$(grep -E 'CFBundleVersion: "[0-9]+"' project.yml | sed -E 's/.*CFBundleVersion: "([0-9]+)".*/\1/')"
+          if [ -z "${BUILD_NUMBER}" ]; then
+            echo "Could not read CFBundleVersion from project.yml" >&2
+            exit 1
+          fi
+
           # Switch onto a fresh copy of main BEFORE editing — the tag we
           # built from is detached, and main may have moved while CI ran.
           git config user.name  "github-actions[bot]"
@@ -271,12 +285,14 @@ jobs:
           # silently makes the oldest release look like "newest available".
           TMP_APPCAST="$(mktemp)"
           APPCAST_VER="${VERSION}" \
+          APPCAST_BUILD="${BUILD_NUMBER}" \
           APPCAST_URL="${DMG_URL}" \
           APPCAST_SIG="${SIG_LINE}" \
           APPCAST_PUB="${PUBDATE}" \
           awk '
           BEGIN {
               ver = ENVIRON["APPCAST_VER"]
+              build = ENVIRON["APPCAST_BUILD"]
               url = ENVIRON["APPCAST_URL"]
               sig = ENVIRON["APPCAST_SIG"]
               pub = ENVIRON["APPCAST_PUB"]
@@ -286,7 +302,7 @@ jobs:
               print "    <item>"
               print "      <title>Version " ver "</title>"
               print "      <pubDate>" pub "</pubDate>"
-              print "      <sparkle:version>" ver "</sparkle:version>"
+              print "      <sparkle:version>" build "</sparkle:version>"
               print "      <sparkle:shortVersionString>" ver "</sparkle:shortVersionString>"
               print "      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>"
               print "      <enclosure url=\"" url "\" " sig " type=\"application/octet-stream\" />"
@@ -297,7 +313,7 @@ jobs:
           ' docs/appcast.xml > "$TMP_APPCAST"
           mv "$TMP_APPCAST" docs/appcast.xml
 
-          grep -q "<sparkle:version>${VERSION}</sparkle:version>" docs/appcast.xml \
+          grep -q "<sparkle:version>${BUILD_NUMBER}</sparkle:version>" docs/appcast.xml \
             || { echo "appcast splice missed — check APPCAST-PREPEND-MARKER anchor" >&2; exit 1; }
           if command -v xmllint >/dev/null; then
             xmllint --noout docs/appcast.xml
