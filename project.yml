@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.10"
-    MARKETING_VERSION: "0.1.0-beta.11"
+    MARKETING_VERSION: "0.1.0-beta.12"
     CURRENT_PROJECT_VERSION: "8"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: "WKV6T7K33K"
@@ -45,7 +45,7 @@ targets:
       properties:
         CFBundleIdentifier: com.mqdir.app
         CFBundleDisplayName: mq-dir
-        CFBundleShortVersionString: "0.1.0-beta.11"
+        CFBundleShortVersionString: "0.1.0-beta.12"
         # Monotonic build number — `Scripts/release.sh` increments this
         # alongside MARKETING_VERSION on every release. Sparkle's
         # SUStandardVersionComparator compares the appcast item's
@@ -57,7 +57,7 @@ targets:
         # that climbs per release restores Sparkle's ordering on every
         # install — including the broken builds in the wild, since
         # their next appcast fetch will see a larger integer.
-        CFBundleVersion: "1"
+        CFBundleVersion: "2"
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "14.0"
         NSHighResolutionCapable: true
