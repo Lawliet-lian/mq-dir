@@ -810,15 +810,26 @@ struct BrowserPaneView: View {
                 handleArrowKey(by: -1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
             }
-            .onKeyPress(.return) {
+            .onKeyPress(.return, phases: [.down]) { keyPress in
                 // While a row is in inline-rename mode the Return key
                 // belongs to the TextField (commits the rename). Don't
                 // intercept it here or the parent's openSelected() races
                 // the TextField's onSubmit and reorders the events
-                // unpredictably.
+                // unpredictably. `phases: [.down]` switches the
+                // closure to the `KeyPress`-receiving overload so the
+                // ⌘ check below has a modifier set to read.
                 guard viewModel.renamingEntryID == nil else { return .ignored }
                 if !isFocused { onFocus() }
-                viewModel.openSelected()
+                if keyPress.modifiers.contains(.command),
+                   let entry = viewModel.selectedEntry, entry.isDirectory {
+                    NotificationCenter.default.post(
+                        name: .mqdirOpenURLInNewTabRequested,
+                        object: nil,
+                        userInfo: ["url": entry.url]
+                    )
+                } else {
+                    viewModel.openSelected()
+                }
                 return .handled
             }
             .onKeyPress(.space) {
@@ -923,7 +934,20 @@ struct BrowserPaneView: View {
             }
         )
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { viewModel.open(entry) }
+        .onTapGesture(count: 2) {
+            // ⌘+double-click on a folder opens it in a new tab —
+            // mirrors Finder. Plain double-click stays the
+            // "navigate into / launch file" path.
+            if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
+                NotificationCenter.default.post(
+                    name: .mqdirOpenURLInNewTabRequested,
+                    object: nil,
+                    userInfo: ["url": entry.url]
+                )
+            } else {
+                viewModel.open(entry)
+            }
+        }
         .simultaneousGesture(TapGesture().onEnded {
             if !isFocused { onFocus() }
             let mods = NSEvent.modifierFlags

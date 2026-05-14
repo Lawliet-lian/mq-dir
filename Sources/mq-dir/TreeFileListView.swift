@@ -66,10 +66,19 @@ struct TreeFileListView: View {
                 handleLeftArrow(proxy: proxy)
                 return .handled
             }
-            .onKeyPress(.return) {
+            .onKeyPress(.return, phases: [.down]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
                 if !isFocused { onFocus() }
-                viewModel.openSelected()
+                if keyPress.modifiers.contains(.command),
+                   let entry = viewModel.selectedEntry, entry.isDirectory {
+                    NotificationCenter.default.post(
+                        name: .mqdirOpenURLInNewTabRequested,
+                        object: nil,
+                        userInfo: ["url": entry.url]
+                    )
+                } else {
+                    viewModel.openSelected()
+                }
                 return .handled
             }
             .onKeyPress(.space) {
@@ -212,7 +221,17 @@ struct TreeFileListView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            if entry.isDirectory {
+            // ⌘+double-click on a folder opens it in a new tab —
+            // mirrors Finder and the list view's matching behavior.
+            // Plain double-click navigates into the folder / launches
+            // the file as before.
+            if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
+                NotificationCenter.default.post(
+                    name: .mqdirOpenURLInNewTabRequested,
+                    object: nil,
+                    userInfo: ["url": entry.url]
+                )
+            } else if entry.isDirectory {
                 viewModel.openFolder(entry.url)
             } else {
                 viewModel.open(entry)
@@ -221,18 +240,13 @@ struct TreeFileListView: View {
         .simultaneousGesture(TapGesture().onEnded {
             if !isFocused { onFocus() }
             let mods = NSEvent.modifierFlags
-            // ⌘-click on a folder = open it in a new tab in this pane
-            // (Finder convention). On files, ⌘-click flips the
-            // toggle-in-selection branch below so multi-select still
-            // works — only folders shortcut to new-tab here.
-            if entry.isDirectory && mods.contains(.command) {
-                NotificationCenter.default.post(
-                    name: .mqdirOpenURLInNewTabRequested,
-                    object: nil,
-                    userInfo: ["url": entry.url]
-                )
-                return
-            }
+            // ⌘+single-click on a folder used to short-circuit to
+            // "open in new tab" here. That collided with the new
+            // ⌘+double-click new-tab path — every double-click fired
+            // single-click twice via simultaneousGesture, producing
+            // two duplicate tabs. Treat ⌘+single-click as the
+            // multi-select toggle just like the list view does; new
+            // tabs come from ⌘+double-click and ⌘+Enter instead.
             if mods.contains(.shift) {
                 viewModel.extendSelection(to: entry.id)
             } else if mods.contains(.command) {
