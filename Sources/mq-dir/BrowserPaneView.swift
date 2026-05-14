@@ -797,14 +797,15 @@ struct BrowserPaneView: View {
             // Read Shift off the captured `KeyPress` instead of
             // `NSEvent.modifierFlags` — the latter is "modifiers right
             // now" and races the key handler, so Shift+↑/↓ range
-            // selection was unreliable. The `phases: [.down]` filter
-            // keeps repeats from re-firing per-keystroke.
-            .onKeyPress(.downArrow, phases: [.down]) { keyPress in
+            // selection was unreliable. The phase set has to include
+            // `.repeat` or holding the arrow key just fires once: the
+            // system key-repeat events get dropped on the floor.
+            .onKeyPress(.downArrow, phases: [.down, .repeat]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
                 handleArrowKey(by: 1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
             }
-            .onKeyPress(.upArrow, phases: [.down]) { keyPress in
+            .onKeyPress(.upArrow, phases: [.down, .repeat]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
                 handleArrowKey(by: -1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled

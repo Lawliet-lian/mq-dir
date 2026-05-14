@@ -44,13 +44,14 @@ struct TreeFileListView: View {
             // KeyPress carries the modifier state captured at the press
             // moment, where `NSEvent.modifierFlags` only reflects "now"
             // and races key-handling on macOS — that's what broke
-            // Shift+↑/↓ range selection in tree mode.
-            .onKeyPress(.downArrow, phases: [.down]) { keyPress in
+            // Shift+↑/↓ range selection in tree mode. `.repeat` keeps
+            // a held arrow key auto-scrolling like Finder does.
+            .onKeyPress(.downArrow, phases: [.down, .repeat]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
                 handleArrow(by: 1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
             }
-            .onKeyPress(.upArrow, phases: [.down]) { keyPress in
+            .onKeyPress(.upArrow, phases: [.down, .repeat]) { keyPress in
                 guard viewModel.renamingEntryID == nil else { return .ignored }
                 handleArrow(by: -1, extending: keyPress.modifiers.contains(.shift), proxy: proxy)
                 return .handled
