@@ -146,14 +146,25 @@ struct FileSystemService {
     /// identical grey dots — the second tag's colour was lost. Returns
     /// an array aligned with `names` so the dot renderer can paint each
     /// tag in its real Finder swatch.
+    ///
+    /// Pairs xattr entries with `names` *by index* rather than by name.
+    /// The original name-based dictionary lookup silently fell back to
+    /// `0` whenever the URLResource tag name and the xattr-parsed name
+    /// disagreed even slightly — Korean tag names like "빨간색" came
+    /// back from URLResource in one Unicode normalisation form and
+    /// from the raw xattr in another on real-world files, so every
+    /// existing tag rendered grey until the user retagged the file.
+    /// macOS keeps the two sources ordered consistently, so
+    /// index-pairing sidesteps the whole normalisation question.
     static func tagColors(for url: URL, names: [String]) -> [Int] {
         guard !names.isEmpty else { return [] }
         let parsed = parseUserTagsXattr(for: url)
         guard !parsed.isEmpty else {
             return Array(repeating: 0, count: names.count)
         }
-        let colourByName = Dictionary(parsed, uniquingKeysWith: { first, _ in first })
-        return names.map { colourByName[$0] ?? 0 }
+        return (0..<names.count).map { i in
+            i < parsed.count ? parsed[i].1 : 0
+        }
     }
 
     /// Decode the raw xattr into `(name, colourIndex)` pairs. Defensive
