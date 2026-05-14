@@ -112,8 +112,12 @@ public enum ShortcutKey: Codable, Sendable, Hashable {
     case downArrow
     case leftArrow
     case rightArrow
+    /// Function keys F1...F12. Stored as the raw integer so existing
+    /// persisted overrides stay forward-compatible: encoding is
+    /// `{kind: "functionKey", number: 5}` (F5).
+    case functionKey(Int)
 
-    private enum CodingKeys: String, CodingKey { case kind, character }
+    private enum CodingKeys: String, CodingKey { case kind, character, number }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -137,6 +141,16 @@ public enum ShortcutKey: Codable, Sendable, Hashable {
         case "downArrow":  self = .downArrow
         case "leftArrow":  self = .leftArrow
         case "rightArrow": self = .rightArrow
+        case "functionKey":
+            let n = try c.decode(Int.self, forKey: .number)
+            guard (1...12).contains(n) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .number,
+                    in: c,
+                    debugDescription: "Function-key number out of range: \(n) (expected 1...12)"
+                )
+            }
+            self = .functionKey(n)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind,
@@ -160,6 +174,9 @@ public enum ShortcutKey: Codable, Sendable, Hashable {
         case .downArrow:  try c.encode("downArrow", forKey: .kind)
         case .leftArrow:  try c.encode("leftArrow", forKey: .kind)
         case .rightArrow: try c.encode("rightArrow", forKey: .kind)
+        case .functionKey(let n):
+            try c.encode("functionKey", forKey: .kind)
+            try c.encode(n, forKey: .number)
         }
     }
 }

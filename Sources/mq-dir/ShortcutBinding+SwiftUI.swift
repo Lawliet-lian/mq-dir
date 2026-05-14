@@ -16,6 +16,14 @@ extension ShortcutKey {
         case .downArrow:         return .downArrow
         case .leftArrow:         return .leftArrow
         case .rightArrow:        return .rightArrow
+        case .functionKey(let n):
+            // AppKit's NSF<N>FunctionKey constants start at 0xF704
+            // (F1) and run contiguously through F12 at 0xF70F. Wrap
+            // that scalar in a `KeyEquivalent` so SwiftUI's
+            // `.keyboardShortcut` registers the menu item exactly
+            // the way an explicit ⌘F-with-shift would have done.
+            let scalar = UnicodeScalar(0xF703 + n)!
+            return KeyEquivalent(Character(scalar))
         }
     }
 
@@ -38,6 +46,7 @@ extension ShortcutKey {
         case .downArrow:  return "\u{2193}"   // ↓
         case .leftArrow:  return "\u{2190}"   // ←
         case .rightArrow: return "\u{2192}"   // →
+        case .functionKey(let n): return "F\(n)"
         }
     }
 }

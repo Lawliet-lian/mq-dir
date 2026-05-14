@@ -270,6 +270,17 @@ private final class KeyCaptureNSView: NSView {
             onBareEscape?()
             return
         }
+        // F1...F12 by hardware keyCode. Reading
+        // `charactersIgnoringModifiers` works too (Apple maps them to
+        // NSF<N>FunctionKey = 0xF704...0xF70F) but the keyCode table
+        // is more obvious and skips the function-row's IR/mute/etc.
+        // overlay codes that share the same physical position on
+        // some Mac keyboards.
+        let fnByKeyCode: [UInt16: Int] = [
+            122: 1, 120: 2, 99: 3, 118: 4, 96: 5, 97: 6,
+            98: 7, 100: 8, 101: 9, 109: 10, 103: 11, 111: 12,
+        ]
+
         let key: ShortcutKey
         switch event.keyCode {
         case 51:  key = .delete
@@ -281,6 +292,10 @@ private final class KeyCaptureNSView: NSView {
         case 123: key = .leftArrow
         case 124: key = .rightArrow
         default:
+            if let fn = fnByKeyCode[event.keyCode] {
+                key = .functionKey(fn)
+                break
+            }
             guard let chars = event.charactersIgnoringModifiers,
                   let first = chars.first
             else { return }
