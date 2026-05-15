@@ -59,6 +59,14 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 
 Grab the latest `.dmg` from [Releases](https://github.com/h5nam/mq-dir/releases) and drag `mq-dir.app` into `/Applications`. Notarized + stapled, so Gatekeeper opens it without a right-click trick. The running app then auto-updates via Sparkle on its 24-hour cadence (or whenever you click the sidebar's "Update Available" button).
 
+### Via Homebrew
+
+```bash
+brew install --cask h5nam/mq-dir/mq-dir
+```
+
+`brew` tap-installs the formula on first use — no separate `brew tap` needed. Subsequent updates are `brew upgrade --cask mq-dir`. The cask points at the same signed DMG as above; the tap repo ([`h5nam/homebrew-mq-dir`](https://github.com/h5nam/homebrew-mq-dir)) is refreshed automatically by the release workflow.
+
 ### From source
 
 ```bash
