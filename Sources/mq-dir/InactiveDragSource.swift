@@ -157,20 +157,10 @@ private final class InactiveDragSourceNSView: NSView, NSDraggingSource {
         let iconSize = NSSize(width: 32, height: 32)
         var items: [NSDraggingItem] = []
         for (index, url) in urls.enumerated() {
+            // Only `public.file-url`, no extra NSURL-supplied types —
+            // see `AppKitFileDrag.swift` for the Slack-PDF reasoning.
             let pbItem = NSPasteboardItem()
-            if let data = url.absoluteString.data(using: .utf8) {
-                pbItem.setData(data, forType: .fileURL)
-            }
-            // Stamp the multi-selection on the first item so in-process
-            // drops can grab the whole set in one hop — same convention
-            // as `AppKitFileDrag.swift`.
-            if index == 0, urls.count > 1,
-               let data = try? JSONEncoder().encode(urls.map(\.absoluteString)) {
-                pbItem.setData(
-                    data,
-                    forType: NSPasteboard.PasteboardType(DragDropSupport.mqdirSelectionTypeIdentifier)
-                )
-            }
+            pbItem.setString(url.absoluteString, forType: .fileURL)
             let dragItem = NSDraggingItem(pasteboardWriter: pbItem)
             let icon = NSWorkspace.shared.icon(forFile: url.path)
             icon.size = iconSize

@@ -61,20 +61,17 @@ private struct AppKitFileDragModifier: ViewModifier {
         var draggingItems: [NSDraggingItem] = []
 
         for (index, url) in urls.enumerated() {
+            // Each item carries ONLY `public.file-url` so Slack sees
+            // every NSDraggingItem as the same shape and accepts the
+            // whole multi-file session. Using NSURL as the writer
+            // also added `public.url` / `public.filename`
+            // representations, and Slack's PDF-handling path treated
+            // those as a competing content type and silently dropped
+            // every item past the first. The plain string form for
+            // `.fileURL` is what Finder writes and what Slack's
+            // file-attachment receiver picks up unconditionally.
             let pbItem = NSPasteboardItem()
-            if let data = url.absoluteString.data(using: .utf8) {
-                pbItem.setData(data, forType: .fileURL)
-            }
-            // Stamp the full multi-selection on the first item so
-            // in-process drops can still grab the whole set in one hop.
-            if index == 0, urls.count > 1,
-               let data = try? JSONEncoder().encode(urls.map(\.absoluteString)) {
-                pbItem.setData(
-                    data,
-                    forType: NSPasteboard.PasteboardType(DragDropSupport.mqdirSelectionTypeIdentifier)
-                )
-            }
-
+            pbItem.setString(url.absoluteString, forType: .fileURL)
             let dragItem = NSDraggingItem(pasteboardWriter: pbItem)
             let icon = NSWorkspace.shared.icon(forFile: url.path)
             icon.size = iconSize
