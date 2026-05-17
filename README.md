@@ -2,7 +2,7 @@
 
 > The native macOS file manager for AI multi-taskers. Up to four independent panes for parallel projects and agents — persistent state, native polish, no compromise.
 
-[![status](https://img.shields.io/badge/status-beta-yellow)](#status)
+[![release](https://img.shields.io/github/v/release/h5nam/mq-dir?label=release&color=blue)](https://github.com/h5nam/mq-dir/releases)
 [![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)](#requirements)
 [![swift](https://img.shields.io/badge/swift-5.10-orange)](https://swift.org)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -19,18 +19,20 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 
 ## Features
 
-**Working today (beta.1)**
-
 - 🟦 **1 / 2H / 2V / 4-pane layouts** — focused-pane routing, independent folder per pane.
-- ↹ **Per-pane tabs** — Safari-style strip with X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], drag-to-reorder, right-click Close Other / Close to Right / Duplicate, last-tab safety placeholder.
-- 🌳 **VS Code-style tree view** — per-tab toggle, lazy child loading, ⌘-click on a folder opens it as a new tab in the same pane.
-- ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ to step through rows (Shift to extend the selection), Return to open. Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, and Move to Trash. Multi-selection right-clicks act on the whole selection.
-- 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). PDFs render through PDFKit with continuous scroll + paging; everything else routes through Quick Look for images, code, video, audio, office docs (DOCX/PPTX/XLSX). MarkdownUI handles `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries. Multi-page navigation for non-PDF documents and formats macOS Quick Look has no generator for (HWP, etc.) is best done with ⎵ to summon the floating Quick Look panel, or ⇧↩ to open in the system default app (e.g. Hancom Office Viewer for HWP).
-- ⭐ **User-editable Favorites sidebar** — drag folders in, right-click Remove or Rename, drag to reorder, ⌘D adds the focused pane's folder. Real Finder folder icons, stale-path styling.
+- ↹ **Per-pane tabs** — Safari-style strip with X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], drag-to-reorder, drag a tab onto Favorites to bookmark its folder, right-click Close Other / Close to Right / Duplicate, last-tab safety placeholder.
+- 🌳 **VS Code-style tree view** — per-tab toggle, lazy child loading, separate chevron hit target (clicking a folder name selects without expanding), Shift / Cmd multi-select, file drag-out to external apps. New tabs via **⌘+double-click** or **⌘+Enter** on a folder (same as list view).
+- ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ step through rows (hold to repeat, Shift to extend the selection); Return opens, ⌘+Return opens in a new tab. Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, and Move to Trash. Multi-selection right-clicks act on the whole selection. Restoring keyboard focus after a rename is handled correctly in both list and tree view.
+- ⚙️ **Settings → Shortcuts** — 17 actions re-bindable from Preferences (⌘,), including F1…F12. Reset-to-default per row.
+- 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). PDFs render through PDFKit with continuous scroll + paging; everything else routes through Quick Look for images, code, video, audio, office docs (DOCX/PPTX/XLSX). MarkdownUI handles `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries. Zip archives preview in-pane (listing + single-entry decode). Multi-page navigation for non-PDF documents and formats macOS Quick Look has no generator for (HWP, etc.) is best done with ⎵ to summon the floating Quick Look panel, or ⇧↩ to open in the system default app (e.g. Hancom Office Viewer for HWP).
+- 🏷️ **Finder tag display** — per-tag colour swatches (red / orange / yellow / green / blue / purple / grey) read straight from macOS metadata, including multi-tag rows. Sidebar Tags section lists every tag in the current folder. Read-only — applying or editing tags happens in Finder.
+- 📂 **Custom folder icons** — folders with a Finder-assigned custom icon (Get Info → drag image) render that icon in the row, not the system default.
+- ⭐ **User-editable Favorites sidebar** — drag folders in (or drag a tab in to bookmark its folder), right-click Remove or Rename, drag to reorder, ⌘⇧D adds the focused pane's folder. Real Finder folder icons, stale-path styling.
 - 📁 **Projects (workspaces)** — named snapshots of (layout + pane tabs + focus). + button creates one, click switches, right-click Rename / Delete, drag to reorder. Switching auto-saves the outgoing project.
 - 💾 **State persistence** — every pane / tab / favorite / project survives relaunch, force-quit, and even schema upgrades (legacy `state.json` shapes auto-migrate).
 - 🔎 **Per-pane recursive search** — debounced, case-insensitive substring match across the current folder's subtree. ⌘F.
 - 🔄 **In-app auto-update** — Sparkle 2 polls the appcast every 24 h; when a new release is out, the sidebar grows an "Update Available" button that runs the standard install/relaunch flow.
+- 💬 **In-app Send Feedback** — sidebar footer → send a short note with optional screenshots straight to the maintainer (no email client involved).
 - 🔗 **[cmux](https://cmux.com) sync** — sidebar grows a CMUX section that mirrors your cmux workspaces. Click a row to open its working directory in the focused pane (⌘-click for a new tab). cmux ships with the socket locked to its own children, so pick one of:
   - **Quick:** cmux → Settings → Automation → Socket Control Mode = Allow All.
   - **Stricter:** Socket Control Mode = Password, then `launchctl setenv CMUX_SOCKET_PASSWORD <pw>` (so the env var reaches GUI-launched apps) and relaunch mq-dir.
@@ -38,14 +40,15 @@ mq-dir gives you up to four independent panes side by side. One per project, one
   Section stays hidden when cmux isn't installed.
 - 🎨 **Native macOS look** — SwiftUI + AppKit, system theme tokens, hand-finished app icon.
 
-**Coming next**
+**Roadmap**
 
 - 3-pane layout option.
-- Keyboard shortcut customization, settings UI.
+- More archive formats in-pane (tar / 7z / rar).
+- Open to ideas — file an issue or use the in-app Send Feedback.
 
 ## Status
 
-**Pre-release.** Each tagged build is Developer ID-signed and Apple-notarized. The working set above is stable enough for daily-driving by the maintainer; expect rough edges around ergonomics and edge cases. Per-release detail lives on the [Releases page](https://github.com/h5nam/mq-dir/releases).
+**v0.1.0 — first non-beta cut.** Each tagged build is Developer ID-signed and Apple-notarized. The feature set above has been daily-driven by the maintainer and a small early-adopter group; expect occasional rough edges around ergonomics. Per-release detail lives on the [Releases page](https://github.com/h5nam/mq-dir/releases).
 
 ## Requirements
 
@@ -94,7 +97,7 @@ If a v1.x release ever proposes opt-in crash reporting, it will land behind a co
 
 ## Out of scope for v1
 
-Cloud sync, archive previews, file editing, plugins, iPadOS/iOS port, localization beyond English.
+Cloud sync, file editing, plugins, iPadOS/iOS port, localization beyond English. Archive *editing* (we preview zip in-pane; tar / 7z / rar previews are on the roadmap, not write support).
 
 ## Contributing
 
@@ -103,7 +106,7 @@ PRs welcome. Contributions are accepted via [DCO](https://developercertificate.o
 ## Releasing (maintainers only)
 
 ```bash
-Scripts/release.sh 0.1.0-alpha.10
+Scripts/release.sh 0.1.1
 ```
 
 That's it. The script bumps the version, builds Release with Developer ID, re-signs every nested binary inside-out (Sparkle's helpers don't auto-inherit signing), notarizes via the stored `mq-dir-notary` keychain profile + staples, builds and EdDSA-signs the DMG, appends a fresh `<item>` to `docs/appcast.xml`, bumps `Casks/mq-dir.rb`, tags + pushes, and creates the GitHub release.
