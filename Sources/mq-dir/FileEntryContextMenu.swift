@@ -29,6 +29,23 @@ struct FileEntryContextMenu: View {
     /// directory.
     private var allFiles: Bool { !targets.contains(where: \.isDirectory) }
 
+    /// Union of every Finder colour label currently applied across the
+    /// menu's targets. Drives the filled-circle indicator next to each
+    /// colour in the Tags submenu so the user can see, at a glance,
+    /// which colours their selection already carries. Multi-select
+    /// shows a colour as "applied" if *any* row has it — clicking still
+    /// toggles per-file, so an already-applied colour is removed from
+    /// rows that have it and added to rows that don't.
+    private var appliedColours: Set<Int> {
+        var seen: Set<Int> = []
+        for target in targets {
+            for colour in target.tagColors where (1...7).contains(colour) {
+                seen.insert(colour)
+            }
+        }
+        return seen
+    }
+
     var body: some View {
         Button(count > 1 ? "Open \(count) Items" : "Open") {
             targets.forEach { viewModel.open($0) }
@@ -54,6 +71,36 @@ struct FileEntryContextMenu: View {
         }
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting(targets.map(\.url))
+        }
+
+        Divider()
+
+        Menu("Tags") {
+            ForEach(TagColor.allLabels, id: \.self) { label in
+                Button {
+                    viewModel.toggleColorTag(label, on: targets)
+                } label: {
+                    // `Label` with an `Image(nsImage:)` icon is the
+                    // only path that survives SwiftUI's NSMenuItem
+                    // conversion with full colour — SF Symbols inside
+                    // a Menu Button get template-rendered and lose
+                    // any `.foregroundStyle` we set on them.
+                    Label {
+                        Text(TagColor.displayName(forLabel: label)
+                             + (appliedColours.contains(label) ? "  ✓" : ""))
+                    } icon: {
+                        Image(nsImage: Self.swatchImage(
+                            forLabel: label,
+                            filled: appliedColours.contains(label)
+                        ))
+                    }
+                }
+            }
+            Divider()
+            Button("Clear Tags") {
+                viewModel.toggleColorTag(0, on: targets)
+            }
+            .disabled(appliedColours.isEmpty)
         }
 
         Divider()
@@ -189,6 +236,32 @@ struct FileEntryContextMenu: View {
         pb.clearContents()
         let nsurls = entries.map { $0.url as NSURL }
         pb.writeObjects(nsurls)
+    }
+
+    /// Render a 12pt swatch matching the Finder colour `label`. `filled`
+    /// paints a solid disc (currently-applied colour) vs an open ring
+    /// (not applied). `isTemplate = false` is the load-bearing bit —
+    /// NSMenu treats template images as monochrome and would otherwise
+    /// strip the colour back to the system menu accent.
+    private static func swatchImage(forLabel label: Int, filled: Bool) -> NSImage {
+        let dim: CGFloat = 12
+        let image = NSImage(size: NSSize(width: dim, height: dim), flipped: false) { rect in
+            let inset = rect.insetBy(dx: 1, dy: 1)
+            let path = NSBezierPath(ovalIn: inset)
+            if let colour = TagColor.color(forLabel: label).map(NSColor.init) {
+                if filled {
+                    colour.setFill()
+                    path.fill()
+                } else {
+                    colour.setStroke()
+                    path.lineWidth = 1.5
+                    path.stroke()
+                }
+            }
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     /// "Copy Path" — newline-joined POSIX paths. Useful for shell pasting,

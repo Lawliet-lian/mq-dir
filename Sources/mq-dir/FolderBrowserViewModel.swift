@@ -1375,6 +1375,35 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Right-click "Move to Trash" → `FileManager.trashItem` per entry.
     /// Failures (permission, missing file) are logged to stderr and skipped
     /// so a partial selection doesn't abort the whole operation.
+    /// Toggle the standard Finder colour `label` (1-7) across each
+    /// entry, or clear every tag when `label == 0`. Matches Finder's
+    /// status-bar colour-dot bar behaviour where re-picking a colour
+    /// unsets it. After the writes complete, broadcasts a refresh so
+    /// every open pane re-enumerates and the dot palette repaints
+    /// against the freshly-written `_kMDItemUserTags`.
+    func toggleColorTag(_ label: Int, on entries: [FileEntry]) {
+        let urls = entries.map(\.url)
+        let displayName = TagColor.displayName(forLabel: label)
+        Task {
+            await Task.detached(priority: .userInitiated) {
+                for url in urls {
+                    do {
+                        try FileSystemService.toggleColourTag(
+                            label: label,
+                            displayName: displayName,
+                            on: url
+                        )
+                    } catch {
+                        FileHandle.standardError.write(
+                            Data("[mq-dir tag] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                        )
+                    }
+                }
+            }.value
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+        }
+    }
+
     func moveToTrash(_ entries: [FileEntry]) {
         let urls = entries.map(\.url)
         Task {

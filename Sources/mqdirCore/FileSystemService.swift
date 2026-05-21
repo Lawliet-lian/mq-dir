@@ -33,7 +33,8 @@ struct FileSystemService {
             let isDirectory = values.isDirectory ?? false
             let name = childURL.lastPathComponent
             let tagNames = values.tagNames ?? []
-            let tagColors = Self.tagColors(for: childURL, names: tagNames)
+            let labelNumber = values.labelNumber ?? 0
+            let tagColors = Self.tagColors(for: childURL, names: tagNames, primaryLabelNumber: labelNumber)
             let hasCustomIcon = isDirectory && Self.folderHasCustomIcon(at: childURL)
 
             return FileEntry(
@@ -45,7 +46,7 @@ struct FileSystemService {
                 kind: kind(for: childURL, isDirectory: isDirectory),
                 isHidden: values.isHidden ?? name.hasPrefix("."),
                 tagNames: tagNames,
-                labelNumber: values.labelNumber ?? 0,
+                labelNumber: labelNumber,
                 tagColors: tagColors,
                 hasCustomIcon: hasCustomIcon
             )
@@ -118,7 +119,8 @@ struct FileSystemService {
 
             let isDirectory = values?.isDirectory ?? false
             let tagNames = values?.tagNames ?? []
-            let tagColors = Self.tagColors(for: childURL, names: tagNames)
+            let labelNumber = values?.labelNumber ?? 0
+            let tagColors = Self.tagColors(for: childURL, names: tagNames, primaryLabelNumber: labelNumber)
             let hasCustomIcon = isDirectory && Self.folderHasCustomIcon(at: childURL)
             results.append(FileEntry(
                 url: childURL,
@@ -129,7 +131,7 @@ struct FileSystemService {
                 kind: kind(for: childURL, isDirectory: isDirectory),
                 isHidden: values?.isHidden ?? name.hasPrefix("."),
                 tagNames: tagNames,
-                labelNumber: values?.labelNumber ?? 0,
+                labelNumber: labelNumber,
                 tagColors: tagColors,
                 hasCustomIcon: hasCustomIcon
             ))
@@ -139,13 +141,13 @@ struct FileSystemService {
     }
 
     /// Pull per-tag colour indices from `com.apple.metadata:_kMDItemUserTags`.
-    /// macOS stores Finder tags there as a binary plist of strings, each
-    /// either `"TagName"` (no colour) or `"TagName\n<0-7>"` (coloured).
-    /// `URLResourceKey.labelNumber` only surfaces the file's *primary*
-    /// colour, which is why a row tagged Red+Blue used to render two
-    /// identical grey dots — the second tag's colour was lost. Returns
-    /// an array aligned with `names` so the dot renderer can paint each
-    /// tag in its real Finder swatch.
+    /// macOS stores Finder tags there as a binary plist of strings; each
+    /// entry is multi-line `"<name>\n<colour 0-7>\n<flag>"` where the
+    /// trailing flag line is an internal "system tag" marker. Older
+    /// writers (raw `setxattr` callers, third-party taggers) sometimes
+    /// emit the flat `"<name>\n<colour>"` form or even bare `"<name>"`
+    /// with no colour. Returns an array aligned with `names` so the
+    /// dot renderer can paint each tag in its real Finder swatch.
     ///
     /// Pairs xattr entries with `names` *by index* rather than by name.
     /// The original name-based dictionary lookup silently fell back to
@@ -156,15 +158,28 @@ struct FileSystemService {
     /// existing tag rendered grey until the user retagged the file.
     /// macOS keeps the two sources ordered consistently, so
     /// index-pairing sidesteps the whole normalisation question.
-    static func tagColors(for url: URL, names: [String]) -> [Int] {
+    ///
+    /// `primaryLabelNumber` is the file's `URLResourceKey.labelNumber`
+    /// — a legacy `com.apple.FinderInfo` colour stamp that some files
+    /// (especially ones tagged via AppleScript's `label index of`, or
+    /// pre-Mavericks Finder labels) carry instead of a populated
+    /// `_kMDItemUserTags` xattr. When that's the only source of truth,
+    /// stamp it onto the primary tag so the dot renders the right
+    /// colour instead of dropping to grey.
+    static func tagColors(for url: URL, names: [String], primaryLabelNumber: Int = 0) -> [Int] {
         guard !names.isEmpty else { return [] }
         let parsed = parseUserTagsXattr(for: url)
-        guard !parsed.isEmpty else {
-            return Array(repeating: 0, count: names.count)
-        }
-        return (0..<names.count).map { i in
+        var colours: [Int] = (0..<names.count).map { i in
             i < parsed.count ? parsed[i].1 : 0
         }
+        // Legacy FinderInfo fallback: tagNames synthesises a name like
+        // "Blue" from the labelNumber, but the matching xattr entry
+        // (when even present) carries colour 0. Stamp the labelNumber
+        // onto the primary slot so the row still paints.
+        if primaryLabelNumber > 0, !colours.isEmpty, colours[0] == 0 {
+            colours[0] = primaryLabelNumber
+        }
+        return colours
     }
 
     /// Decode the raw xattr into `(name, colourIndex)` pairs. Defensive
@@ -185,18 +200,67 @@ struct FileSystemService {
               let entries = raw as? [String]
         else { return [] }
         return entries.map { entry -> (String, Int) in
-            // Split once on the first newline. macOS only ever stores
-            // a single trailing "\n<digit>"; treating the join as the
-            // tag name keeps custom names containing newlines intact
-            // even though Finder's UI doesn't expose that path.
-            guard let newline = entry.firstIndex(of: "\n") else {
-                return (entry, 0)
+            // Apple's URLResource writer (which Finder uses) stores
+            // entries as `"<name>\n<colour>\n<flag>"` — three lines.
+            // Raw `setxattr` callers and older writers use the flat
+            // `"<name>\n<colour>"` form, and uncoloured tags arrive
+            // as bare `"<name>"`. Split into lines and read the
+            // colour off line 2 so all three shapes parse the same.
+            let lines = entry.split(separator: "\n", omittingEmptySubsequences: false)
+            guard let first = lines.first else { return (entry, 0) }
+            let name = String(first)
+            let colour: Int
+            if lines.count >= 2,
+               let parsed = Int(lines[1]),
+               (0...7).contains(parsed) {
+                colour = parsed
+            } else {
+                colour = 0
             }
-            let name = String(entry[..<newline])
-            let suffix = entry[entry.index(after: newline)...]
-            let colour = Int(suffix).flatMap { (0...7).contains($0) ? $0 : nil } ?? 0
             return (name, colour)
         }
+    }
+
+    /// Currently-applied Finder tags for `url`. Reads
+    /// `com.apple.metadata:_kMDItemUserTags` so the tag picker can paint
+    /// checkmarks next to colours the file already carries and so the
+    /// toggle helper can compare against the on-disk set. Returns an
+    /// empty array for untagged files.
+    public static func currentTags(for url: URL) -> [(name: String, colour: Int)] {
+        parseUserTagsXattr(for: url)
+    }
+
+    /// Replace the Finder-tag set on `url` with `tags`. Pass an empty
+    /// array to clear every tag. Routes through `NSURL.setResourceValue`
+    /// because `URLResourceValues.tagNames` only gained a setter on
+    /// macOS 26 and we still ship to 14.0; the NSURL bridge has owned
+    /// this key since 10.9 and macOS normalises the xattr layout +
+    /// fires the Spotlight / Finder sync side effects either way.
+    public static func setTags(_ tags: [(name: String, colour: Int)], on url: URL) throws {
+        let formatted = tags.map { tag -> String in
+            guard (1...7).contains(tag.colour) else { return tag.name }
+            return "\(tag.name)\n\(tag.colour)"
+        }
+        try (url as NSURL).setResourceValue(formatted as NSArray, forKey: .tagNamesKey)
+    }
+
+    /// Toggle the standard Finder colour `label` (1-7) on `url`. When
+    /// the colour is already present, the matching tag is removed;
+    /// otherwise `displayName` is appended as a new tag. `displayName`
+    /// is what shows in the user's locale ("Red" / "빨강") so Finder
+    /// and Spotlight render the same string mq-dir wrote. `label == 0`
+    /// is the "clear all tags" affordance the picker uses for its
+    /// Clear row.
+    public static func toggleColourTag(label: Int, displayName: String, on url: URL) throws {
+        var tags = currentTags(for: url)
+        if label == 0 {
+            tags.removeAll()
+        } else if let existing = tags.firstIndex(where: { $0.colour == label }) {
+            tags.remove(at: existing)
+        } else {
+            tags.append((name: displayName, colour: label))
+        }
+        try setTags(tags, on: url)
     }
 
     /// Cheap presence check for the `Icon\r` sentinel macOS writes inside

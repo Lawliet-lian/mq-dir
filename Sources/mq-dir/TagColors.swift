@@ -11,6 +11,12 @@ import SwiftUI
 /// miss any non-English system. The labelNumber survives
 /// localisation untouched.
 enum TagColor {
+    /// Ordered list of the seven Finder colour labels in the same order
+    /// Finder's own tag picker uses (Red → Gray). The tag picker submenu
+    /// iterates this so the menu always shows all seven, in a familiar
+    /// order, regardless of which subset the file currently carries.
+    static let allLabels: [Int] = [6, 7, 5, 2, 4, 3, 1]
+
     static func color(forLabel index: Int) -> Color? {
         switch index {
         case 1: return .gray
@@ -28,6 +34,41 @@ enum TagColor {
     /// skips the index plumbing at the call site.
     static func color(for entry: FileEntry) -> Color? {
         color(forLabel: entry.labelNumber)
+    }
+
+    /// Locale-aware display name for the standard Finder colour `label`.
+    /// Used as the tag-name string written to `_kMDItemUserTags` when
+    /// the user picks a colour from the context-menu Tags submenu, so
+    /// the value mq-dir stores matches what a Korean (or English) user
+    /// would have seen if they'd tagged the file in Finder instead.
+    /// Custom Finder tag-renames (e.g. user renamed "Red" to "긴급")
+    /// aren't honoured — public API for the user's customised palette
+    /// doesn't exist, so we stick with the system defaults.
+    static func displayName(forLabel label: Int) -> String {
+        let isKorean = Locale.current.language.languageCode?.identifier == "ko"
+        if isKorean {
+            switch label {
+            case 1: return "회색"
+            case 2: return "초록"
+            case 3: return "보라"
+            case 4: return "파랑"
+            case 5: return "노랑"
+            case 6: return "빨강"
+            case 7: return "주황"
+            default: return ""
+            }
+        } else {
+            switch label {
+            case 1: return "Gray"
+            case 2: return "Green"
+            case 3: return "Purple"
+            case 4: return "Blue"
+            case 5: return "Yellow"
+            case 6: return "Red"
+            case 7: return "Orange"
+            default: return ""
+            }
+        }
     }
 }
 
