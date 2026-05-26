@@ -22,7 +22,7 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 - 🟦 **1 / 2H / 2V / 4-pane layouts** — focused-pane routing, independent folder per pane.
 - ↹ **Per-pane tabs** — Safari-style strip with X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], drag-to-reorder, drag a tab onto Favorites to bookmark its folder, right-click Close Other / Close to Right / Duplicate, last-tab safety placeholder.
 - 🌳 **VS Code-style tree view** — per-tab toggle, lazy child loading, separate chevron hit target (clicking a folder name selects without expanding), Shift / Cmd multi-select, file drag-out to external apps. New tabs via **⌘+double-click** or **⌘+Enter** on a folder (same as list view).
-- ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ step through rows (hold to repeat, Shift to extend the selection); Return opens, ⌘+Return opens in a new tab. Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, and Move to Trash. Multi-selection right-clicks act on the whole selection. Restoring keyboard focus after a rename is handled correctly in both list and tree view.
+- ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ step through rows (hold to repeat, Shift to extend the selection); Return opens, ⌘+Return opens in a new tab. Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, **Normalize Filename to NFC** (rewrites Hangul filenames stored as decomposed NFD on disk to the precomposed NFC form Windows / Slack / Discord / Gmail / web uploaders expect — multi-select supported, no-op on already-NFC names), and Move to Trash. Multi-selection right-clicks act on the whole selection. Restoring keyboard focus after a rename is handled correctly in both list and tree view.
 - ⚙️ **Settings → Shortcuts** — 17 actions re-bindable from Preferences (⌘,), including F1…F12. Reset-to-default per row.
 - 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). PDFs render through PDFKit with continuous scroll + paging; everything else routes through Quick Look for images, code, video, audio, office docs (DOCX/PPTX/XLSX). MarkdownUI handles `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries. Zip archives preview in-pane (listing + single-entry decode). Multi-page navigation for non-PDF documents and formats macOS Quick Look has no generator for (HWP, etc.) is best done with ⎵ to summon the floating Quick Look panel, or ⇧↩ to open in the system default app (e.g. Hancom Office Viewer for HWP).
 - 🏷️ **Finder tag display** — per-tag colour swatches (red / orange / yellow / green / blue / purple / grey) read straight from macOS metadata, including multi-tag rows. Sidebar Tags section lists every tag in the current folder. Read-only — applying or editing tags happens in Finder.
@@ -48,7 +48,7 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 
 ## Status
 
-**v0.1.0 — first non-beta cut.** Each tagged build is Developer ID-signed and Apple-notarized. The feature set above has been daily-driven by the maintainer and a small early-adopter group; expect occasional rough edges around ergonomics. Per-release detail lives on the [Releases page](https://github.com/h5nam/mq-dir/releases).
+**v0.1.2 — latest stable cut.** Each tagged build is Developer ID-signed and Apple-notarized. The feature set above has been daily-driven by the maintainer and a small early-adopter group; expect occasional rough edges around ergonomics. Per-release detail lives on the [Releases page](https://github.com/h5nam/mq-dir/releases).
 
 ## Requirements
 
@@ -106,7 +106,7 @@ PRs welcome. Contributions are accepted via [DCO](https://developercertificate.o
 ## Releasing (maintainers only)
 
 ```bash
-Scripts/release.sh 0.1.1
+Scripts/release.sh 0.1.3
 ```
 
 That's it. The script bumps the version, builds Release with Developer ID, re-signs every nested binary inside-out (Sparkle's helpers don't auto-inherit signing), notarizes via the stored `mq-dir-notary` keychain profile + staples, builds and EdDSA-signs the DMG, appends a fresh `<item>` to `docs/appcast.xml`, bumps `Casks/mq-dir.rb`, tags + pushes, and creates the GitHub release.

@@ -22,7 +22,7 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 - 🟦 **1 / 2H / 2V / 4-pane 레이아웃** — 활성 pane으로 라우팅, pane마다 독립 폴더.
 - ↹ **Pane별 탭** — Safari 스타일 탭 바, X / +, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], 드래그로 재정렬, 탭을 즐겨찾기로 끌어다 추가, 우클릭에 Close Other / Close to Right / Duplicate, 마지막 탭 안전장치.
 - 🌳 **VS Code 스타일 트리 뷰** — 탭별 토글, 자식 lazy 로드, 셰브론만 펼침/접힘(폴더 이름 클릭은 선택만), Shift / Cmd 멀티선택, 외부 앱으로 파일 드래그 아웃. 새 탭은 폴더에 **⌘+더블클릭** 또는 **⌘+Enter** (리스트뷰와 동일).
-- ⌨️ **키보드 네비게이션 + Finder급 우클릭 메뉴** — ↑/↓로 행 이동(꾹 누르면 연속 이동), Shift로 다중 선택 확장, Return으로 열기, ⌘+Return으로 새 탭 열기. 우클릭 메뉴에 Open With ▸ (LaunchServices 후보 + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, Move to Trash. 다중 선택 시 선택 전체에 적용. rename 후 키보드 포커스 복원도 list/tree 양쪽에서 정상.
+- ⌨️ **키보드 네비게이션 + Finder급 우클릭 메뉴** — ↑/↓로 행 이동(꾹 누르면 연속 이동), Shift로 다중 선택 확장, Return으로 열기, ⌘+Return으로 새 탭 열기. 우클릭 메뉴에 Open With ▸ (LaunchServices 후보 + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, **Normalize Filename to NFC** (디스크에 NFD(자모분리형)로 저장된 한글 파일명을 Windows / Slack / Discord / Gmail / 웹 업로더가 기대하는 NFC(조합형)로 다시 써줍니다 — 다중 선택 지원, 이미 NFC인 파일은 no-op), Move to Trash. 다중 선택 시 선택 전체에 적용. rename 후 키보드 포커스 복원도 list/tree 양쪽에서 정상.
 - ⚙️ **설정 → 단축키** — Preferences(⌘,)에서 17개 액션을 자유롭게 재바인딩, F1…F12 지원. 행별 기본값 리셋.
 - 👀 **탭별 미리보기 패널** — pane 헤더에서 토글 (또는 ⌘⇧P). PDF는 PDFKit으로 연속 스크롤 + 페이지 네비게이션, 그 외 이미지·코드·비디오·오디오·오피스 문서(DOCX/PPTX/XLSX)는 Quick Look으로, `.md`는 MarkdownUI로 GFM(테이블, 코드 블록, 리스트) 풀 렌더링. 폴더·다중·빈 선택은 별도 요약. zip 아카이브는 in-pane(목록 + 단일 항목 디코드) 미리보기. 비-PDF 문서나 macOS Quick Look이 generator를 제공하지 않는 포맷(HWP 등)의 다중 페이지 탐색은 ⎵로 floating Quick Look을 띄우거나 ⇧↩으로 시스템 기본 앱(HWP면 한컴 Office Viewer 등)에서 열어 보세요.
 - 🏷️ **Finder 태그 표시** — 태그별 색상 점(빨강 / 주황 / 노랑 / 초록 / 파랑 / 보라 / 회색)을 macOS 메타데이터에서 직접 읽어 다중 태그도 모두 렌더링. 사이드바 Tags 섹션에 현재 폴더의 모든 태그 노출. 읽기 전용 — 태그 적용/편집은 Finder에서.
@@ -48,7 +48,7 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 
 ## 상태
 
-**v0.1.0 — 첫 non-beta 릴리즈.** 모든 태그 빌드는 Developer ID로 서명되고 Apple notarization까지 끝낸 상태로 배포됩니다. 위 기능 세트는 메인테이너와 소수의 얼리 어답터 그룹이 일상 사용 중이며, 일부 사용감 부분에 거친 모서리가 남아 있을 수 있습니다. 릴리즈별 상세는 [Releases 페이지](https://github.com/h5nam/mq-dir/releases)에서 확인하세요.
+**v0.1.2 — 최신 안정 버전.** 모든 태그 빌드는 Developer ID로 서명되고 Apple notarization까지 끝낸 상태로 배포됩니다. 위 기능 세트는 메인테이너와 소수의 얼리 어답터 그룹이 일상 사용 중이며, 일부 사용감 부분에 거친 모서리가 남아 있을 수 있습니다. 릴리즈별 상세는 [Releases 페이지](https://github.com/h5nam/mq-dir/releases)에서 확인하세요.
 
 ## 요구사항
 
@@ -106,7 +106,7 @@ PR 환영합니다. 기여는 [DCO](https://developercertificate.org/) 방식으
 ## 릴리즈 (메인테이너 전용)
 
 ```bash
-Scripts/release.sh 0.1.1
+Scripts/release.sh 0.1.3
 ```
 
 이게 전부입니다. 스크립트가 버전 bump → Developer ID로 Release 빌드 → 모든 nested binary inside-out 재서명 (Sparkle helper들은 서명을 자동 상속하지 않음) → `mq-dir-notary` keychain profile로 notarize + staple → DMG 빌드 + EdDSA 서명 → `docs/appcast.xml`에 새 `<item>` 추가 → `Casks/mq-dir.rb` bump → 태그 + push → GitHub Release 생성까지 한 번에 처리합니다.
