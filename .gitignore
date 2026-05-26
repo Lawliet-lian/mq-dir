@@ -59,3 +59,7 @@ CLAUDE.md
 # the shipping repo (sits at ~tens of MB, unrelated to source).
 hyperframes/
 
+# Threads / X publishing tooling — local-only automation, same category
+# as marketing/ (copy decks). Holds API tokens and post drafts.
+Scripts/x-publish/
+
