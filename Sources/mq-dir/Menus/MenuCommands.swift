@@ -175,14 +175,20 @@ struct MenuCommands: Commands {
         NotificationCenter.default.post(name: name, object: nil, userInfo: userInfo)
     }
 
-    /// Edit-menu dispatcher. If the focused responder is a text view
-    /// (search field, inline rename TextField, etc.) forward to its
-    /// native selector so the system text-edit behaviour wins. Anywhere
-    /// else, post the file-level notification so the focused pane's
-    /// view model handles the action.
+    /// Edit-menu dispatcher. Only forward to the system text selector
+    /// when the focused responder is genuinely editing text — i.e. the
+    /// NSTextField field editor that powers the search box, inline
+    /// rename, etc. A plain `responder is NSText` check used to fire
+    /// here too, but `QLPreviewView` installs its own read-only
+    /// NSTextView as first responder once it appears, so ⌘C on a
+    /// .docx (or any non-markdown file with a text-rendered Quick
+    /// Look preview) was silently sent to that view as a no-op
+    /// instead of running our file-level copy. `isFieldEditor` is
+    /// the load-bearing filter — only true for the field editor an
+    /// NSTextField installs while the user is typing.
     private func dispatch(text selector: Selector, file notification: Notification.Name) {
         let responder = NSApp.keyWindow?.firstResponder
-        if responder is NSText {
+        if let textView = responder as? NSTextView, textView.isFieldEditor {
             NSApp.sendAction(selector, to: responder, from: nil)
         } else {
             post(notification)
