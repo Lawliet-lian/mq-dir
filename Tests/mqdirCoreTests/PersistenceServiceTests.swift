@@ -263,6 +263,7 @@ final class PersistenceServiceTests: XCTestCase {
                        "an explicit .light preference must survive a save/load cycle")
     }
 
+
     func testWorkspaceSettingsDefaultShortcutOverridesAreEmpty() {
         let settings = WorkspaceSettings()
         XCTAssertTrue(settings.shortcutOverrides.isEmpty,

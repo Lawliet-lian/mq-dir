@@ -29,6 +29,15 @@ struct FileEntryContextMenu: View {
     /// directory.
     private var allFiles: Bool { !targets.contains(where: \.isDirectory) }
 
+    /// True if any target's filename is in decomposed (NFD) form, so
+    /// the "Normalize Filename to NFC" menu item is worth showing.
+    /// Uses byte-level comparison because Swift's `String ==`
+    /// collapses canonically-equivalent strings — see
+    /// `String.isDecomposedRelativeToNFC`.
+    private var anyNeedsNFCNormalization: Bool {
+        targets.contains { $0.name.isDecomposedRelativeToNFC }
+    }
+
     /// Union of every Finder colour label currently applied across the
     /// menu's targets. Drives the filled-circle indicator next to each
     /// colour in the Tags submenu so the user can see, at a glance,
@@ -122,6 +131,11 @@ struct FileEntryContextMenu: View {
             // multi-rename is its own UX and lives elsewhere.
             Button("Rename") { viewModel.beginRename(target) }
                 .keyboardShortcut(workspace.workspace.settings.binding(for: .rename))
+        }
+        if anyNeedsNFCNormalization {
+            Button(count > 1 ? "Normalize \(count) Filenames to NFC" : "Normalize Filename to NFC") {
+                viewModel.normalizeFilenamesToNFC(targets)
+            }
         }
         Button(count > 1 ? "Move \(count) Items to Trash" : "Move to Trash") {
             viewModel.moveToTrash(targets)

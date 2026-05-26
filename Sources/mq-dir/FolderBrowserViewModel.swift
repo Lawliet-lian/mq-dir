@@ -1372,6 +1372,24 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         renameDraft = ""
     }
 
+    /// Rename any decomposed-Hangul (NFD) filenames in `entries` to
+    /// NFC form on disk. Used by the right-click "Normalize Filename
+    /// to NFC" action and (via `AppKitFileDragModifier`) automatically
+    /// on drag-out when the matching workspace setting is on.
+    /// Delegates the actual rename to `HangulNFCFilename.renameToNFC`,
+    /// which bypasses `FileManager.moveItem` (a no-op on APFS for
+    /// normalisation-only renames). Reloads at the end if anything
+    /// actually changed.
+    func normalizeFilenamesToNFC(_ entries: [FileEntry]) {
+        var changed = false
+        for entry in entries {
+            if HangulNFCFilename.renameToNFC(entry.url) != nil {
+                changed = true
+            }
+        }
+        if changed { reload() }
+    }
+
     /// Right-click "Move to Trash" → `FileManager.trashItem` per entry.
     /// Failures (permission, missing file) are logged to stderr and skipped
     /// so a partial selection doesn't abort the whole operation.
