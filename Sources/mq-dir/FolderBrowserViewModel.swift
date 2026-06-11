@@ -335,64 +335,83 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     /// Navigate to a folder, recording the current location in the back stack
-    /// and clearing the forward stack. This is the user-initiated path.
-    /// Refreshes the security-scoped bookmark so persistence captures the
-    /// latest folder reference without a separate "save bookmark" step.
+    /// and clearing the forward stack. This is the user-initiated path. The
+    /// security-scoped bookmark refresh and scope re-acquisition happen in the
+    /// shared `navigate(to:)` so back/forward navigation gets them too.
     func openFolder(_ url: URL) {
-        if let current = folderURL, current != url {
-            backStack.append(currentFrame())
+        if let current = folderURL, current != url, let frame = currentFrame() {
+            backStack.append(frame)
         }
         forwardStack.removeAll()
-        // Refresh the durable bookmark for persistence. A failure here is
-        // non-fatal — we just won't be able to restore this folder across
-        // launches in sandboxed builds, which matches non-sandboxed today.
-        currentBookmark = try? PersistenceService.makeBookmark(for: url)
         navigate(to: url, restoring: [])
     }
 
     func goBack() {
         guard let previous = backStack.popLast() else { return }
-        if folderURL != nil {
-            forwardStack.append(currentFrame())
+        if let frame = currentFrame() {
+            forwardStack.append(frame)
         }
         navigate(to: previous.url, restoring: previous.selectionPaths)
     }
 
     func goForward() {
         guard let next = forwardStack.popLast() else { return }
-        if folderURL != nil {
-            backStack.append(currentFrame())
+        if let frame = currentFrame() {
+            backStack.append(frame)
         }
         navigate(to: next.url, restoring: next.selectionPaths)
     }
 
     /// Snapshot of the current folder + selection for the back/forward
-    /// stacks. `selectedURLs` already resolves through the O(1) entry
+    /// stacks, or nil when no folder is open (nothing worth pushing onto
+    /// the history). `selectedURLs` already resolves through the O(1) entry
     /// index added for the bulk-select perf fix, so capturing it here
     /// stays cheap even on large multi-selections.
-    private func currentFrame() -> NavigationFrame {
-        NavigationFrame(
-            url: folderURL ?? URL(fileURLWithPath: "/"),
+    private func currentFrame() -> NavigationFrame? {
+        guard let folderURL else { return nil }
+        return NavigationFrame(
+            url: folderURL,
             selectionPaths: selectedURLs.map(\.path)
         )
     }
 
     /// Bare navigation that does NOT touch back/forward stacks. Used by
-    /// `goBack`, `goForward`, and the initial `openFolder` after stack
-    /// bookkeeping. Resets selection and triggers a reload.
+    /// `openFolder`, `goBack`, and `goForward` after stack bookkeeping.
+    /// Resets selection and triggers a reload.
     ///
     /// `restoring` queues a per-path selection set for the next
     /// successful enumeration so back/forward navigation lands the
     /// user back on the rows they had picked — empty for a fresh
     /// `openFolder()` so user-driven nav still starts clean.
     ///
-    /// Balances any outstanding security-scope access on the previous URL
-    /// before assigning the new one — required for sandboxed builds.
+    /// Refreshes the durable `currentBookmark` so persistence captures the
+    /// folder we actually land on — `goBack`/`goForward` route through here
+    /// too, so without this a save after navigating Back would persist the
+    /// folder the user just left. A bookmark failure here is non-fatal: we
+    /// just won't be able to restore this folder across launches in sandboxed
+    /// builds, which matches the non-sandboxed behaviour today.
+    ///
+    /// Balances any outstanding security-scope access on the previous URL,
+    /// then re-acquires the claim on the new one — both required for
+    /// sandboxed builds. `hasSecurityScopeAccess` and `scopedURL` move as a
+    /// single unit so they never diverge; `deinit` balances through
+    /// `scopedURL`, mirroring `init(state:)` and the original `openFolder`.
     private func navigate(to url: URL, restoring selectionPaths: [String]) {
-        if hasSecurityScopeAccess, let previous = folderURL, previous != url {
+        if hasSecurityScopeAccess, let previous = scopedURL {
             previous.stopAccessingSecurityScopedResource()
             hasSecurityScopeAccess = false
             scopedURL = nil
+        }
+        currentBookmark = try? PersistenceService.makeBookmark(for: url)
+        // Re-acquire the claim for the new folder. Resolve through the
+        // freshly-made bookmark (not `url` directly) so the URL we claim and
+        // store in `scopedURL` carries the same security scope `init(state:)`
+        // would resolve on next launch.
+        if let bookmark = currentBookmark,
+           let scoped = PersistenceService.resolveBookmark(bookmark),
+           scoped.startAccessingSecurityScopedResource() {
+            hasSecurityScopeAccess = true
+            scopedURL = scoped
         }
         folderURL = url
         selection.removeAll()
@@ -434,6 +453,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard !trimmed.isEmpty, let root = folderURL else {
             searchResults = []
             isSearching = false
+            // Drop the just-cancelled token's identity so a stale deferred
+            // block (which guards on `searchCancelToken === token`) can't
+            // match and flip `isSearching` back on after we've cleared it.
+            searchCancelToken = nil
             return
         }
 
@@ -845,36 +868,52 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
               !items.isEmpty
         else { return }
 
+        // Read the cut marker on the main actor *before* detaching — the
+        // pasteboard is main-actor state, and the detached loop only needs
+        // the resolved `isCut` flag plus the URLs.
         let isCut = pb.types?.contains(Self.cutMarkerType) == true
-        let fm = FileManager.default
-        for source in items {
-            let target = uniqueDestination(for: folder.appendingPathComponent(source.lastPathComponent))
-            do {
-                if isCut {
-                    try fm.moveItem(at: source, to: target)
-                } else {
-                    try fm.copyItem(at: source, to: target)
+        Task {
+            await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                for source in items {
+                    var dest = folder.appendingPathComponent(source.lastPathComponent)
+                    // Same standardized self-drop + descendant guards drop
+                    // uses, so paste-into-same-folder and paste-into-descendant
+                    // behave identically to a drag-drop.
+                    if source.standardizedFileURL == dest.standardizedFileURL { continue }
+                    if fm.fileExists(atPath: dest.path) {
+                        dest = Self.uniqueDestination(for: source, in: folder)
+                    }
+                    if dest.path.hasPrefix(source.path + "/") { continue }
+                    do {
+                        if isCut {
+                            try fm.moveItem(at: source, to: dest)
+                        } else {
+                            try fm.copyItem(at: source, to: dest)
+                        }
+                    } catch {
+                        FileHandle.standardError.write(
+                            Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                        )
+                    }
                 }
-            } catch {
-                FileHandle.standardError.write(
-                    Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                )
+            }.value
+            // After a cut+paste the source URLs are gone, so wipe the
+            // pasteboard to avoid a follow-up paste silently failing on
+            // missing files. Plain-copy paste leaves the clipboard alone
+            // so the user can paste the same set into multiple folders.
+            // Back on the main actor here (NSPasteboard is main-actor state).
+            if isCut {
+                pb.clearContents()
             }
+            // Tell every other pane/tab to refresh — the source folder
+            // (potentially open in another pane after a cross-pane
+            // cut+paste) and any pane viewing the destination both need
+            // to drop the stale entries / pick up the new ones. The
+            // broadcast reloads this pane too, so we don't reload directly.
+            // Same pattern moveToTrash / acceptDrop / duplicate use.
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
-        // After a cut+paste the source URLs are gone, so wipe the
-        // pasteboard to avoid a follow-up paste silently failing on
-        // missing files. Plain-copy paste leaves the clipboard alone
-        // so the user can paste the same set into multiple folders.
-        if isCut {
-            pb.clearContents()
-        }
-        reload()
-        // Tell every other pane/tab to refresh — the source folder
-        // (potentially open in another pane after a cross-pane
-        // cut+paste) and any pane viewing the destination both need
-        // to drop the stale entries / pick up the new ones. Same
-        // broadcast pattern moveToTrash / acceptDrop / duplicate use.
-        NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
     }
 
     /// Convenience around `moveToTrash` that operates on the live
@@ -1451,13 +1490,18 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                 let fm = FileManager.default
                 for source in urls {
                     var dest = destinationFolder.appendingPathComponent(source.lastPathComponent)
-                    if source == dest { continue }
-                    // Reject dropping a folder into itself or any descendant.
-                    if dest.path.hasPrefix(source.path + "/") { continue }
+                    // Standardize both sides so a trailing-slash or
+                    // percent-encoding mismatch can't slip a no-op self-drop
+                    // past the equality check.
+                    if source.standardizedFileURL == dest.standardizedFileURL { continue }
                     // Auto-rename on conflict instead of skipping.
                     if fm.fileExists(atPath: dest.path) {
                         dest = Self.uniqueDestination(for: source, in: destinationFolder)
                     }
+                    // Reject dropping a folder into itself or any descendant.
+                    // Checked against the *post-rename* dest so a conflict
+                    // rename can't sneak a descendant target past the guard.
+                    if dest.path.hasPrefix(source.path + "/") { continue }
                     do {
                         if copy {
                             try fm.copyItem(at: source, to: dest)
