@@ -41,11 +41,22 @@ final class DirectoryWatcher: @unchecked Sendable {
         self.onChange = onChange
         self.debounceQueue = DispatchQueue(label: "mq-dir.directory-watcher.\(UUID().uuidString)")
 
+        // Hand FSEvents a *retained* box holding a *weak* reference to
+        // `self` as the context info. The stream's +1 keeps the box alive
+        // (so a callback in flight on `debounceQueue` never dereferences
+        // freed memory), while the watcher itself stays un-retained — so
+        // the VM's "drop the reference and ARC tears it down" contract
+        // (FolderBrowserViewModel relies on `deinit` → `stop()`) keeps
+        // working. A callback racing teardown weak-loads either a live
+        // watcher or nil, never a dangling pointer. The box retain is
+        // balanced by the stream's `release` callback, invoked when the
+        // stream is invalidated in `stop()`.
+        let box = WatcherContextBox(self)
         var context = FSEventStreamContext(
             version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
+            info: Unmanaged.passRetained(box).toOpaque(),
             retain: nil,
-            release: nil,
+            release: DirectoryWatcher.contextRelease,
             copyDescription: nil
         )
 
@@ -65,7 +76,10 @@ final class DirectoryWatcher: @unchecked Sendable {
         ) else {
             // FSEventStreamCreate returns nil on permission failures
             // or invalid paths. Drop the watcher silently — manual
-            // ⌘R reload still works for the user.
+            // ⌘R reload still works for the user. No stream ever adopted
+            // the context, so its `release` callback won't fire; balance
+            // the `passRetained` here so the box isn't leaked.
+            Unmanaged<WatcherContextBox>.fromOpaque(context.info!).release()
             self.stream = nil
             return
         }
@@ -81,6 +95,11 @@ final class DirectoryWatcher: @unchecked Sendable {
     func stop() {
         guard let stream else { return }
         FSEventStreamStop(stream)
+        // `FSEventStreamInvalidate` invokes the context `release` callback
+        // (`contextRelease`) exactly once, balancing the `passRetained`
+        // from init. `guard let stream` keeps this idempotent: a second
+        // `stop()` (or `deinit` after an explicit `stop()`) returns early,
+        // so the release never runs twice.
         FSEventStreamInvalidate(stream)
         FSEventStreamRelease(stream)
         self.stream = nil
@@ -110,14 +129,36 @@ final class DirectoryWatcher: @unchecked Sendable {
         debounceQueue.asyncAfter(deadline: .now() + DirectoryWatcher.debounceLatency, execute: work)
     }
 
-    /// FSEvents C-callback. The `info` pointer is the unretained
-    /// `DirectoryWatcher` we registered in the context above; we
-    /// hand it back through `Unmanaged` and forward to the instance
-    /// method without retaining (FSEvents is the lifecycle owner —
-    /// we explicitly stop+release in `stop()`).
+    /// FSEvents C-callback. The `info` pointer is the *retained*
+    /// `WatcherContextBox` registered in the context above; the box is
+    /// guaranteed alive by the stream's retain, and the watcher is
+    /// weak-loaded from it — a callback racing a concurrent teardown
+    /// gets nil instead of a dangling pointer. `takeUnretainedValue`
+    /// because the retain is owned by the stream's context and balanced
+    /// by `contextRelease` on invalidation.
     private static let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
         guard let info else { return }
-        let watcher = Unmanaged<DirectoryWatcher>.fromOpaque(info).takeUnretainedValue()
-        watcher.scheduleDebouncedNotify()
+        let box = Unmanaged<WatcherContextBox>.fromOpaque(info).takeUnretainedValue()
+        box.watcher?.scheduleDebouncedNotify()
     }
+
+    /// Context `release` callback. FSEvents calls this exactly once when
+    /// the stream is invalidated (from `stop()`), balancing the
+    /// `passRetained(box)` we set as `context.info` at init.
+    private static let contextRelease: CFAllocatorReleaseCallBack = { info in
+        guard let info else { return }
+        Unmanaged<WatcherContextBox>.fromOpaque(info).release()
+    }
+}
+
+/// Retained by the FSEvents stream context in place of the watcher
+/// itself. Holding the watcher only weakly means the stream's +1 keeps
+/// *this box* alive across in-flight callbacks without preventing the
+/// watcher's `deinit` (which is what stops the stream — retaining the
+/// watcher from its own stream context would deadlock that teardown
+/// into a permanent leak). ARC weak references are thread-safe, so the
+/// callback's weak-load on `debounceQueue` is race-free.
+private final class WatcherContextBox {
+    weak var watcher: DirectoryWatcher?
+    init(_ watcher: DirectoryWatcher) { self.watcher = watcher }
 }
