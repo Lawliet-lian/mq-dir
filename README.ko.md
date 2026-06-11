@@ -1,6 +1,6 @@
 # mq-dir
 
-> 여러 프로젝트와 AI 에이전트를 동시에 굴리는 사람을 위한 macOS 네이티브 파일 매니저. 최대 4개의 독립된 pane이 나란히, 각 pane이 자기 폴더·정렬·스크롤 위치를 따로 들고 있고, 재시작 후에도 그대로 남아 있습니다.
+> 무료·오픈소스 macOS 네이티브 파일 매니저. 여러 프로젝트와 AI 에이전트를 동시에 굴리는 사람을 위해 — 프로젝트당 최대 4개의 독립된 pane, 각 pane이 자기 폴더·정렬·스크롤 위치를 따로 들고 재시작 후에도 그대로 살아 있습니다. 텔레메트리 0, v1에서 영원히.
 
 [![release](https://img.shields.io/github/v/release/h5nam/mq-dir?label=release&color=blue)](https://github.com/h5nam/mq-dir/releases)
 [![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)](#요구사항)
@@ -22,7 +22,7 @@ mq-dir은 최대 4개의 pane을 나란히 띄워줍니다. 하나는 프로젝�
 - 🟦 **1 / 2H / 2V / 4-pane 레이아웃** — 활성 pane으로 라우팅, pane마다 독립 폴더.
 - ↹ **Pane별 탭** — Safari 스타일 탭 바, X / +, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], 드래그로 재정렬, 탭을 즐겨찾기로 끌어다 추가, 우클릭에 Close Other / Close to Right / Duplicate, 마지막 탭 안전장치.
 - 🌳 **VS Code 스타일 트리 뷰** — 탭별 토글, 자식 lazy 로드, 셰브론만 펼침/접힘(폴더 이름 클릭은 선택만), Shift / Cmd 멀티선택, 외부 앱으로 파일 드래그 아웃. 새 탭은 폴더에 **⌘+더블클릭** 또는 **⌘+Enter** (리스트뷰와 동일).
-- ⌨️ **키보드 네비게이션 + Finder급 우클릭 메뉴** — ↑/↓로 행 이동(꾹 누르면 연속 이동), Shift로 다중 선택 확장, Return으로 열기, ⌘+Return으로 새 탭 열기. 우클릭 메뉴에 Open With ▸ (LaunchServices 후보 + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, **Normalize Filename to NFC** (디스크에 NFD(자모분리형)로 저장된 한글 파일명을 Windows / Slack / Discord / Gmail / 웹 업로더가 기대하는 NFC(조합형)로 다시 써줍니다 — 다중 선택 지원, 이미 NFC인 파일은 no-op), Move to Trash. 다중 선택 시 선택 전체에 적용. rename 후 키보드 포커스 복원도 list/tree 양쪽에서 정상.
+- ⌨️ **키보드 네비게이션 + Finder급 우클릭 메뉴** — ↑/↓로 행 이동(꾹 누르면 연속 이동), Shift로 다중 선택 확장, Return으로 열기, ⌘+Return으로 새 탭 열기. **⌘C / ⌘X / ⌘V** 복사 / 잘라내기 / 붙여넣기 — Windows Explorer 스타일 이동 시맨틱(⌘X로 마킹한 선택은 ⌘V에서 복사가 아닌 이동, Finder엔 없는 동작). 우클릭 메뉴에 Open With ▸ (LaunchServices 후보 + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, **Normalize Filename to NFC** (디스크에 NFD(자모분리형)로 저장된 한글 파일명을 Windows / Slack / Discord / Gmail / 웹 업로더가 기대하는 NFC(조합형)로 다시 써줍니다 — 다중 선택 지원, 이미 NFC인 파일은 no-op), Move to Trash. 다중 선택 시 선택 전체에 적용. rename 후 키보드 포커스 복원도 list/tree 양쪽에서 정상.
 - ⚙️ **설정 → 단축키** — Preferences(⌘,)에서 17개 액션을 자유롭게 재바인딩, F1…F12 지원. 행별 기본값 리셋.
 - 👀 **탭별 미리보기 패널** — pane 헤더에서 토글 (또는 ⌘⇧P). PDF는 PDFKit으로 연속 스크롤 + 페이지 네비게이션, 그 외 이미지·코드·비디오·오디오·오피스 문서(DOCX/PPTX/XLSX)는 Quick Look으로, `.md`는 MarkdownUI로 GFM(테이블, 코드 블록, 리스트) 풀 렌더링. 폴더·다중·빈 선택은 별도 요약. zip 아카이브는 in-pane(목록 + 단일 항목 디코드) 미리보기. 비-PDF 문서나 macOS Quick Look이 generator를 제공하지 않는 포맷(HWP 등)의 다중 페이지 탐색은 ⎵로 floating Quick Look을 띄우거나 ⇧↩으로 시스템 기본 앱(HWP면 한컴 Office Viewer 등)에서 열어 보세요.
 - 🏷️ **Finder 태그 표시** — 태그별 색상 점(빨강 / 주황 / 노랑 / 초록 / 파랑 / 보라 / 회색)을 macOS 메타데이터에서 직접 읽어 다중 태그도 모두 렌더링. 사이드바 Tags 섹션에 현재 폴더의 모든 태그 노출. 읽기 전용 — 태그 적용/편집은 Finder에서.
@@ -89,9 +89,14 @@ swift test
 
 ## 프라이버시
 
-**Telemetry 없음. Crash report 없음. Analytics 없음. v1에서는 영원히.**
+**외부로 전화 거는 일 없습니다. Telemetry 0, Crash report 0, Analytics 0. v1에서는 영원히.**
 
-mq-dir은 자동 업데이트 체크를 빼면 모든 게 로컬에서 돌아갑니다. 파일 시스템을 읽어서 화면에 보여주고, 자체 상태는 `~/Library/Application Support/com.mqdir.app/`에 씁니다. 외부로 나가는 트래픽은 Sparkle이 하루 한 번 `https://h5nam.github.io/mq-dir/appcast.xml`을 받아오는 것뿐, 그 외엔 어디로도 보내지 않습니다.
+mq-dir은 기본적으로 로컬에서만 돌아갑니다. 외부로 나가는 트래픽은 좁게 정의된 두 가지뿐, 둘 다 소스로 검증 가능합니다:
+
+1. **Sparkle 업데이트 체크** — 24시간마다 `https://h5nam.github.io/mq-dir/appcast.xml`을 받아옴. 공개 파일이고 식별 정보는 요청에 붙이지 않습니다.
+2. **Send Feedback** — 사이드바 footer에서 *직접* 버튼을 누른 경우에만, 메시지 + 옵션 스크린샷을 메인테이너 Discord 웹훅에 전송. 안 누르면 아무것도 안 나갑니다.
+
+백그라운드 분석, 사용 ping, 크래시 리포트 업로드 없음. 로컬 상태는 `~/Library/Application Support/com.mqdir.app/`에 저장됩니다.
 
 향후 v1.x에서 opt-in crash reporting이 제안된다면, 기본값 OFF인 설정 토글로, 소스가 공개되어 검증 가능한 형태로만 들어갑니다.
 

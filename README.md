@@ -1,6 +1,6 @@
 # mq-dir
 
-> The native macOS file manager for AI multi-taskers. Up to four independent panes for parallel projects and agents — persistent state, native polish, no compromise.
+> Free, open-source macOS file manager for AI multi-taskers. Up to four independent panes per project, each remembering its folder, sort, and scroll position across launches — with zero telemetry, ever.
 
 [![release](https://img.shields.io/github/v/release/h5nam/mq-dir?label=release&color=blue)](https://github.com/h5nam/mq-dir/releases)
 [![platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)](#requirements)
@@ -22,7 +22,7 @@ mq-dir gives you up to four independent panes side by side. One per project, one
 - 🟦 **1 / 2H / 2V / 4-pane layouts** — focused-pane routing, independent folder per pane.
 - ↹ **Per-pane tabs** — Safari-style strip with X/+, ⌘T / ⌘W / ⌘⇧T / ⌘1…⌘9 / ⌘⇧[ / ⌘⇧], drag-to-reorder, drag a tab onto Favorites to bookmark its folder, right-click Close Other / Close to Right / Duplicate, last-tab safety placeholder.
 - 🌳 **VS Code-style tree view** — per-tab toggle, lazy child loading, separate chevron hit target (clicking a folder name selects without expanding), Shift / Cmd multi-select, file drag-out to external apps. New tabs via **⌘+double-click** or **⌘+Enter** on a folder (same as list view).
-- ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ step through rows (hold to repeat, Shift to extend the selection); Return opens, ⌘+Return opens in a new tab. Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, **Normalize Filename to NFC** (rewrites Hangul filenames stored as decomposed NFD on disk to the precomposed NFC form Windows / Slack / Discord / Gmail / web uploaders expect — multi-select supported, no-op on already-NFC names), and Move to Trash. Multi-selection right-clicks act on the whole selection. Restoring keyboard focus after a rename is handled correctly in both list and tree view.
+- ⌨️ **Keyboard nav + Finder-parity right-click** — ↑/↓ step through rows (hold to repeat, Shift to extend the selection); Return opens, ⌘+Return opens in a new tab. **⌘C / ⌘X / ⌘V** copy / cut / paste with Windows Explorer-style move semantics — a ⌘X-marked selection moves on ⌘V at the destination instead of copying (something Finder doesn't ship). Row context menu covers Open With ▸ (LaunchServices candidates + Other…), Get Info, Reveal in Finder, Copy / Copy Path, Duplicate, Rename, **Normalize Filename to NFC** (rewrites Hangul filenames stored as decomposed NFD on disk to the precomposed NFC form Windows / Slack / Discord / Gmail / web uploaders expect — multi-select supported, no-op on already-NFC names), and Move to Trash. Multi-selection right-clicks act on the whole selection. Restoring keyboard focus after a rename is handled correctly in both list and tree view.
 - ⚙️ **Settings → Shortcuts** — 17 actions re-bindable from Preferences (⌘,), including F1…F12. Reset-to-default per row.
 - 👀 **Per-tab preview pane** — toggle in the pane header (or ⌘⇧P). PDFs render through PDFKit with continuous scroll + paging; everything else routes through Quick Look for images, code, video, audio, office docs (DOCX/PPTX/XLSX). MarkdownUI handles `.md` with full GFM (tables, code blocks, lists). Folder/multi/empty selections get custom summaries. Zip archives preview in-pane (listing + single-entry decode). Multi-page navigation for non-PDF documents and formats macOS Quick Look has no generator for (HWP, etc.) is best done with ⎵ to summon the floating Quick Look panel, or ⇧↩ to open in the system default app (e.g. Hancom Office Viewer for HWP).
 - 🏷️ **Finder tag display** — per-tag colour swatches (red / orange / yellow / green / blue / purple / grey) read straight from macOS metadata, including multi-tag rows. Sidebar Tags section lists every tag in the current folder. Read-only — applying or editing tags happens in Finder.
@@ -89,9 +89,14 @@ swift test
 
 ## Privacy
 
-**No telemetry. No crash reporting. No analytics. Ever, in v1.**
+**We never call home. No telemetry, no crash reporting, no analytics. Ever, in v1.**
 
-mq-dir is local-only for everything except the auto-update check. It reads your filesystem to show it back to you and writes its own state to `~/Library/Application Support/com.mqdir.app/`. The single network egress is Sparkle fetching `https://h5nam.github.io/mq-dir/appcast.xml` once a day to look for a newer release; nothing else phones home.
+mq-dir is local-only by default. Outbound network traffic is limited to two narrowly-scoped paths, both auditable in the source:
+
+1. **Sparkle update check** — once every 24 hours, fetches `https://h5nam.github.io/mq-dir/appcast.xml`. Public file, no identifying info attached to the request.
+2. **Send Feedback** — only when *you* press the button in the sidebar footer, posts your message + optional screenshots to the maintainer's Discord webhook. Nothing leaves the machine if you never use it.
+
+No background analytics, no usage pings, no crash reporting upload. Local state lives in `~/Library/Application Support/com.mqdir.app/`.
 
 If a v1.x release ever proposes opt-in crash reporting, it will land behind a config toggle defaulting to off, with the source clearly visible.
 
