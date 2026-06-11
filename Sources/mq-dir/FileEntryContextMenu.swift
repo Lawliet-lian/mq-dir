@@ -38,6 +38,19 @@ struct FileEntryContextMenu: View {
         targets.contains { $0.name.isDecomposedRelativeToNFC }
     }
 
+    /// True when `entry` lives at or below the current folder root, so
+    /// "Reveal in Tree" has somewhere to scroll to. Search hits in deeper
+    /// folders are the headline case; a direct child qualifies too (the
+    /// reveal just selects + scrolls without expanding anything). An entry
+    /// outside the root (stale result) is excluded so the action never
+    /// no-ops silently.
+    private func canRevealInTree(_ entry: FileEntry) -> Bool {
+        guard let root = viewModel.folderURL else { return false }
+        let rootPath = root.standardizedFileURL.path
+        let entryPath = entry.url.standardizedFileURL.path
+        return entryPath == rootPath || entryPath.hasPrefix(rootPath + "/")
+    }
+
     /// Union of every Finder colour label currently applied across the
     /// menu's targets. Drives the filled-circle indicator next to each
     /// colour in the Tags submenu so the user can see, at a glance,
@@ -80,6 +93,26 @@ struct FileEntryContextMenu: View {
         }
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting(targets.map(\.url))
+        }
+
+        // "Reveal in Tree" surfaces a single entry in tree mode with its
+        // ancestors expanded — most useful for a deep recursive-search hit,
+        // whose row otherwise only shows a subtitle path. Single-target only
+        // (revealing N scattered hits at once has no coherent scroll target);
+        // shown whenever the entry sits below the current folder root.
+        if count == 1, let target = targets.first, canRevealInTree(target) {
+            Button("Reveal in Tree") {
+                viewModel.revealInTree(target)
+            }
+        }
+
+        // Folders carry no size until walked on demand. Show the action only
+        // when the selection actually contains a directory — for an all-files
+        // selection every size is already known and the item would be inert.
+        if FolderBrowserViewModel.canCalculateSize(targets) {
+            Button(count > 1 ? "Calculate Size (\(count))" : "Calculate Size") {
+                viewModel.calculateSize(targets)
+            }
         }
 
         Divider()

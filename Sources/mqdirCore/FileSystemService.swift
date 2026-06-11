@@ -277,6 +277,90 @@ struct FileSystemService {
         try setTags(tags, on: url)
     }
 
+    /// Ordered chain of ancestor folder URLs strictly between `root` and
+    /// `leaf`, top-down (shallowest first). Powers "Reveal in Tree": every
+    /// returned URL is a folder the tree view must expand (and load children
+    /// for) so the leaf becomes visible. `root` itself is excluded (it's the
+    /// always-expanded tree root) and so is `leaf` (the entry being revealed,
+    /// which is selected, not expanded).
+    ///
+    /// Pure path math — no disk access. Returns `[]` when `leaf` is a direct
+    /// child of `root` (nothing to expand) or when `leaf` is not actually
+    /// under `root` (defensive: a reveal target from a stale search result).
+    /// Path components are compared after standardisation so a `root` carrying
+    /// `.`/`..` or a trailing slash still matches a clean `leaf`.
+    static func ancestorFolders(from root: URL, to leaf: URL) -> [URL] {
+        let rootComponents = root.standardizedFileURL.pathComponents
+        let leafComponents = leaf.standardizedFileURL.pathComponents
+        // Leaf must be strictly deeper than root and share its prefix.
+        guard leafComponents.count > rootComponents.count,
+              Array(leafComponents.prefix(rootComponents.count)) == rootComponents
+        else { return [] }
+
+        // Intermediate components are everything between the root depth and
+        // the leaf's own last component (exclusive on both ends).
+        var ancestors: [URL] = []
+        var current = root.standardizedFileURL
+        for component in leafComponents[rootComponents.count..<(leafComponents.count - 1)] {
+            current = current.appendingPathComponent(component)
+            ancestors.append(current)
+        }
+        return ancestors
+    }
+
+    /// Recursively sum the logical sizes of every file under `directory`.
+    /// Powers the on-demand "Calculate Size" action — directories carry no
+    /// `size` of their own in `enumerateDirectory`, so a folder's footprint
+    /// has to be walked. Uses `fileSizeKey` (logical file size) rather than
+    /// `totalFileAllocatedSize` so the total stays consistent with the size
+    /// column, which renders `fileSize` for individual files.
+    ///
+    /// Behaviour pinned by `FileSystemServiceSizeTests`:
+    /// - Hidden files ARE counted (no `.skipsHiddenFiles`) — a folder's real
+    ///   footprint includes its dotfiles; this is "how big is this on disk",
+    ///   not "what does the browser show".
+    /// - Symlinks are NOT followed: the enumerator descends real directories
+    ///   only, and a symlink entry contributes its own (tiny) link size via
+    ///   `fileSizeKey`, never the target's bytes. This avoids double-counting
+    ///   and infinite loops on cyclic links — the enumerator's default
+    ///   (no `.producesRelativePathURLs`, no follow) gives us this for free.
+    ///
+    /// `isCancelled` is polled periodically (same cheap masked-counter trick
+    /// `enumerateMatching` uses) so a navigation away can stop a long walk;
+    /// on cancel it returns the partial sum gathered so far, which is
+    /// harmless because the caller treats the result as a cache entry it can
+    /// recompute on demand.
+    func directorySize(
+        at directory: URL,
+        isCancelled: @Sendable () -> Bool = { false }
+    ) -> Int64 {
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .isDirectoryKey, .isRegularFileKey]
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [],
+            errorHandler: { _, _ in true }
+        ) else {
+            return 0
+        }
+
+        var total: Int64 = 0
+        var visited = 0
+        for case let childURL as URL in enumerator {
+            visited &+= 1
+            if visited & 0xFF == 0, isCancelled() { return total }
+            // Only regular files contribute. Directories report no
+            // meaningful `fileSize`; symlinks surface as non-regular and
+            // are skipped so the link target's bytes aren't double-counted.
+            let values = try? childURL.resourceValues(forKeys: keys)
+            guard values?.isRegularFile == true else { continue }
+            if let size = values?.fileSize {
+                total &+= Int64(size)
+            }
+        }
+        return total
+    }
+
     /// Cheap presence check for the `Icon\r` sentinel macOS writes inside
     /// any folder whose icon the user changed via Get Info → drag image.
     /// One `stat(2)` per folder; we deliberately don't load the actual

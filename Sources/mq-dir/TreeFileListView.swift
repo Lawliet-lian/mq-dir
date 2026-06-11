@@ -49,6 +49,18 @@ struct TreeFileListView: View {
             .onChange(of: isFocused) { _, newValue in
                 if newValue { treeFocused = true }
             }
+            // "Reveal in Tree" queues a row ID on the VM; scroll it into view
+            // once the expanded ancestors have rendered, then clear the
+            // signal so a later identical reveal still fires. Deferred one
+            // runloop turn so the freshly-inserted `expandedPaths` rows have
+            // materialised in the LazyVStack before the proxy looks for them.
+            .onChange(of: viewModel.pendingRevealTarget) { _, target in
+                guard let target else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(target, anchor: .center)
+                    viewModel.pendingRevealTarget = nil
+                }
+            }
             // Root cache freshness is owned by the VM (`entries` didSet +
             // `refreshTreeChildren`), so this view no longer mirrors entries
             // into `treeChildren[root]`. The `entriesForRoot()` fallback in

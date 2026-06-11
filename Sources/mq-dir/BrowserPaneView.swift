@@ -470,6 +470,9 @@ struct BrowserPaneView: View {
     private var paneHeader: some View {
         HStack(spacing: 6) {
             paneHeaderTitle
+            if let tag = viewModel.tagFilter {
+                tagFilterChip(tag)
+            }
             Spacer(minLength: 0)
             viewModeToggle
         }
@@ -479,6 +482,42 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separatorFaint).frame(height: 0.5)
         }
+    }
+
+    /// Active tag-filter affordance, mounted in the pane header next to the
+    /// folder title — the same strip that carries the search-active state's
+    /// sibling chrome, so an active filter is always visible and dismissible.
+    /// Renders the tag's Finder swatch (resolved from the focused tab's tag
+    /// summaries by name) + the tag name + a ✕ that clears the filter.
+    private func tagFilterChip(_ tag: String) -> some View {
+        let labelNumber = viewModel.tagSummaries.first { $0.name == tag }?.labelNumber ?? 0
+        return HStack(spacing: 4) {
+            if let color = TagColor.color(forLabel: labelNumber) {
+                Circle().fill(color).frame(width: 7, height: 7)
+            } else {
+                Circle()
+                    .strokeBorder(Theme.Color.labelTertiary, lineWidth: 1)
+                    .frame(width: 7, height: 7)
+            }
+            Text(tag)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.Color.label)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Button {
+                viewModel.tagFilter = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.Color.labelTertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Clear tag filter")
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Color.white.opacity(0.06), in: Capsule())
+        .help("Filtering by tag \u{201C}\(tag)\u{201D}")
     }
 
     /// Folder name + item count strip on the left of the pane header.
@@ -579,6 +618,10 @@ struct BrowserPaneView: View {
             let count = viewModel.visibleEntries.count
             return "\(count) match\(count == 1 ? "" : "es")"
         }
+        if viewModel.isTagFiltering {
+            let count = viewModel.visibleEntries.count
+            return "\(count) match\(count == 1 ? "" : "es")"
+        }
         let total = viewModel.entries.count
         return "\(total) item\(total == 1 ? "" : "s")"
     }
@@ -588,6 +631,9 @@ struct BrowserPaneView: View {
             if viewModel.isSearching { return "Searching\u{2026}" }
             let trimmed = viewModel.searchQuery.trimmingCharacters(in: .whitespaces)
             return "No matches for \u{201C}\(trimmed)\u{201D}"
+        }
+        if let tag = viewModel.tagFilter {
+            return "No items tagged \u{201C}\(tag)\u{201D}"
         }
         return "No items"
     }
@@ -606,6 +652,27 @@ struct BrowserPaneView: View {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return stripped.isEmpty ? nil : stripped
     }
+
+    /// Resolve the Size-column string for a row. Files use their own
+    /// `size`; directories (which enumerate with `size == nil`) show "…"
+    /// while an on-demand size walk runs, the formatted total once it lands
+    /// in the VM's `computedDirectorySizes`, or "—" until the user invokes
+    /// "Calculate Size". Same `.file`-style formatter the file rows use, so
+    /// computed folder totals format identically to file sizes.
+    private func sizeText(for entry: FileEntry) -> String {
+        if entry.isDirectory {
+            if viewModel.computingSizeIDs.contains(entry.id) { return "\u{2026}" }
+            if let size = viewModel.computedDirectorySizes[entry.id] {
+                return Self.sizeFormatter.string(fromByteCount: size)
+            }
+            return "\u{2014}"
+        }
+        return Self.sizeFormatter.string(fromByteCount: entry.size)
+    }
+
+    /// Shared `.file`-style byte formatter for the Size column — one instance
+    /// reused across every row's `sizeText(for:)` resolution.
+    private static let sizeFormatter = FileSizeFormatter()
 
     // MARK: Column header
 
@@ -921,6 +988,7 @@ struct BrowserPaneView: View {
             paneIsFocused: isFocused,
             isDropTarget: isRowDropTarget,
             columnWidths: viewModel.columnWidths,
+            sizeText: sizeText(for: entry),
             subtitle: searchSubtitle(for: entry),
             isRenaming: viewModel.renamingEntryID == entry.id,
             renameDraft: Binding(
@@ -1092,6 +1160,12 @@ private struct FileEntryRow: View {
     let paneIsFocused: Bool
     let isDropTarget: Bool
     let columnWidths: PaneColumnWidths
+    /// Pre-resolved string for the Size column. Files render their formatted
+    /// byte count; directories render "—" (unknown), "…" (size walk running),
+    /// or the formatted on-demand total once "Calculate Size" completes. The
+    /// caller (`rowView`) owns this resolution because the computed-size cache
+    /// and computing set live on the VM, which the row struct doesn't hold.
+    let sizeText: String
     /// Optional second line under the name — used by recursive search to show
     /// where in the tree a hit lives. `nil` keeps the row at single-line height.
     let subtitle: String?
@@ -1158,7 +1232,7 @@ private struct FileEntryRow: View {
 
             Color.clear.frame(width: 6)
 
-            Text(Self.sizeFormatter.string(fromByteCount: entry.size))
+            Text(sizeText)
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1)
@@ -1212,7 +1286,6 @@ private struct FileEntryRow: View {
     }
 
     private static let modifiedDateFormatter = ModifiedDateFormatter()
-    private static let sizeFormatter = FileSizeFormatter()
 }
 
 private struct ModifiedDateFormatter {

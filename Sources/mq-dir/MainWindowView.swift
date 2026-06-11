@@ -143,12 +143,14 @@ struct MainWindowView: View {
                 // VM-memoized — see `FolderBrowserViewModel.tagSummaries`.
                 tagsSummary: focusedPane.tagSummaries,
                 onTagSelected: { tag in
-                    // Phase 3B 1차: substring search via the existing
-                    // searchQuery path. A dedicated tag-aware match mode
-                    // ships with the tag-write sprint; this filters by
-                    // tag-name substring for now and is good enough when
-                    // tag names are unique words.
-                    focusedPane.searchQuery = tag
+                    // Dedicated tag filter: shows only current-folder entries
+                    // whose `tagNames` contain this exact name — so a file
+                    // tagged "업무" surfaces regardless of its filename, which
+                    // the old substring-into-searchQuery hack couldn't do.
+                    // Clicking the already-active tag clears the filter
+                    // (toggle), matching the sidebar's "click to filter,
+                    // click again to clear" affordance.
+                    focusedPane.tagFilter = (focusedPane.tagFilter == tag) ? nil : tag
                 }
             ) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }

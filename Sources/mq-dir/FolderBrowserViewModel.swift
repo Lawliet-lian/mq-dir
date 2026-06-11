@@ -55,7 +55,45 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             // row cache so a keypress right after typing doesn't scan a stale
             // index. The recursive walk itself is scheduled below.
             if oldValue.isEmpty != searchQuery.isEmpty { invalidateRowCaches() }
+            // Search and tag filter are mutually exclusive — they each swap
+            // which axis `visibleEntries` returns, so letting both be active
+            // would render an ambiguous list. Typing a query clears any tag
+            // filter. The `!isEmpty` guard means *clearing* the query (e.g.
+            // on folder navigation) doesn't stomp a tag filter the user
+            // hasn't touched. Setting `tagFilter` clears `searchQuery` in its
+            // own setter, so the two never recurse (this branch only fires
+            // for a non-empty query, which the tag-filter path never writes).
+            if !searchQuery.isEmpty, tagFilter != nil { tagFilter = nil }
             scheduleSearch()
+        }
+    }
+    /// Per-pane current-folder tag filter. When non-nil, `visibleEntries`
+    /// shows only entries whose `tagNames` contain this name. Mutually
+    /// exclusive with `searchQuery` (see that setter) — set by clicking a
+    /// tag in the sidebar's Tags section, cleared by clicking the same tag
+    /// again or by the active-filter chip's ✕. Not persisted: transient
+    /// view state, like `searchQuery`.
+    ///
+    /// Tag names compare with Swift's `String ==`, which is Unicode
+    /// canonical-equivalence aware (NFC vs NFD), so a "업무" written by Finder
+    /// in one normalisation form still matches the sidebar summary's name in
+    /// another — the same property the tag-colour index-pairing relies on.
+    ///
+    /// Scope is current-folder LIST filtering only — it filters `entries`,
+    /// not a recursive walk. Recursive tag search (find every tagged file
+    /// under the root) is deliberately future work; current-folder filtering
+    /// is the simplest correct scope and mirrors how `searchResults` only
+    /// ever drives the flat list.
+    @Published var tagFilter: String? {
+        didSet {
+            guard oldValue != tagFilter else { return }
+            // Swapping the visible axis — drop the list-mode row cache so the
+            // next nav keypress walks the filtered set, mirroring searchQuery.
+            invalidateRowCaches()
+            // Mutual exclusion: activating a tag filter clears any live
+            // search. Guarded on non-nil so clearing the filter doesn't wipe
+            // a query, and so this never recurses with the searchQuery setter.
+            if tagFilter != nil, !searchQuery.isEmpty { searchQuery = "" }
         }
     }
     /// Recursive matches for the active `searchQuery`. Empty when not
@@ -67,6 +105,26 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// True between a non-empty `searchQuery` arriving and the resulting
     /// recursive walk completing. Drives the spinner / "Searching…" hint.
     @Published private(set) var isSearching: Bool = false
+    /// On-demand directory sizes, keyed by `FileEntry.ID` (the entry's URL).
+    /// `enumerateDirectory` leaves folders with `size == nil` (sizing every
+    /// folder on every listing would be ruinous), so the size column shows
+    /// "—" for directories until the user invokes "Calculate Size"; the
+    /// walk's result lands here and the column repaints. Invalidating the
+    /// selected-size cache on every assignment keeps the status-bar total in
+    /// sync when a folder's size resolves.
+    @Published private(set) var computedDirectorySizes: [FileEntry.ID: Int64] = [:] {
+        didSet { cachedSelectedSize = nil }
+    }
+    /// Directories whose size walk is currently in flight. The size cell
+    /// renders "…" for these so the user sees the calculation is running
+    /// rather than a stale "—".
+    @Published private(set) var computingSizeIDs: Set<FileEntry.ID> = []
+    /// Bumped on every navigation / reload so a size walk that outlived its
+    /// folder can detect it's stale and skip publishing. A stale write keyed
+    /// by URL-ID is harmless anyway (the entry is gone, so nothing renders
+    /// it), but dropping it keeps `computedDirectorySizes` from accreting
+    /// dead URLs across a long browsing session.
+    private var sizeWalkGeneration = 0
     @Published private(set) var sortKey: FileEntrySortKey = .name
     @Published private(set) var sortAscending = true
     /// When true, directories sort ahead of files within the same key.
@@ -287,6 +345,54 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         expandedPaths.contains(url.path)
     }
 
+    /// Row the tree view should scroll into view on its next render. Set by
+    /// `revealInTree`, consumed (and cleared) by `TreeFileListView` via an
+    /// `onChange` that calls `proxy.scrollTo`. A published signal rather than
+    /// a direct proxy call because the VM has no `ScrollViewProxy` — the
+    /// proxy lives inside the tree's `ScrollViewReader`.
+    @Published var pendingRevealTarget: FileEntry.ID?
+
+    /// "Reveal in Tree": surface `entry` — typically a deep recursive-search
+    /// hit — in tree mode with every ancestor folder between the root and the
+    /// entry expanded, the entry selected, and a scroll-into-view queued.
+    ///
+    /// Steps, in order:
+    /// 1. Clear both filters so the tree shows the real hierarchy, not a
+    ///    filtered list (search results / tag filter only drive list mode).
+    /// 2. Switch to tree mode.
+    /// 3. Expand each ancestor top-down (`FileSystemService.ancestorFolders`
+    ///    gives the root-relative chain, leaf excluded). Each expand inserts
+    ///    the path into `expandedPaths` and loads that folder's children so
+    ///    `treeChildren` is populated for the row that needs to render.
+    /// 4. Select the entry and queue it as the scroll target.
+    ///
+    /// Harmless for a direct child of the root: the ancestor chain is empty,
+    /// so it just selects + scrolls without expanding anything.
+    func revealInTree(_ entry: FileEntry) {
+        guard let root = folderURL else { return }
+        // Filters drive list mode only; clear them so the tree renders the
+        // full hierarchy the reveal walks into.
+        searchQuery = ""
+        tagFilter = nil
+        viewMode = .tree
+
+        for ancestor in FileSystemService.ancestorFolders(from: root, to: entry.url) {
+            let path = ancestor.path
+            if !expandedPaths.contains(path) {
+                expandedPaths.insert(path)
+            }
+            // Load children even if the path was already expanded but never
+            // populated (e.g. a stale expandedPaths entry from restore), so
+            // the ancestor's subtree is present for the next level to render.
+            if treeChildren[path] == nil {
+                loadChildren(for: ancestor)
+            }
+        }
+
+        replaceSelection(entry.id)
+        pendingRevealTarget = entry.id
+    }
+
     /// Synchronous child enumeration. The tree typically lazy-loads only
     /// the folders the user touches, so blocking the main actor briefly
     /// here is fine; the call is bounded by one directory's worth of
@@ -386,12 +492,31 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     /// What the file list should render. Recursive `searchResults` while a
-    /// query is active, the canonical `entries` for the current folder
+    /// query is active, the tag-filtered subset of `entries` while a tag
+    /// filter is active, the canonical `entries` for the current folder
     /// otherwise. Selection IDs always resolve against `entries` (so a
     /// recursive hit clicked into a subfolder navigates fresh).
+    ///
+    /// Search and tag filter are mutually exclusive (enforced in their
+    /// setters), so the order here is unambiguous: at most one branch is
+    /// ever non-trivial.
     var visibleEntries: [FileEntry] {
-        isFiltering ? searchResults : entries
+        if isFiltering { return searchResults }
+        if let tag = tagFilter {
+            // Current-folder filtering only — `entries`, not a recursive
+            // walk. `String ==` is NFC/NFD-aware so a tag name stored in one
+            // normalisation form still matches the clicked summary's form.
+            return entries.filter { $0.tagNames.contains(tag) }
+        }
+        return entries
     }
+
+    /// True when a current-folder tag filter is narrowing the list. Distinct
+    /// from `isFiltering` (search), which drives the recursive-walk UI
+    /// (subtitles, "Searching…"). The active-filter chip and item-count
+    /// label read this to render the tag affordance without pulling in the
+    /// search-specific chrome.
+    var isTagFiltering: Bool { tagFilter != nil }
 
     /// Flat top-to-bottom sequence of every row currently rendered by
     /// `TreeFileListView` (root → expanded children → expanded
@@ -541,9 +666,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
         folderURL = url
         selection.removeAll()
-        // Drop the per-folder filter so a query typed in the previous folder
-        // doesn't bleed into the new listing (matches Finder).
+        // Drop the per-folder filters so a query / tag filter applied in the
+        // previous folder doesn't bleed into the new listing (matches Finder).
         searchQuery = ""
+        tagFilter = nil
         pendingRestoredSelection = selectionPaths
         reload()
         updateDirectoryWatcher()
@@ -635,6 +761,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         loadTask?.cancel()
         isLoading = true
         errorMessage = nil
+        // Invalidate computed directory sizes on every reload (navigation and
+        // every `.mqdirFileSystemChanged` broadcast funnel through here): a
+        // folder's contents may have changed, so a previously-walked total is
+        // now suspect. Recomputing is explicit (the user re-invokes "Calculate
+        // Size"), so dropping the cache is cheap + correct rather than trying
+        // to incrementally patch it. Bumping the generation also tells any
+        // in-flight walk from the prior listing not to publish a stale result.
+        sizeWalkGeneration &+= 1
+        if !computedDirectorySizes.isEmpty { computedDirectorySizes = [:] }
+        if !computingSizeIDs.isEmpty { computingSizeIDs = [] }
 
         let includeHidden = includeHidden
         let sortKey = sortKey
@@ -1242,6 +1378,44 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
     }
 
+    /// True when `entries` contains at least one directory — gates the
+    /// "Calculate Size" context-menu item (folders are the only entries that
+    /// lack a size). A pure predicate over the passed targets so the menu can
+    /// hide the action for an all-files selection.
+    nonisolated static func canCalculateSize(_ entries: [FileEntry]) -> Bool {
+        entries.contains { $0.isDirectory }
+    }
+
+    /// On-demand size calculation for every directory in `entries`. Files are
+    /// ignored (they already carry a size). Each folder is walked recursively
+    /// off the main actor at utility priority; the running set drives the "…"
+    /// progress text and the result publishes into `computedDirectorySizes`,
+    /// which repaints the size column and feeds the status-bar selected total.
+    ///
+    /// A generation token captured at launch lets a walk that outlived its
+    /// folder (navigation / reload bumps the generation) skip publishing —
+    /// the stale-write-is-harmless property holds because IDs are URLs, but
+    /// dropping it keeps the cache from accreting dead entries.
+    func calculateSize(_ entries: [FileEntry]) {
+        let directories = entries.filter(\.isDirectory)
+        guard !directories.isEmpty else { return }
+        let generation = sizeWalkGeneration
+        for directory in directories {
+            let id = directory.id
+            guard !computingSizeIDs.contains(id) else { continue }
+            computingSizeIDs.insert(id)
+            let url = directory.url
+            Task { [weak self] in
+                let size = await Task.detached(priority: .utility) {
+                    FileSystemService().directorySize(at: url)
+                }.value
+                guard let self, self.sizeWalkGeneration == generation else { return }
+                self.computedDirectorySizes[id] = size
+                self.computingSizeIDs.remove(id)
+            }
+        }
+    }
+
     /// Move the selection up or down by `offset` rows in `visibleEntries`,
     /// the same set the file list renders. With `extending: true` (Shift
     /// held) grows the selection from the anchor instead of replacing it,
@@ -1282,7 +1456,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     var selectedSize: Int64 {
         if let cached = cachedSelectedSize { return cached }
         let total = selection.reduce(Int64(0)) { running, id in
-            running + (findEntry(id: id)?.size ?? 0)
+            // A selected directory contributes its computed size when one has
+            // been calculated (folders carry `size == nil` otherwise); files
+            // contribute their own `size`. `computedDirectorySizes` keys on
+            // the same URL-ID so the lookup is O(1).
+            running + (findEntry(id: id)?.size ?? computedDirectorySizes[id] ?? 0)
         }
         cachedSelectedSize = total
         return total
