@@ -42,21 +42,21 @@ final class WorkspaceManager: ObservableObject {
     /// Capture the running pane state into the active project before
     /// switching. Called by `MainWindowView` right before `.id` flips
     /// and tears down its `@StateObject` panes.
-    func updateActive(_ mutate: (inout Project) -> Void) {
+    func updateActive(_ body: (inout Project) -> Void) {
         guard let idx = workspace.projects.firstIndex(where: { $0.id == workspace.activeProjectID })
         else { return }
-        var project = workspace.projects[idx]
-        mutate(&project)
-        workspace.projects[idx] = project
-        scheduleSave()
+        mutate { state in
+            var project = state.projects[idx]
+            body(&project)
+            state.projects[idx] = project
+        }
     }
 
     func switchTo(projectID: UUID) {
         guard projectID != workspace.activeProjectID,
               workspace.projects.contains(where: { $0.id == projectID })
         else { return }
-        workspace.activeProjectID = projectID
-        scheduleSave()
+        mutate { $0.activeProjectID = projectID }
     }
 
     // MARK: Project CRUD
@@ -66,9 +66,10 @@ final class WorkspaceManager: ObservableObject {
     /// "Project 2" / "Project 3" sequence without a modal prompt.
     func createProject() {
         let project = Project(name: nextProjectName())
-        workspace.projects.append(project)
-        workspace.activeProjectID = project.id
-        scheduleSave()
+        mutate { state in
+            state.projects.append(project)
+            state.activeProjectID = project.id
+        }
     }
 
     func rename(_ projectID: UUID, to newName: String) {
@@ -76,8 +77,7 @@ final class WorkspaceManager: ObservableObject {
         guard !trimmed.isEmpty,
               let idx = workspace.projects.firstIndex(where: { $0.id == projectID })
         else { return }
-        workspace.projects[idx].name = trimmed
-        scheduleSave()
+        mutate { $0.projects[idx].name = trimmed }
     }
 
     /// Refuses to delete the last surviving project — the UI hides this
@@ -88,13 +88,14 @@ final class WorkspaceManager: ObservableObject {
               let idx = workspace.projects.firstIndex(where: { $0.id == projectID })
         else { return }
         let wasActive = workspace.projects[idx].id == workspace.activeProjectID
-        workspace.projects.remove(at: idx)
-        if wasActive {
-            // Snap to the same slot, or back one if we removed the tail.
-            let nextIdx = min(idx, workspace.projects.count - 1)
-            workspace.activeProjectID = workspace.projects[nextIdx].id
+        mutate { state in
+            state.projects.remove(at: idx)
+            if wasActive {
+                // Snap to the same slot, or back one if we removed the tail.
+                let nextIdx = min(idx, state.projects.count - 1)
+                state.activeProjectID = state.projects[nextIdx].id
+            }
         }
-        scheduleSave()
     }
 
     func move(sourceID: UUID, before targetID: UUID?) {
@@ -112,15 +113,13 @@ final class WorkspaceManager: ObservableObject {
         }
         if insertAt == from { return }
         copy.insert(item, at: insertAt)
-        workspace.projects = copy
-        scheduleSave()
+        mutate { $0.projects = copy }
     }
 
     // MARK: Favorites passthrough
 
     func setFavorites(_ favorites: [Favorite]) {
-        workspace.favorites = favorites
-        scheduleSave()
+        mutate { $0.favorites = favorites }
     }
 
     // MARK: Settings passthrough
@@ -131,8 +130,16 @@ final class WorkspaceManager: ObservableObject {
     /// save persisting across launches.
     func setColorScheme(_ option: ColorSchemeOption) {
         guard workspace.settings.colorScheme != option else { return }
-        workspace.settings.colorScheme = option
-        scheduleSave()
+        mutate { $0.settings.colorScheme = option }
+    }
+
+    /// Toggle the "normalise Hangul filenames to NFC on drag out"
+    /// preference. Read at drag-start (and at copy/move/duplicate time)
+    /// off `workspace.settings.normalizeHangulOnDragOut`; the standard
+    /// 500 ms debounced save persists it across launches.
+    func setNormalizeHangulOnDragOut(_ enabled: Bool) {
+        guard workspace.settings.normalizeHangulOnDragOut != enabled else { return }
+        mutate { $0.settings.normalizeHangulOnDragOut = enabled }
     }
 
     /// Persist a user override for the given action. Passing `nil`
@@ -153,12 +160,11 @@ final class WorkspaceManager: ObservableObject {
         }
         if let normalised {
             guard workspace.settings.shortcutOverrides[action] != normalised else { return }
-            workspace.settings.shortcutOverrides[action] = normalised
+            mutate { $0.settings.shortcutOverrides[action] = normalised }
         } else {
             guard workspace.settings.shortcutOverrides[action] != nil else { return }
-            workspace.settings.shortcutOverrides.removeValue(forKey: action)
+            mutate { $0.settings.shortcutOverrides.removeValue(forKey: action) }
         }
-        scheduleSave()
     }
 
     /// Drop every user override so all 10 customisable shortcuts
@@ -166,19 +172,31 @@ final class WorkspaceManager: ObservableObject {
     /// "Restore Defaults" button.
     func resetAllShortcutOverrides() {
         guard !workspace.settings.shortcutOverrides.isEmpty else { return }
-        workspace.settings.shortcutOverrides.removeAll()
-        scheduleSave()
+        mutate { $0.settings.shortcutOverrides.removeAll() }
     }
 
     // MARK: Persistence
 
+    /// Single mutation entry point: apply `body` to the live workspace and
+    /// schedule a debounced save in one place so "mutate then schedule" can't
+    /// drift apart across the individual mutators. Every state-changing method
+    /// routes through here.
+    private func mutate(_ body: (inout WorkspaceState) -> Void) {
+        body(&workspace)
+        scheduleSave()
+    }
+
     private func scheduleSave() {
         guard let persistence else { return }
         saveDebounceTask?.cancel()
-        saveDebounceTask = Task { @MainActor [persistence, workspace] in
+        // Capture only `persistence` by value; read `self.workspace` fresh
+        // inside the @MainActor body after the sleep so the persisted snapshot
+        // reflects any mutation that landed during the 500ms debounce window
+        // rather than the by-value snapshot taken at schedule time.
+        saveDebounceTask = Task { @MainActor [persistence] in
             try? await Task.sleep(for: .milliseconds(500))
             if Task.isCancelled { return }
-            await Self.persist(workspace, using: persistence)
+            await Self.persist(self.workspace, using: persistence)
         }
     }
 

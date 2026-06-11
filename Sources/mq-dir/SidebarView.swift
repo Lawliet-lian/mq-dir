@@ -605,11 +605,7 @@ struct SidebarView: View {
             // the Finder convention used by tree-view ⌘-click).
             // Plain click → swap the focused pane's active tab to it.
             if NSEvent.modifierFlags.contains(.command) {
-                NotificationCenter.default.post(
-                    name: .mqdirOpenURLInNewTabRequested,
-                    object: nil,
-                    userInfo: ["url": url]
-                )
+                AppCommand.openURLInNewTab(url: url).post()
             } else {
                 selectedURL = url
                 onSelect(url)
@@ -652,14 +648,6 @@ struct SidebarView: View {
     }
 
     // MARK: Section chrome
-
-    @ViewBuilder
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader(title)
-            content()
-        }
-    }
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
@@ -721,13 +709,29 @@ struct SidebarView: View {
             let urls = await DragDropSupport.resolveURLs(from: providers)
             if !urls.isEmpty {
                 await MainActor.run {
+                    // Add each dropped URL, capturing the ID of every
+                    // favorite that's genuinely new (`add` no-ops on
+                    // files/dupes, so we diff against the prior set
+                    // rather than assuming `favorites.last` is ours).
+                    var addedIDs: [Favorite.ID] = []
                     for url in urls {
+                        let before = Set(viewModel.favorites.map(\.id))
                         viewModel.add(url: url)
-                        if let targetID,
-                           let newest = viewModel.favorites.last,
-                           newest.id != targetID
-                        {
-                            viewModel.move(sourceID: newest.id, before: targetID)
+                        if let new = viewModel.favorites.first(where: { !before.contains($0.id) }) {
+                            addedIDs.append(new.id)
+                        }
+                    }
+                    // Move the whole batch as a contiguous block before
+                    // the target, preserving drop order — dropping 3
+                    // folders lands all 3 at the drop point, not just
+                    // the last. Moving in forward order works because
+                    // each `move(before: targetID)` inserts immediately
+                    // before the target, after the previously-moved
+                    // item, so the block ends up as [first … last] right
+                    // before the target row.
+                    if let targetID {
+                        for id in addedIDs where id != targetID {
+                            viewModel.move(sourceID: id, before: targetID)
                         }
                     }
                     // No-op when the drop didn't originate from a tab;
@@ -755,10 +759,15 @@ struct SidebarView: View {
 
 // MARK: Project reorder
 
-/// Project equivalent of the favorite reorder delegate. Reordering happens
-/// on `dropEntered` (not `performDrop`) so the user sees the row swap as
-/// soon as the cursor crosses a sibling, mirroring Safari's tab strip
-/// instead of waiting until mouse-up.
+/// Project equivalent of the tab reorder delegate. Hovering a sibling row
+/// only previews the landing spot (the blue insertion bar driven by
+/// `highlightID`); the actual `workspace.move` runs ONCE in `performDrop`.
+///
+/// The previous version mutated the model in `dropEntered` on every
+/// hover-cross, which armed a debounced save per crossing and — when the
+/// *active* project moved — re-keyed `MainWindowView` mid-drag (the app
+/// keys the window on `activeProjectID`). Deferring the commit to mouse-up
+/// mirrors `TabReorderDropDelegate` and keeps the drag visually stable.
 private struct ProjectReorderDropDelegate: DropDelegate {
     let target: UUID
     @ObservedObject var workspace: WorkspaceManager
@@ -767,17 +776,8 @@ private struct ProjectReorderDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         guard let dragging = draggingID, dragging != target else { return }
+        // Preview only — show where the row will land, don't move it yet.
         highlightID = target
-        // Insert AFTER the target if dragging from earlier in the list,
-        // BEFORE if dragging from later — same convention as favorites.
-        let projects = workspace.workspace.projects
-        guard let from = projects.firstIndex(where: { $0.id == dragging }),
-              let to = projects.firstIndex(where: { $0.id == target })
-        else { return }
-        let beforeID: UUID? = from < to
-            ? (to + 1 < projects.count ? projects[to + 1].id : nil)
-            : projects[to].id
-        workspace.move(sourceID: dragging, before: beforeID)
     }
 
     func dropExited(info: DropInfo) {
@@ -785,8 +785,21 @@ private struct ProjectReorderDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        draggingID = nil
-        highlightID = nil
+        defer {
+            draggingID = nil
+            highlightID = nil
+        }
+        guard let dragging = draggingID, dragging != target else { return false }
+        // Insert AFTER the target if dragging from earlier in the list,
+        // BEFORE if dragging from later — same convention as favorites.
+        let projects = workspace.workspace.projects
+        guard let from = projects.firstIndex(where: { $0.id == dragging }),
+              let to = projects.firstIndex(where: { $0.id == target })
+        else { return false }
+        let beforeID: UUID? = from < to
+            ? (to + 1 < projects.count ? projects[to + 1].id : nil)
+            : projects[to].id
+        workspace.move(sourceID: dragging, before: beforeID)
         return true
     }
 

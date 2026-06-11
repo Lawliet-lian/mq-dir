@@ -20,6 +20,10 @@ struct FeedbackSheet: View {
     private let recipient = "business@mindfullabs.ai"
     private let messageLimit = 4000
     private let attachmentLimit = 10
+    /// Maximum bytes for a single attachment (4 MB).
+    private let maxAttachmentBytes = 4 * 1024 * 1024
+    /// Maximum aggregate bytes for all attachments combined (8 MB Discord free-tier limit).
+    private let maxTotalAttachmentBytes = 8 * 1024 * 1024
 
     var body: some View {
         Group {
@@ -247,9 +251,30 @@ struct FeedbackSheet: View {
         body.append(payloadJSON)
         body.appendASCII("\r\n")
 
+        var droppedFilenames: [String] = []
+        var totalAttachmentBytes = 0
         for (idx, fileURL) in attachments.enumerated() {
-            guard let fileData = try? Data(contentsOf: fileURL) else { continue }
-            let filename = fileURL.lastPathComponent
+            let rawName = fileURL.lastPathComponent
+            // FIX 4: sanitize filename — strip CR/LF, remove quotes to avoid breaking multipart framing.
+            let filename = rawName
+                .components(separatedBy: .newlines).joined()
+                .replacingOccurrences(of: "\"", with: "")
+
+            // FIX 1 & 2: enforce per-file and aggregate size caps; collect dropped names.
+            guard let fileData = try? Data(contentsOf: fileURL) else {
+                droppedFilenames.append(rawName)
+                continue
+            }
+            guard fileData.count <= maxAttachmentBytes else {
+                droppedFilenames.append(rawName)
+                continue
+            }
+            guard totalAttachmentBytes + fileData.count <= maxTotalAttachmentBytes else {
+                droppedFilenames.append(rawName)
+                continue
+            }
+
+            totalAttachmentBytes += fileData.count
             body.appendASCII("--\(boundary)\r\n")
             body.appendASCII(
                 "Content-Disposition: form-data; name=\"files[\(idx)]\"; filename=\"\(filename)\"\r\n"
@@ -258,6 +283,12 @@ struct FeedbackSheet: View {
             body.append(fileData)
             body.appendASCII("\r\n")
         }
+
+        // FIX 2: fail loudly before sending if any selected attachment couldn't be included.
+        if !droppedFilenames.isEmpty {
+            throw FeedbackError.attachmentsDropped(droppedFilenames)
+        }
+
         body.appendASCII("--\(boundary)--\r\n")
 
         var request = URLRequest(url: url)
@@ -272,6 +303,10 @@ struct FeedbackSheet: View {
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            // FIX 3: surface 413 with an actionable message.
+            if code == 413 {
+                throw FeedbackError.payloadTooLarge
+            }
             throw FeedbackError.httpStatus(code)
         }
     }
@@ -301,6 +336,10 @@ private enum FeedbackSendState {
 private enum FeedbackError: LocalizedError {
     case notConfigured
     case httpStatus(Int)
+    /// FIX 3: dedicated case for HTTP 413 with an actionable message.
+    case payloadTooLarge
+    /// FIX 2: one or more selected attachments couldn't be included (unreadable or over size cap).
+    case attachmentsDropped([String])
 
     var errorDescription: String? {
         switch self {
@@ -308,6 +347,11 @@ private enum FeedbackError: LocalizedError {
             return "Feedback channel is not configured for this build."
         case .httpStatus(let code):
             return "Server responded with HTTP \(code)."
+        case .payloadTooLarge:
+            return "Attachments are too large — please remove some or use smaller images."
+        case .attachmentsDropped(let names):
+            let list = names.joined(separator: ", ")
+            return "The following attachment(s) couldn't be included (unreadable or exceeds the 4 MB per-file / 8 MB total limit): \(list). Remove them and try again."
         }
     }
 }

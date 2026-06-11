@@ -16,9 +16,27 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
     @Published private(set) var folderURL: URL?
     @Published private(set) var entries: [FileEntry] = [] {
-        didSet { rebuildEntriesIndex() }
+        didSet {
+            // Root cache ownership lives here, not in the tree view: the
+            // root's `treeChildren` entry tracks `entries` 1:1 (folders-first
+            // via the shared helper) on every assignment, so tree mode renders
+            // correctly even when `TreeFileListView` isn't alive to mirror it.
+            // Cheap — an array copy. `reload()` clears `treeChildren` *after*
+            // setting `entries`, so it re-populates the root itself (see
+            // `refreshTreeChildren`).
+            if let root = folderURL {
+                treeChildren[root.path] = FileEntry.treeOrdered(entries)
+            }
+            rebuildEntriesIndex()
+            invalidateRowCaches()
+            // Status-bar / sidebar derived values read off `entries`.
+            cachedTagSummaries = nil
+            cachedSelectedSize = nil
+        }
     }
-    @Published var selection: Set<FileEntry.ID> = []
+    @Published var selection: Set<FileEntry.ID> = [] {
+        didSet { cachedSelectedSize = nil }
+    }
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published var includeHidden = false {
@@ -31,15 +49,82 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// schedules a debounced background walk that populates `searchResults`.
     /// Not persisted — transient view state.
     @Published var searchQuery: String = "" {
-        didSet { scheduleSearch() }
+        didSet {
+            // `isFiltering` flips with the first/last character, swapping
+            // which axis `visibleEntries` returns — invalidate the list-mode
+            // row cache so a keypress right after typing doesn't scan a stale
+            // index. The recursive walk itself is scheduled below.
+            if oldValue.isEmpty != searchQuery.isEmpty { invalidateRowCaches() }
+            // Search and tag filter are mutually exclusive — they each swap
+            // which axis `visibleEntries` returns, so letting both be active
+            // would render an ambiguous list. Typing a query clears any tag
+            // filter. The `!isEmpty` guard means *clearing* the query (e.g.
+            // on folder navigation) doesn't stomp a tag filter the user
+            // hasn't touched. Setting `tagFilter` clears `searchQuery` in its
+            // own setter, so the two never recurse (this branch only fires
+            // for a non-empty query, which the tag-filter path never writes).
+            if !searchQuery.isEmpty, tagFilter != nil { tagFilter = nil }
+            scheduleSearch()
+        }
+    }
+    /// Per-pane current-folder tag filter. When non-nil, `visibleEntries`
+    /// shows only entries whose `tagNames` contain this name. Mutually
+    /// exclusive with `searchQuery` (see that setter) — set by clicking a
+    /// tag in the sidebar's Tags section, cleared by clicking the same tag
+    /// again or by the active-filter chip's ✕. Not persisted: transient
+    /// view state, like `searchQuery`.
+    ///
+    /// Tag names compare with Swift's `String ==`, which is Unicode
+    /// canonical-equivalence aware (NFC vs NFD), so a "업무" written by Finder
+    /// in one normalisation form still matches the sidebar summary's name in
+    /// another — the same property the tag-colour index-pairing relies on.
+    ///
+    /// Scope is current-folder LIST filtering only — it filters `entries`,
+    /// not a recursive walk. Recursive tag search (find every tagged file
+    /// under the root) is deliberately future work; current-folder filtering
+    /// is the simplest correct scope and mirrors how `searchResults` only
+    /// ever drives the flat list.
+    @Published var tagFilter: String? {
+        didSet {
+            guard oldValue != tagFilter else { return }
+            // Swapping the visible axis — drop the list-mode row cache so the
+            // next nav keypress walks the filtered set, mirroring searchQuery.
+            invalidateRowCaches()
+            // Mutual exclusion: activating a tag filter clears any live
+            // search. Guarded on non-nil so clearing the filter doesn't wipe
+            // a query, and so this never recurses with the searchQuery setter.
+            if tagFilter != nil, !searchQuery.isEmpty { searchQuery = "" }
+        }
     }
     /// Recursive matches for the active `searchQuery`. Empty when not
     /// filtering, or while the first results of a fresh query are still
     /// being gathered.
-    @Published private(set) var searchResults: [FileEntry] = []
+    @Published private(set) var searchResults: [FileEntry] = [] {
+        didSet { invalidateRowCaches() }
+    }
     /// True between a non-empty `searchQuery` arriving and the resulting
     /// recursive walk completing. Drives the spinner / "Searching…" hint.
     @Published private(set) var isSearching: Bool = false
+    /// On-demand directory sizes, keyed by `FileEntry.ID` (the entry's URL).
+    /// `enumerateDirectory` leaves folders with `size == nil` (sizing every
+    /// folder on every listing would be ruinous), so the size column shows
+    /// "—" for directories until the user invokes "Calculate Size"; the
+    /// walk's result lands here and the column repaints. Invalidating the
+    /// selected-size cache on every assignment keeps the status-bar total in
+    /// sync when a folder's size resolves.
+    @Published private(set) var computedDirectorySizes: [FileEntry.ID: Int64] = [:] {
+        didSet { cachedSelectedSize = nil }
+    }
+    /// Directories whose size walk is currently in flight. The size cell
+    /// renders "…" for these so the user sees the calculation is running
+    /// rather than a stale "—".
+    @Published private(set) var computingSizeIDs: Set<FileEntry.ID> = []
+    /// Bumped on every navigation / reload so a size walk that outlived its
+    /// folder can detect it's stale and skip publishing. A stale write keyed
+    /// by URL-ID is harmless anyway (the entry is gone, so nothing renders
+    /// it), but dropping it keeps `computedDirectorySizes` from accreting
+    /// dead URLs across a long browsing session.
+    private var sizeWalkGeneration = 0
     @Published private(set) var sortKey: FileEntrySortKey = .name
     @Published private(set) var sortAscending = true
     /// When true, directories sort ahead of files within the same key.
@@ -64,14 +149,22 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Set of expanded directory paths in tree mode. Stored as paths so
     /// it survives serialization without bookmark plumbing — losing access
     /// to a path just collapses that node, never breaks the view.
-    @Published var expandedPaths: Set<String> = []
+    @Published var expandedPaths: Set<String> = [] {
+        didSet { invalidateRowCaches() }
+    }
     /// Cached children per directory path for tree mode. Populated on
     /// expand, evicted on `reload()`. Doesn't bloat memory in normal use
     /// because the user only expands what they actively browse. The
     /// setter is open so `TreeFileListView` can mirror the root entries
     /// into the cache without a dedicated method on the VM.
     @Published var treeChildren: [String: [FileEntry]] = [:] {
-        didSet { rebuildEntriesIndex() }
+        didSet {
+            rebuildEntriesIndex()
+            invalidateRowCaches()
+            // Tree-mode selections live in `treeChildren`, so their sizes do
+            // too — a subtree refresh can change the selected-size total.
+            cachedSelectedSize = nil
+        }
     }
     @Published private(set) var backStack: [NavigationFrame] = []
     @Published private(set) var forwardStack: [NavigationFrame] = []
@@ -159,10 +252,22 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             self.folderURL = resolved
             reload()
             updateDirectoryWatcher()
-            // Pre-warm any expanded subtrees so the tree view doesn't
-            // spend its first render flickering placeholders.
-            for path in expandedPaths {
-                loadChildren(for: URL(fileURLWithPath: path))
+            // Pre-warm any expanded subtrees so the tree view settles onto
+            // its real rows quickly — but OFF the synchronous init path. Each
+            // `loadChildren` is a blocking directory enumeration; running N of
+            // them inline here stalled the very first window paint by however
+            // long the deepest restored tree took to walk. Deferring to a
+            // post-render `Task` lets the window come up immediately; the tree
+            // renders the root via `TreeFileListView`'s `entries` fallback and
+            // fills expanded subfolders in as this hydration lands (each
+            // `treeChildren` assignment re-renders the affected rows).
+            let pathsToWarm = expandedPaths
+            if !pathsToWarm.isEmpty {
+                Task { @MainActor [weak self] in
+                    for path in pathsToWarm {
+                        self?.loadChildren(for: URL(fileURLWithPath: path))
+                    }
+                }
             }
         }
     }
@@ -195,12 +300,18 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     // MARK: Tree mode
 
     /// Toggle expansion for a directory in tree mode. Lazy-loads children
-    /// on first expand; collapsing keeps the cached children so re-expand
-    /// is instant. Cache invalidates only on `reload()`.
+    /// on first expand. On collapse, evicts this path's cached children AND
+    /// every descendant path's children: a collapsed subtree is invisible, so
+    /// holding its (potentially deep) listing just bloats `treeChildren` and
+    /// makes every later `rebuildEntriesIndex` walk more rows than are on
+    /// screen. The "instant re-expand" we'd keep is marginal next to that
+    /// unbounded-growth cost — re-expanding simply re-enumerates one folder.
+    /// The root path is never a collapsible node here, so it's untouched.
     func toggleExpanded(_ url: URL) {
         let path = url.path
         if expandedPaths.contains(path) {
             expandedPaths.remove(path)
+            evictCachedSubtree(under: path)
         } else {
             expandedPaths.insert(path)
             if treeChildren[path] == nil {
@@ -209,8 +320,77 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
     }
 
+    /// Drop `path`'s cached children plus every descendant path's children
+    /// from `treeChildren`. Descendants are matched by the standard
+    /// `"<path>/"` prefix test (the same shape the drop/self-drop guards use).
+    /// Skips the early-return-friendly no-op when nothing matches so an
+    /// unrelated collapse doesn't dirty the cache.
+    private func evictCachedSubtree(under path: String) {
+        let descendantPrefix = path + "/"
+        let doomed = treeChildren.keys.filter {
+            $0 == path || $0.hasPrefix(descendantPrefix)
+        }
+        guard !doomed.isEmpty else { return }
+        // Mutate a local copy and assign once so the `treeChildren` `didSet`
+        // (rebuildEntriesIndex + cache invalidation) fires a single time, not
+        // once per removed key.
+        var pruned = treeChildren
+        for key in doomed {
+            pruned.removeValue(forKey: key)
+        }
+        treeChildren = pruned
+    }
+
     func isExpanded(_ url: URL) -> Bool {
         expandedPaths.contains(url.path)
+    }
+
+    /// Row the tree view should scroll into view on its next render. Set by
+    /// `revealInTree`, consumed (and cleared) by `TreeFileListView` via an
+    /// `onChange` that calls `proxy.scrollTo`. A published signal rather than
+    /// a direct proxy call because the VM has no `ScrollViewProxy` — the
+    /// proxy lives inside the tree's `ScrollViewReader`.
+    @Published var pendingRevealTarget: FileEntry.ID?
+
+    /// "Reveal in Tree": surface `entry` — typically a deep recursive-search
+    /// hit — in tree mode with every ancestor folder between the root and the
+    /// entry expanded, the entry selected, and a scroll-into-view queued.
+    ///
+    /// Steps, in order:
+    /// 1. Clear both filters so the tree shows the real hierarchy, not a
+    ///    filtered list (search results / tag filter only drive list mode).
+    /// 2. Switch to tree mode.
+    /// 3. Expand each ancestor top-down (`FileSystemService.ancestorFolders`
+    ///    gives the root-relative chain, leaf excluded). Each expand inserts
+    ///    the path into `expandedPaths` and loads that folder's children so
+    ///    `treeChildren` is populated for the row that needs to render.
+    /// 4. Select the entry and queue it as the scroll target.
+    ///
+    /// Harmless for a direct child of the root: the ancestor chain is empty,
+    /// so it just selects + scrolls without expanding anything.
+    func revealInTree(_ entry: FileEntry) {
+        guard let root = folderURL else { return }
+        // Filters drive list mode only; clear them so the tree renders the
+        // full hierarchy the reveal walks into.
+        searchQuery = ""
+        tagFilter = nil
+        viewMode = .tree
+
+        for ancestor in FileSystemService.ancestorFolders(from: root, to: entry.url) {
+            let path = ancestor.path
+            if !expandedPaths.contains(path) {
+                expandedPaths.insert(path)
+            }
+            // Load children even if the path was already expanded but never
+            // populated (e.g. a stale expandedPaths entry from restore), so
+            // the ancestor's subtree is present for the next level to render.
+            if treeChildren[path] == nil {
+                loadChildren(for: ancestor)
+            }
+        }
+
+        replaceSelection(entry.id)
+        pendingRevealTarget = entry.id
     }
 
     /// Synchronous child enumeration. The tree typically lazy-loads only
@@ -233,6 +413,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func refreshTreeChildren() {
         let stillExpanded = expandedPaths
         treeChildren.removeAll()
+        // `removeAll()` drops the root entry the `entries` didSet just set;
+        // restore it so tree mode keeps a fresh root listing after a reload.
+        if let root = folderURL {
+            treeChildren[root.path] = FileEntry.treeOrdered(entries)
+        }
         for path in stillExpanded {
             loadChildren(for: URL(fileURLWithPath: path))
         }
@@ -250,6 +435,37 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// either source. The previous linear scan turned bulk-selection
     /// (`Cmd+A` on ~1000 entries) into O(M×N) and hung the app.
     private var entriesByID: [FileEntry.ID: FileEntry] = [:]
+
+    /// Lazily-built ordered row sequences, keyed by view mode. Arrow-key nav
+    /// (`moveSelection`) and Shift-range (`extendSelection`) previously
+    /// rebuilt the full DFS flatten on every ↑/↓ — O(n) work per keypress in
+    /// a large tree. These cache the flattened order once; the range math
+    /// (now in `mqdirCore.SelectionModel`) walks the cached row IDs. `nil`
+    /// means "needs rebuild"; the row sources change only on the same events
+    /// that rebuild `entriesByID` (`entries` / `treeChildren` mutations) plus
+    /// `expandedPaths` and the filter toggle, so invalidation hooks all of
+    /// those.
+    private var cachedTreeRows: [FileEntry]?
+    private var cachedListRows: [FileEntry]?
+
+    /// Memoized status-bar / sidebar derived values. The global status bar
+    /// re-reads `selectedSize` and the sidebar re-reads `tagSummaries` on
+    /// every `MainWindowView` body re-render — without these, each render
+    /// re-ran an O(selection) size reduce and an O(entries) tag walk. `nil`
+    /// means "needs recompute"; invalidated from the `didSet` of the sources
+    /// each reads (`selection`/`entries`/`treeChildren` for the size,
+    /// `entries` for the tag summaries).
+    private var cachedSelectedSize: Int64?
+    private var cachedTagSummaries: [TagSummary]?
+
+    /// Drop the lazily-built row order caches. Called from the `didSet` of
+    /// every source the flatten/visible-list reads (`entries`,
+    /// `treeChildren`, `expandedPaths`, `searchResults`, and the filter
+    /// on/off edge of `searchQuery`). The next nav keypress rebuilds on demand.
+    private func invalidateRowCaches() {
+        cachedTreeRows = nil
+        cachedListRows = nil
+    }
 
     /// Look up a `FileEntry` by id across both the flat root listing
     /// (`entries`) and every cached tree subtree (`treeChildren`). Tree
@@ -276,30 +492,55 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     /// What the file list should render. Recursive `searchResults` while a
-    /// query is active, the canonical `entries` for the current folder
+    /// query is active, the tag-filtered subset of `entries` while a tag
+    /// filter is active, the canonical `entries` for the current folder
     /// otherwise. Selection IDs always resolve against `entries` (so a
     /// recursive hit clicked into a subfolder navigates fresh).
+    ///
+    /// Search and tag filter are mutually exclusive (enforced in their
+    /// setters), so the order here is unambiguous: at most one branch is
+    /// ever non-trivial.
     var visibleEntries: [FileEntry] {
-        isFiltering ? searchResults : entries
+        if isFiltering { return searchResults }
+        if let tag = tagFilter {
+            // Current-folder filtering only — `entries`, not a recursive
+            // walk. `String ==` is NFC/NFD-aware so a tag name stored in one
+            // normalisation form still matches the clicked summary's form.
+            return entries.filter { $0.tagNames.contains(tag) }
+        }
+        return entries
     }
+
+    /// True when a current-folder tag filter is narrowing the list. Distinct
+    /// from `isFiltering` (search), which drives the recursive-walk UI
+    /// (subtitles, "Searching…"). The active-filter chip and item-count
+    /// label read this to render the tag affordance without pulling in the
+    /// search-specific chrome.
+    var isTagFiltering: Bool { tagFilter != nil }
 
     /// Flat top-to-bottom sequence of every row currently rendered by
     /// `TreeFileListView` (root → expanded children → expanded
     /// grandchildren …). Used by arrow-key navigation so ↑/↓ in tree mode
     /// walks the same visual order the user sees, not just the root level.
-    /// Mirrors `TreeFileListView.orderedForTree` (folders first, files
-    /// after).
+    /// Folders-first per level via the shared `FileEntry.treeOrdered`
+    /// helper — same ordering rule `TreeFileListView` applies to each
+    /// rendered level. Cached — the DFS flatten only rebuilds when a source
+    /// the tree reads from changes, not on every keypress.
     var visibleTreeEntries: [FileEntry] {
-        guard let root = folderURL else { return [] }
+        if let cached = cachedTreeRows { return cached }
+        guard let root = folderURL else {
+            cachedTreeRows = []
+            return []
+        }
         let rootEntries = treeChildren[root.path] ?? entries
-        return flattenTree(rootEntries)
+        let rows = flattenTree(rootEntries)
+        cachedTreeRows = rows
+        return rows
     }
 
     private func flattenTree(_ entries: [FileEntry]) -> [FileEntry] {
-        let folders = entries.filter { $0.isDirectory }
-        let files = entries.filter { !$0.isDirectory }
         var result: [FileEntry] = []
-        for entry in folders + files {
+        for entry in FileEntry.treeOrdered(entries) {
             result.append(entry)
             if entry.isDirectory,
                isExpanded(entry.url),
@@ -308,6 +549,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             }
         }
         return result
+    }
+
+    /// Cached version of `visibleEntries` for the nav hot path. Identical
+    /// contents to `visibleEntries` but the array is reused across keypresses
+    /// instead of re-allocating `searchResults`/`entries`.
+    private var cachedVisibleEntries: [FileEntry] {
+        if let cached = cachedListRows { return cached }
+        let rows = visibleEntries
+        cachedListRows = rows
+        return rows
     }
 
     var isFiltering: Bool {
@@ -335,70 +586,90 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     /// Navigate to a folder, recording the current location in the back stack
-    /// and clearing the forward stack. This is the user-initiated path.
-    /// Refreshes the security-scoped bookmark so persistence captures the
-    /// latest folder reference without a separate "save bookmark" step.
+    /// and clearing the forward stack. This is the user-initiated path. The
+    /// security-scoped bookmark refresh and scope re-acquisition happen in the
+    /// shared `navigate(to:)` so back/forward navigation gets them too.
     func openFolder(_ url: URL) {
-        if let current = folderURL, current != url {
-            backStack.append(currentFrame())
+        if let current = folderURL, current != url, let frame = currentFrame() {
+            backStack.append(frame)
         }
         forwardStack.removeAll()
-        // Refresh the durable bookmark for persistence. A failure here is
-        // non-fatal — we just won't be able to restore this folder across
-        // launches in sandboxed builds, which matches non-sandboxed today.
-        currentBookmark = try? PersistenceService.makeBookmark(for: url)
         navigate(to: url, restoring: [])
     }
 
     func goBack() {
         guard let previous = backStack.popLast() else { return }
-        if folderURL != nil {
-            forwardStack.append(currentFrame())
+        if let frame = currentFrame() {
+            forwardStack.append(frame)
         }
         navigate(to: previous.url, restoring: previous.selectionPaths)
     }
 
     func goForward() {
         guard let next = forwardStack.popLast() else { return }
-        if folderURL != nil {
-            backStack.append(currentFrame())
+        if let frame = currentFrame() {
+            backStack.append(frame)
         }
         navigate(to: next.url, restoring: next.selectionPaths)
     }
 
     /// Snapshot of the current folder + selection for the back/forward
-    /// stacks. `selectedURLs` already resolves through the O(1) entry
+    /// stacks, or nil when no folder is open (nothing worth pushing onto
+    /// the history). `selectedURLs` already resolves through the O(1) entry
     /// index added for the bulk-select perf fix, so capturing it here
     /// stays cheap even on large multi-selections.
-    private func currentFrame() -> NavigationFrame {
-        NavigationFrame(
-            url: folderURL ?? URL(fileURLWithPath: "/"),
+    private func currentFrame() -> NavigationFrame? {
+        guard let folderURL else { return nil }
+        return NavigationFrame(
+            url: folderURL,
             selectionPaths: selectedURLs.map(\.path)
         )
     }
 
     /// Bare navigation that does NOT touch back/forward stacks. Used by
-    /// `goBack`, `goForward`, and the initial `openFolder` after stack
-    /// bookkeeping. Resets selection and triggers a reload.
+    /// `openFolder`, `goBack`, and `goForward` after stack bookkeeping.
+    /// Resets selection and triggers a reload.
     ///
     /// `restoring` queues a per-path selection set for the next
     /// successful enumeration so back/forward navigation lands the
     /// user back on the rows they had picked — empty for a fresh
     /// `openFolder()` so user-driven nav still starts clean.
     ///
-    /// Balances any outstanding security-scope access on the previous URL
-    /// before assigning the new one — required for sandboxed builds.
+    /// Refreshes the durable `currentBookmark` so persistence captures the
+    /// folder we actually land on — `goBack`/`goForward` route through here
+    /// too, so without this a save after navigating Back would persist the
+    /// folder the user just left. A bookmark failure here is non-fatal: we
+    /// just won't be able to restore this folder across launches in sandboxed
+    /// builds, which matches the non-sandboxed behaviour today.
+    ///
+    /// Balances any outstanding security-scope access on the previous URL,
+    /// then re-acquires the claim on the new one — both required for
+    /// sandboxed builds. `hasSecurityScopeAccess` and `scopedURL` move as a
+    /// single unit so they never diverge; `deinit` balances through
+    /// `scopedURL`, mirroring `init(state:)` and the original `openFolder`.
     private func navigate(to url: URL, restoring selectionPaths: [String]) {
-        if hasSecurityScopeAccess, let previous = folderURL, previous != url {
+        if hasSecurityScopeAccess, let previous = scopedURL {
             previous.stopAccessingSecurityScopedResource()
             hasSecurityScopeAccess = false
             scopedURL = nil
         }
+        currentBookmark = try? PersistenceService.makeBookmark(for: url)
+        // Re-acquire the claim for the new folder. Resolve through the
+        // freshly-made bookmark (not `url` directly) so the URL we claim and
+        // store in `scopedURL` carries the same security scope `init(state:)`
+        // would resolve on next launch.
+        if let bookmark = currentBookmark,
+           let scoped = PersistenceService.resolveBookmark(bookmark),
+           scoped.startAccessingSecurityScopedResource() {
+            hasSecurityScopeAccess = true
+            scopedURL = scoped
+        }
         folderURL = url
         selection.removeAll()
-        // Drop the per-folder filter so a query typed in the previous folder
-        // doesn't bleed into the new listing (matches Finder).
+        // Drop the per-folder filters so a query / tag filter applied in the
+        // previous folder doesn't bleed into the new listing (matches Finder).
         searchQuery = ""
+        tagFilter = nil
         pendingRestoredSelection = selectionPaths
         reload()
         updateDirectoryWatcher()
@@ -434,6 +705,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard !trimmed.isEmpty, let root = folderURL else {
             searchResults = []
             isSearching = false
+            // Drop the just-cancelled token's identity so a stale deferred
+            // block (which guards on `searchCancelToken === token`) can't
+            // match and flip `isSearching` back on after we've cleared it.
+            searchCancelToken = nil
             return
         }
 
@@ -486,6 +761,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         loadTask?.cancel()
         isLoading = true
         errorMessage = nil
+        // Invalidate computed directory sizes on every reload (navigation and
+        // every `.mqdirFileSystemChanged` broadcast funnel through here): a
+        // folder's contents may have changed, so a previously-walked total is
+        // now suspect. Recomputing is explicit (the user re-invokes "Calculate
+        // Size"), so dropping the cache is cheap + correct rather than trying
+        // to incrementally patch it. Bumping the generation also tells any
+        // in-flight walk from the prior listing not to publish a stale result.
+        sizeWalkGeneration &+= 1
+        if !computedDirectorySizes.isEmpty { computedDirectorySizes = [:] }
+        if !computingSizeIDs.isEmpty { computingSizeIDs = [] }
 
         let includeHidden = includeHidden
         let sortKey = sortKey
@@ -527,6 +812,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                         entries.contains { $0.id == selectedID }
                     }
                 }
+                // A reload can fire mid-rename (e.g. another app touches the
+                // folder and the watcher reloads us). `renamingEntryID` is
+                // URL-keyed, so it survives the re-enumeration as long as the
+                // entry is still on disk — keep rename mode and the live draft
+                // intact. If the renamed file vanished, drop out of rename mode
+                // cleanly so we don't leave a field bound to a dead row.
+                if let renamingID = renamingEntryID,
+                   !entries.contains(where: { $0.id == renamingID }) {
+                    renamingEntryID = nil
+                    renameDraft = ""
+                }
                 isLoading = false
                 // Re-fetch any expanded subtrees so the tree view reflects
                 // the same on-disk state the flat list just refreshed against.
@@ -538,6 +834,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
                 entries = []
                 selection.removeAll()
+                // Folder became unreadable mid-rename — there's no row to bind
+                // the field to, so drop rename mode cleanly.
+                renamingEntryID = nil
+                renameDraft = ""
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
@@ -618,9 +918,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// behaviour from the empty-area context menu and the ⌘⇧N shortcut.
     func createNewFolder() {
         guard let folder = folderURL else { return }
-        let target = uniqueDestination(for: folder.appendingPathComponent("untitled folder"))
         do {
-            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+            try FileOperationService.createDirectory(
+                at: folder.appendingPathComponent("untitled folder")
+            )
             reload()
         } catch {
             FileHandle.standardError.write(
@@ -643,10 +944,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Duplicate every currently-selected entry. Wraps the existing
     /// `duplicate(_:)` so the Edit-menu ⌘D shortcut and the file
     /// context menu's "Duplicate" item share one path.
-    func duplicateSelection() {
+    func duplicateSelection(normalizeHangul: Bool = false) {
         let targets = selectedEntries
         guard !targets.isEmpty else { return }
-        duplicate(targets)
+        duplicate(targets, normalizeHangul: normalizeHangul)
     }
 
     /// Newline-joined POSIX paths of the current selection on the
@@ -735,20 +1036,39 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
     // MARK: Selection (multi-select with cmd / shift)
 
+    /// The range math lives in `mqdirCore.SelectionModel` (pure, value-type,
+    /// unit-tested). The VM keeps the three `@Published` properties as the
+    /// source of truth views bind to — and other paths (`reload`, `navigate`)
+    /// write them directly — so each mutation method snapshots the *current*
+    /// published state into a model, runs the pure operation, and writes the
+    /// result back. Snapshotting per call (rather than holding a long-lived
+    /// mirror) means an external write to `selection`/`selectionAnchor`/
+    /// `selectionCursor` is always respected on the next selection gesture.
+    private var selectionModel: SelectionModel {
+        SelectionModel(selectedIDs: selection, anchor: selectionAnchor, cursor: selectionCursor)
+    }
+
+    /// Push a mutated `SelectionModel` back onto the `@Published` properties.
+    /// Each assignment is guarded so we only fire `objectWillChange` /
+    /// `didSet` for the fields that actually moved — `selection`'s `didSet`
+    /// invalidates the selected-size cache, so a redundant write there isn't
+    /// free.
+    private func applySelection(_ model: SelectionModel) {
+        if selection != model.selectedIDs { selection = model.selectedIDs }
+        if selectionAnchor != model.anchor { selectionAnchor = model.anchor }
+        if selectionCursor != model.cursor { selectionCursor = model.cursor }
+    }
+
     func replaceSelection(_ id: FileEntry.ID) {
-        selection = [id]
-        selectionAnchor = id
-        selectionCursor = id
+        var model = selectionModel
+        model.replace(with: id)
+        applySelection(model)
     }
 
     func toggleSelection(_ id: FileEntry.ID) {
-        if selection.contains(id) {
-            selection.remove(id)
-        } else {
-            selection.insert(id)
-        }
-        selectionAnchor = id
-        selectionCursor = id
+        var model = selectionModel
+        model.toggle(id)
+        applySelection(model)
     }
 
     func extendSelection(to id: FileEntry.ID) {
@@ -756,48 +1076,52 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // not the flat `entries` array — using `entries` for the
         // range walk made Shift+click silently collapse to a single-
         // row replace whenever either endpoint sat in an expanded
-        // subtree. `selectionOrderedRows` picks the right axis for
+        // subtree. `selectionOrderedRowIDs` picks the right axis for
         // the current view mode.
-        let ordered = selectionOrderedRows
-        guard let anchor = selectionAnchor,
-              let anchorIdx = ordered.firstIndex(where: { $0.id == anchor }),
-              let targetIdx = ordered.firstIndex(where: { $0.id == id })
-        else {
-            replaceSelection(id)
-            return
-        }
-        let lower = min(anchorIdx, targetIdx)
-        let upper = max(anchorIdx, targetIdx)
-        selection = Set(ordered[lower...upper].map(\.id))
-        selectionCursor = id
+        var model = selectionModel
+        model.extend(to: id, in: selectionOrderedRowIDs)
+        applySelection(model)
     }
 
-    /// Row sequence Shift-range selection should walk over. Tree mode
-    /// uses the flattened DFS of every visible (expanded) row;
-    /// list mode uses the standard flat enumeration (or search
-    /// results when a filter is active).
-    private var selectionOrderedRows: [FileEntry] {
-        viewMode == .tree ? visibleTreeEntries : visibleEntries
+    /// Row ID sequence Shift-range selection should walk over. Tree mode
+    /// uses the flattened DFS of every visible (expanded) row; list mode
+    /// uses the standard flat enumeration (or search results when a filter
+    /// is active). Reads the cached arrays so a Shift-extend doesn't
+    /// re-flatten the tree.
+    private var selectionOrderedRowIDs: [FileEntry.ID] {
+        (viewMode == .tree ? visibleTreeEntries : cachedVisibleEntries).map(\.id)
+    }
+
+    /// Swap one `FileEntry.ID` (a URL) for another across the selection
+    /// set, anchor, and cursor. Used by `commitRename`: after a rename the
+    /// renamed row's ID changes (ID == URL), so without this the renamed
+    /// row would deselect on the next reload. Writes the published props
+    /// directly — selection-model snapshotting isn't needed for a plain
+    /// member substitution.
+    private func migrateSelection(from old: FileEntry.ID, to new: FileEntry.ID) {
+        if selection.contains(old) {
+            selection.remove(old)
+            selection.insert(new)
+        }
+        if selectionAnchor == old { selectionAnchor = new }
+        if selectionCursor == old { selectionCursor = new }
     }
 
     /// Wipe the selection. Used by the file list when the user clicks
     /// empty pane background — Finder's deselect-on-empty-click pattern.
     func clearSelection() {
-        guard !selection.isEmpty else { return }
-        selection.removeAll()
-        selectionAnchor = nil
-        selectionCursor = nil
+        var model = selectionModel
+        guard model.clear() else { return }
+        applySelection(model)
     }
 
     /// Select every row currently visible in the list (`visibleEntries`,
     /// which honours the active search filter). Anchors on the first
     /// entry so a follow-up shift-extend has a sensible starting point.
     func selectAll() {
-        let all = visibleEntries
-        guard !all.isEmpty else { return }
-        selection = Set(all.map(\.id))
-        selectionAnchor = all.first?.id
-        selectionCursor = all.last?.id
+        var model = selectionModel
+        model.selectAll(in: visibleEntries.map(\.id))
+        applySelection(model)
     }
 
     /// Write the currently selected file URLs to the system pasteboard
@@ -838,43 +1162,45 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// current folder. Mirrors Finder's ⌘V (copy) and Windows
     /// File Explorer's ⌘V-after-⌘X (move). Silently skips when the
     /// pasteboard has no file URLs or no folder is open.
-    func pasteFromPasteboard() {
+    func pasteFromPasteboard(normalizeHangul: Bool = false) {
         guard let folder = folderURL else { return }
         let pb = NSPasteboard.general
         guard let items = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
               !items.isEmpty
         else { return }
 
+        // Read the cut marker on the main actor *before* detaching — the
+        // pasteboard is main-actor state, and the detached loop only needs
+        // the resolved `isCut` flag plus the URLs.
         let isCut = pb.types?.contains(Self.cutMarkerType) == true
-        let fm = FileManager.default
-        for source in items {
-            let target = uniqueDestination(for: folder.appendingPathComponent(source.lastPathComponent))
-            do {
-                if isCut {
-                    try fm.moveItem(at: source, to: target)
-                } else {
-                    try fm.copyItem(at: source, to: target)
-                }
-            } catch {
+        Task {
+            let failures = await Task.detached(priority: .userInitiated) {
+                // Same standardized self-drop + descendant guards drop
+                // uses, so paste-into-same-folder and paste-into-descendant
+                // behave identically to a drag-drop.
+                FileOperationService.transfer(items, into: folder, move: isCut, normalizeHangul: normalizeHangul)
+            }.value
+            for (source, error) in failures {
                 FileHandle.standardError.write(
                     Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
                 )
             }
+            // After a cut+paste the source URLs are gone, so wipe the
+            // pasteboard to avoid a follow-up paste silently failing on
+            // missing files. Plain-copy paste leaves the clipboard alone
+            // so the user can paste the same set into multiple folders.
+            // Back on the main actor here (NSPasteboard is main-actor state).
+            if isCut {
+                pb.clearContents()
+            }
+            // Tell every other pane/tab to refresh — the source folder
+            // (potentially open in another pane after a cross-pane
+            // cut+paste) and any pane viewing the destination both need
+            // to drop the stale entries / pick up the new ones. The
+            // broadcast reloads this pane too, so we don't reload directly.
+            // Same pattern moveToTrash / acceptDrop / duplicate use.
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
-        // After a cut+paste the source URLs are gone, so wipe the
-        // pasteboard to avoid a follow-up paste silently failing on
-        // missing files. Plain-copy paste leaves the clipboard alone
-        // so the user can paste the same set into multiple folders.
-        if isCut {
-            pb.clearContents()
-        }
-        reload()
-        // Tell every other pane/tab to refresh — the source folder
-        // (potentially open in another pane after a cross-pane
-        // cut+paste) and any pane viewing the destination both need
-        // to drop the stale entries / pick up the new ones. Same
-        // broadcast pattern moveToTrash / acceptDrop / duplicate use.
-        NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
     }
 
     /// Convenience around `moveToTrash` that operates on the live
@@ -909,16 +1235,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
         Task {
             let failures: [(URL, String)] = await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                var failed: [(URL, String)] = []
-                for url in urls {
-                    do {
-                        try fm.removeItem(at: url)
-                    } catch {
-                        failed.append((url, error.localizedDescription))
-                    }
-                }
-                return failed
+                FileOperationService.permanentlyDelete(urls)
+                    .map { ($0.0, $0.1.localizedDescription) }
             }.value
 
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
@@ -956,11 +1274,13 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Cross-folder selections are rejected because zip's relative
     /// pathing assumes a single working directory.
     func compress(_ entries: [FileEntry]) {
-        let urls = entries.map(\.url)
-        guard !urls.isEmpty else { return }
-        guard let parent = urls.first?.deletingLastPathComponent() else { return }
-        let sameParent = urls.allSatisfy { $0.deletingLastPathComponent() == parent }
-        guard sameParent else {
+        guard !entries.isEmpty else { return }
+        let plan: (parent: URL, destination: URL, sourceNames: [String])?
+        do {
+            plan = try FileOperationService.planCompression(
+                urls: entries.map { (url: $0.url, isDirectory: $0.isDirectory) }
+            )
+        } catch FileOperationService.CompressError.crossFolder {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Can't compress items from different folders"
@@ -968,24 +1288,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return
+        } catch {
+            return
         }
-
-        let stem: String
-        if entries.count == 1 {
-            let only = entries[0]
-            stem = only.isDirectory
-                ? only.url.lastPathComponent
-                : only.url.deletingPathExtension().lastPathComponent
-        } else {
-            stem = "Archive"
-        }
-        let destination = Self.uniqueZipDestination(in: parent, stem: stem)
-        let sourceNames = urls.map(\.lastPathComponent)
+        guard let (parent, destination, sourceNames) = plan else { return }
 
         Task {
             let failure: String? = await Task.detached(priority: .utility) {
                 do {
-                    try Self.runCompression(
+                    try FileOperationService.runCompression(
                         parent: parent,
                         sources: sourceNames,
                         destination: destination
@@ -1009,63 +1320,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
     }
 
-    /// Pick a non-existing `<stem>.zip` under `parent`, falling back
-    /// to "<stem> 2.zip", "<stem> 3.zip", … on collision (Finder
-    /// convention). Same shape as `uniqueExtractionDirectory`.
-    nonisolated static func uniqueZipDestination(in parent: URL, stem: String) -> URL {
-        let fm = FileManager.default
-        let primary = parent.appendingPathComponent("\(stem).zip")
-        if !fm.fileExists(atPath: primary.path) { return primary }
-        for n in 2...999 {
-            let candidate = parent.appendingPathComponent("\(stem) \(n).zip")
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        let stamp = Int(Date().timeIntervalSince1970)
-        return parent.appendingPathComponent("\(stem) \(stamp).zip")
-    }
-
-    /// Drive /usr/bin/zip with `currentDirectoryURL = parent` so the
-    /// archive stores relative paths (`foo/bar` rather than absolute
-    /// `/Users/…/foo/bar`). `-r` recurses into directories, `-y`
-    /// preserves symlinks rather than chasing them, `-q` silences
-    /// per-file progress so stderr only carries real errors.
-    nonisolated static func runCompression(
-        parent: URL,
-        sources: [String],
-        destination: URL
-    ) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", "-y", "-q", destination.path] + sources
-        process.currentDirectoryURL = parent
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = Pipe()
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
-            let trimmed = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
-            throw NSError(
-                domain: "mq-dir.compress",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: summary]
-            )
-        }
-    }
-
     /// True when every entry in `entries` is an archive we know how
     /// to extract (case-insensitive .zip / .tar / .tgz / .tar.gz).
     /// Used by the context menu to decide whether the "Extract"
     /// item is enabled. An empty list returns false so the entry is
-    /// hidden when no rows are selected.
+    /// hidden when no rows are selected. Thin wrapper over
+    /// `FileOperationService.canExtract`.
     nonisolated static func canExtract(_ entries: [FileEntry]) -> Bool {
-        guard !entries.isEmpty else { return false }
-        return entries.allSatisfy { entry in
-            archiveKind(for: entry.url) != nil && !entry.isDirectory
-        }
+        FileOperationService.canExtract(
+            entries.map { (url: $0.url, isDirectory: $0.isDirectory) }
+        )
     }
 
     /// Extract every supported archive in `entries` into a sibling
@@ -1076,9 +1340,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// open pane on the same folder picks up the new directory, and
     /// surfaces a single NSAlert with the archives that failed.
     func extractArchives(_ entries: [FileEntry]) {
-        let archives: [(URL, ArchiveKind)] = entries.compactMap { entry in
+        let archives: [(URL, FileOperationService.ArchiveKind)] = entries.compactMap { entry in
             guard !entry.isDirectory,
-                  let kind = Self.archiveKind(for: entry.url) else { return nil }
+                  let kind = FileOperationService.archiveKind(for: entry.url) else { return nil }
             return (entry.url, kind)
         }
         guard !archives.isEmpty else { return }
@@ -1087,11 +1351,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             let failures: [(URL, String)] = await Task.detached(priority: .utility) {
                 var failed: [(URL, String)] = []
                 for (url, kind) in archives {
-                    let parent = url.deletingLastPathComponent()
-                    let stem = Self.archiveStem(for: url, kind: kind)
-                    let dest = Self.uniqueExtractionDirectory(in: parent, stem: stem)
                     do {
-                        try Self.runExtraction(kind: kind, archive: url, destination: dest)
+                        try FileOperationService.extract(archive: url, kind: kind)
                     } catch {
                         failed.append((url, error.localizedDescription))
                     }
@@ -1117,116 +1378,42 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
     }
 
-    /// Archive kinds we recognize; drives both the extension test in
-    /// `archiveKind(for:)` and the tool/argument selection in
-    /// `runExtraction`.
-    enum ArchiveKind {
-        case zip
-        case tar
-        case tarGz
+    /// True when `entries` contains at least one directory — gates the
+    /// "Calculate Size" context-menu item (folders are the only entries that
+    /// lack a size). A pure predicate over the passed targets so the menu can
+    /// hide the action for an all-files selection.
+    nonisolated static func canCalculateSize(_ entries: [FileEntry]) -> Bool {
+        entries.contains { $0.isDirectory }
     }
 
-    /// Map a URL's extension to a known archive kind, case-insensitive.
-    /// Treats `.tgz` as gzip-compressed tar; `.tar.gz` is detected by
-    /// looking at the full filename, not just the last extension.
-    nonisolated static func archiveKind(for url: URL) -> ArchiveKind? {
-        let name = url.lastPathComponent.lowercased()
-        if name.hasSuffix(".zip") { return .zip }
-        if name.hasSuffix(".tar.gz") || name.hasSuffix(".tgz") { return .tarGz }
-        if name.hasSuffix(".tar") { return .tar }
-        return nil
-    }
-
-    /// Strip the archive extension from a filename so we can name the
-    /// extraction folder after the contents. ".tar.gz" gets both
-    /// extensions trimmed; everything else loses the last one.
-    nonisolated static func archiveStem(for url: URL, kind: ArchiveKind) -> String {
-        let base = url.lastPathComponent
-        switch kind {
-        case .tarGz where base.lowercased().hasSuffix(".tar.gz"):
-            return String(base.dropLast(".tar.gz".count))
-        case .zip, .tar, .tarGz:
-            return url.deletingPathExtension().lastPathComponent
+    /// On-demand size calculation for every directory in `entries`. Files are
+    /// ignored (they already carry a size). Each folder is walked recursively
+    /// off the main actor at utility priority; the running set drives the "…"
+    /// progress text and the result publishes into `computedDirectorySizes`,
+    /// which repaints the size column and feeds the status-bar selected total.
+    ///
+    /// A generation token captured at launch lets a walk that outlived its
+    /// folder (navigation / reload bumps the generation) skip publishing —
+    /// the stale-write-is-harmless property holds because IDs are URLs, but
+    /// dropping it keeps the cache from accreting dead entries.
+    func calculateSize(_ entries: [FileEntry]) {
+        let directories = entries.filter(\.isDirectory)
+        guard !directories.isEmpty else { return }
+        let generation = sizeWalkGeneration
+        for directory in directories {
+            let id = directory.id
+            guard !computingSizeIDs.contains(id) else { continue }
+            computingSizeIDs.insert(id)
+            let url = directory.url
+            Task { [weak self] in
+                let size = await Task.detached(priority: .utility) {
+                    FileSystemService().directorySize(at: url)
+                }.value
+                guard let self, self.sizeWalkGeneration == generation else { return }
+                self.computedDirectorySizes[id] = size
+                self.computingSizeIDs.remove(id)
+            }
         }
-    }
-
-    /// Pick a non-existing folder under `parent` named `stem`, falling
-    /// back to "stem 2", "stem 3", … on collision (Finder convention).
-    /// Caps at 999 attempts and finally appends a timestamp so the
-    /// extraction never silently overwrites.
-    nonisolated static func uniqueExtractionDirectory(in parent: URL, stem: String) -> URL {
-        let fm = FileManager.default
-        let primary = parent.appendingPathComponent(stem)
-        if !fm.fileExists(atPath: primary.path) { return primary }
-        for n in 2...999 {
-            let candidate = parent.appendingPathComponent("\(stem) \(n)")
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        let stamp = Int(Date().timeIntervalSince1970)
-        return parent.appendingPathComponent("\(stem) \(stamp)")
-    }
-
-    /// Drive ditto/tar against the archive. ditto's -x -k handles zip
-    /// (preserves resource forks); tar's -xf handles plain tar and
-    /// transparently picks up gzip via -xzf for .tar.gz/.tgz.
-    /// `destination` must NOT exist yet — both tools create it with
-    /// the right mode bits when given a fresh path.
-    nonisolated static func runExtraction(
-        kind: ArchiveKind,
-        archive: URL,
-        destination: URL
-    ) throws {
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        let process = Process()
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = Pipe()
-        switch kind {
-        case .zip:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-            process.arguments = ["-x", "-k", archive.path, destination.path]
-        case .tar:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            process.arguments = ["-xf", archive.path, "-C", destination.path]
-        case .tarGz:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            process.arguments = ["-xzf", archive.path, "-C", destination.path]
-        }
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            // readToEnd() is throws -> Data?, so try? wraps it as
-            // Data??; flatten with ?? nil before falling back to
-            // an empty Data() so the next String(data:) sees a
-            // single-level optional.
-            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
-            let trimmed = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
-            throw NSError(
-                domain: "mq-dir.extract",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: summary]
-            )
-        }
-    }
-
-    /// If `target` already exists, append " 2", " 3", … before the
-    /// extension until a free slot opens. Mirrors Finder's "untitled
-    /// folder 2" behaviour for paste-into-same-dir.
-    private func uniqueDestination(for target: URL) -> URL {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: target.path) else { return target }
-        let parent = target.deletingLastPathComponent()
-        let ext = target.pathExtension
-        let stem = target.deletingPathExtension().lastPathComponent
-        for i in 2...999 {
-            let candidate = parent.appendingPathComponent(
-                ext.isEmpty ? "\(stem) \(i)" : "\(stem) \(i).\(ext)"
-            )
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return target
     }
 
     /// Move the selection up or down by `offset` rows in `visibleEntries`,
@@ -1236,48 +1423,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func moveSelection(by offset: Int, extending: Bool) {
         // In tree mode walk the flat DFS of expanded rows (matches what
         // the user sees). In list mode keep the existing flat-listing
-        // walk so search-result navigation also works.
-        let visible = viewMode == .tree ? visibleTreeEntries : visibleEntries
-        guard !visible.isEmpty else { return }
-
-        // `currentIdx` is the row the keypress moves *from*. When
-        // extending we step the cursor (the trailing edge), keeping
-        // the anchor fixed; without extending we step from the
-        // anchor, which then becomes the new cursor via
-        // `replaceSelection`. The previous code stepped from the
-        // anchor in both branches, which capped Shift+↓ at two rows
-        // because each press recomputed `anchor + 1` instead of
-        // `cursor + 1`.
-        let pivotID: FileEntry.ID? = extending ? (selectionCursor ?? selectionAnchor) : selectionAnchor
-        let currentIdx: Int
-        if let pivot = pivotID,
-           let idx = visible.firstIndex(where: { $0.id == pivot }) {
-            currentIdx = idx
-        } else if let firstID = selection.first,
-                  let idx = visible.firstIndex(where: { $0.id == firstID }) {
-            currentIdx = idx
-        } else {
-            // No prior selection — arrow-down lands on the first row,
-            // arrow-up on the last (Finder convention).
-            guard let target = offset >= 0 ? visible.first : visible.last
-            else { return }
-            replaceSelection(target.id)
-            return
-        }
-
-        let newIdx = max(0, min(visible.count - 1, currentIdx + offset))
-        let target = visible[newIdx]
-
-        if extending,
-           let anchor = selectionAnchor,
-           let anchorIdx = visible.firstIndex(where: { $0.id == anchor }) {
-            let lower = min(anchorIdx, newIdx)
-            let upper = max(anchorIdx, newIdx)
-            selection = Set(visible[lower...upper].map(\.id))
-            selectionCursor = target.id
-        } else {
-            replaceSelection(target.id)
-        }
+        // walk so search-result navigation also works. Both read the cached
+        // arrays so a held arrow key doesn't re-flatten/re-allocate per repeat.
+        // The pivot/clamp/extend math (including the documented Shift-growth
+        // fix — stepping from the cursor, not the anchor) lives in
+        // `SelectionModel.move`.
+        let visible = (viewMode == .tree ? visibleTreeEntries : cachedVisibleEntries).map(\.id)
+        var model = selectionModel
+        model.move(by: offset, extending: extending, in: visible)
+        applySelection(model)
     }
 
     /// Every currently-selected entry, resolved across the flat root
@@ -1295,35 +1449,63 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         selectedEntries.map(\.url)
     }
 
+    /// Total byte size of the current selection, summed across the O(1)
+    /// entry index. Memoized so the global status bar's per-render read
+    /// doesn't re-run the `compactMap`/`reduce` on every `MainWindowView`
+    /// body invalidation; recomputes only when selection or entry data moves.
+    var selectedSize: Int64 {
+        if let cached = cachedSelectedSize { return cached }
+        let total = selection.reduce(Int64(0)) { running, id in
+            // A selected directory contributes its computed size when one has
+            // been calculated (folders carry `size == nil` otherwise); files
+            // contribute their own `size`. `computedDirectorySizes` keys on
+            // the same URL-ID so the lookup is O(1).
+            running + (findEntry(id: id)?.size ?? computedDirectorySizes[id] ?? 0)
+        }
+        cachedSelectedSize = total
+        return total
+    }
+
+    /// Deduplicated tag summaries for the current folder's entries, feeding
+    /// the sidebar's Tags section. Memoized so the sidebar's per-render read
+    /// doesn't re-walk every entry's tags on each `MainWindowView` body pass;
+    /// recomputes only when `entries` changes.
+    var tagSummaries: [TagSummary] {
+        if let cached = cachedTagSummaries { return cached }
+        let summaries = entries.uniqueTagSummaries()
+        cachedTagSummaries = summaries
+        return summaries
+    }
+
     /// Right-click "Duplicate" → for each entry, copy in place with a
     /// Finder-style " 2" / " 3" suffix. Mirrors `acceptDrop`'s detached-task
     /// + system-wide reload pattern so an open second pane viewing the same
     /// folder also picks up the new copies.
-    func duplicate(_ entries: [FileEntry]) {
+    func duplicate(_ entries: [FileEntry], normalizeHangul: Bool = false) {
         let urls = entries.map(\.url)
         Task {
-            await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                for source in urls {
-                    let parent = source.deletingLastPathComponent()
-                    let dest = Self.uniqueDestination(for: source, in: parent)
-                    do {
-                        try fm.copyItem(at: source, to: dest)
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir duplicate] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
-                }
+            let failures = await Task.detached(priority: .userInitiated) {
+                FileOperationService.duplicate(urls, normalizeHangul: normalizeHangul)
             }.value
+            for (source, error) in failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir duplicate] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
     }
 
     /// Begin inline rename for `entry`. Seeds the draft with the
-    /// current name and selects the row so the TextField that the
-    /// FileEntryRow renders is pointed at the right item.
+    /// current name and selects the row so the rename field the row
+    /// renders is pointed at the right item. If a *different* row is
+    /// already mid-rename, commit it first — only one row is ever in
+    /// rename mode, and starting a fresh rename shouldn't silently
+    /// discard the in-flight edit (Finder commits the old one).
     func beginRename(_ entry: FileEntry) {
+        if let active = renamingEntryID, active != entry.id {
+            commitRename()
+        }
         renamingEntryID = entry.id
         renameDraft = entry.name
         replaceSelection(entry.id)
@@ -1333,6 +1515,23 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// the ⌘⇧R menu shortcut. No-op if nothing is selected.
     func beginRenameForActiveSelection() {
         guard let entry = selectedEntry else { return }
+        beginRename(entry)
+    }
+
+    /// Tab / Shift-Tab while renaming: commit the current edit, then begin
+    /// renaming the next (`forward`) or previous visible row, Finder-style.
+    /// Walks the same row order arrow-key nav uses (tree DFS in tree mode,
+    /// the flat visible list otherwise). No-op past the first / last row.
+    func beginRenameAdjacent(forward: Bool) {
+        guard let currentID = renamingEntryID else { return }
+        // commitRename clears renamingEntryID; capture the order first.
+        let rows = selectionOrderedRowIDs
+        commitRename()
+        guard let idx = rows.firstIndex(of: currentID) else { return }
+        let nextIdx = forward ? idx + 1 : idx - 1
+        guard rows.indices.contains(nextIdx),
+              let entry = findEntry(id: rows[nextIdx])
+        else { return }
         beginRename(entry)
     }
 
@@ -1352,15 +1551,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != entry.name else { return }
 
-        let dest = entry.url.deletingLastPathComponent().appendingPathComponent(trimmed)
-        let fm = FileManager.default
-        guard !fm.fileExists(atPath: dest.path) else {
-            errorMessage = "An item named '\(trimmed)' already exists in this folder."
-            return
-        }
         do {
-            try fm.moveItem(at: entry.url, to: dest)
+            let newURL = try FileOperationService.rename(entry.url, to: trimmed)
+            // FileEntry.ID is the URL, so the renamed row gets a brand-new ID
+            // after the fs-changed reload. Migrate the selection / anchor /
+            // cursor from the old ID to the new URL *now* so the renamed row
+            // stays selected — and so it sticks even if the file watcher's
+            // reload races `reload()` below (the set already holds the new URL).
+            migrateSelection(from: entry.id, to: newURL)
             reload()
+        } catch FileOperationService.RenameError.destinationExists(let name) {
+            errorMessage = "An item named '\(name)' already exists in this folder."
         } catch {
             errorMessage = "Couldn't rename: \(error.localizedDescription)"
         }
@@ -1373,13 +1574,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     /// Rename any decomposed-Hangul (NFD) filenames in `entries` to
-    /// NFC form on disk. Used by the right-click "Normalize Filename
-    /// to NFC" action and (via `AppKitFileDragModifier`) automatically
-    /// on drag-out when the matching workspace setting is on.
-    /// Delegates the actual rename to `HangulNFCFilename.renameToNFC`,
-    /// which bypasses `FileManager.moveItem` (a no-op on APFS for
-    /// normalisation-only renames). Reloads at the end if anything
-    /// actually changed.
+    /// NFC form on disk. This is the explicit right-click "Normalize
+    /// Filename to NFC" action. The same `HangulNFCFilename.renameToNFC`
+    /// primitive is also driven automatically — gated by the
+    /// `normalizeHangulOnDragOut` workspace setting — by the drag-out
+    /// source modifiers (`appKitFileDrag` / `inactiveDragSource`) at
+    /// drag-start and by `FileOperationService.transfer` / `duplicate`
+    /// after a copy/move/duplicate. `renameToNFC` bypasses
+    /// `FileManager.moveItem` (a no-op on APFS for normalisation-only
+    /// renames). Reloads at the end if anything actually changed.
     func normalizeFilenamesToNFC(_ entries: [FileEntry]) {
         var changed = false
         for entry in entries {
@@ -1425,18 +1628,14 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func moveToTrash(_ entries: [FileEntry]) {
         let urls = entries.map(\.url)
         Task {
-            await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                for url in urls {
-                    do {
-                        try fm.trashItem(at: url, resultingItemURL: nil)
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir trash] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
-                }
+            let failures = await Task.detached(priority: .userInitiated) {
+                FileOperationService.moveToTrash(urls)
             }.value
+            for (url, error) in failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir trash] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
     }
@@ -1445,50 +1644,18 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// `copy=true` forces copy (Option held). Default Finder semantics: same-volume = move,
     /// cross-volume = copy. On name conflict, the destination gets " 2", " 3", ... suffix
     /// (Finder convention). After completion, broadcasts a system-wide reload.
-    func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool) {
+    func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool, normalizeHangul: Bool = false) {
         Task {
-            await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                for source in urls {
-                    var dest = destinationFolder.appendingPathComponent(source.lastPathComponent)
-                    if source == dest { continue }
-                    // Reject dropping a folder into itself or any descendant.
-                    if dest.path.hasPrefix(source.path + "/") { continue }
-                    // Auto-rename on conflict instead of skipping.
-                    if fm.fileExists(atPath: dest.path) {
-                        dest = Self.uniqueDestination(for: source, in: destinationFolder)
-                    }
-                    do {
-                        if copy {
-                            try fm.copyItem(at: source, to: dest)
-                        } else {
-                            try fm.moveItem(at: source, to: dest)
-                        }
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir drop] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
-                }
+            let failures = await Task.detached(priority: .userInitiated) {
+                FileOperationService.transfer(urls, into: destinationFolder, move: !copy, normalizeHangul: normalizeHangul)
             }.value
+            for (source, error) in failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir drop] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
-    }
-
-    /// Generates "name 2.ext", "name 3.ext", ... for the first non-existent path.
-    /// Caps at 500 attempts; falls back to a timestamped name to avoid hanging.
-    nonisolated static func uniqueDestination(for source: URL, in folder: URL) -> URL {
-        let fm = FileManager.default
-        let stem = source.deletingPathExtension().lastPathComponent
-        let ext = source.pathExtension
-        for n in 2...500 {
-            let suffix = ext.isEmpty ? "\(stem) \(n)" : "\(stem) \(n).\(ext)"
-            let candidate = folder.appendingPathComponent(suffix)
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        let stamp = Int(Date().timeIntervalSince1970)
-        let fallback = ext.isEmpty ? "\(stem)-\(stamp)" : "\(stem)-\(stamp).\(ext)"
-        return folder.appendingPathComponent(fallback)
     }
 }
 

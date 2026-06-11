@@ -84,6 +84,14 @@ struct BrowserPaneView: View {
     let isFocused: Bool
     let onFocus: () -> Void
 
+    /// Live "normalise Hangul filenames to NFC on drag out" preference,
+    /// read off the workspace settings and handed to the drag-source
+    /// modifiers so each drag-start can rename NFD names before the
+    /// pasteboard captures them.
+    private var normalizeHangulOnDragOut: Bool {
+        workspace.workspace.settings.normalizeHangulOnDragOut
+    }
+
     @State private var paneIsDropTargeted = false
     @State private var rowDropTargeted: FileEntry.ID?
     /// Where the blue insertion-line indicator should render in this
@@ -124,6 +132,12 @@ struct BrowserPaneView: View {
             content
         }
         .background(Theme.Color.paneBg)
+        // Installs an NSView into the window's responder chain so this
+        // window has formal standing in Quick Look's first-responder
+        // arbitration (see QuickLookPanelBridge). The direct
+        // `.onKeyPress(.space) → QuickLookManager.toggle` path still
+        // drives the common case; this only supplements it.
+        .background(QuickLookPanelBridge())
         .overlay(
             Rectangle()
                 .strokeBorder(
@@ -169,7 +183,7 @@ struct BrowserPaneView: View {
 
         Divider()
 
-        Button("Paste") { viewModel.pasteFromPasteboard() }
+        Button("Paste") { viewModel.pasteFromPasteboard(normalizeHangul: normalizeHangulOnDragOut) }
             .keyboardShortcut("v", modifiers: .command)
             .disabled(!viewModel.canPasteFiles || viewModel.folderURL == nil)
 
@@ -456,6 +470,9 @@ struct BrowserPaneView: View {
     private var paneHeader: some View {
         HStack(spacing: 6) {
             paneHeaderTitle
+            if let tag = viewModel.tagFilter {
+                tagFilterChip(tag)
+            }
             Spacer(minLength: 0)
             viewModeToggle
         }
@@ -465,6 +482,42 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separatorFaint).frame(height: 0.5)
         }
+    }
+
+    /// Active tag-filter affordance, mounted in the pane header next to the
+    /// folder title — the same strip that carries the search-active state's
+    /// sibling chrome, so an active filter is always visible and dismissible.
+    /// Renders the tag's Finder swatch (resolved from the focused tab's tag
+    /// summaries by name) + the tag name + a ✕ that clears the filter.
+    private func tagFilterChip(_ tag: String) -> some View {
+        let labelNumber = viewModel.tagSummaries.first { $0.name == tag }?.labelNumber ?? 0
+        return HStack(spacing: 4) {
+            if let color = TagColor.color(forLabel: labelNumber) {
+                Circle().fill(color).frame(width: 7, height: 7)
+            } else {
+                Circle()
+                    .strokeBorder(Theme.Color.labelTertiary, lineWidth: 1)
+                    .frame(width: 7, height: 7)
+            }
+            Text(tag)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Theme.Color.label)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Button {
+                viewModel.tagFilter = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.Color.labelTertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Clear tag filter")
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Color.white.opacity(0.06), in: Capsule())
+        .help("Filtering by tag \u{201C}\(tag)\u{201D}")
     }
 
     /// Folder name + item count strip on the left of the pane header.
@@ -487,8 +540,8 @@ struct BrowserPaneView: View {
             }
             .contentShape(Rectangle())
             .help(url.path)
-            .appKitFileDrag(primary: url)
-            .inactiveDragSource(primary: url)
+            .appKitFileDrag(primary: url, normalizeHangul: normalizeHangulOnDragOut)
+            .inactiveDragSource(primary: url, normalizeHangul: normalizeHangulOnDragOut)
         } else {
             Text("No folder open")
                 .foregroundStyle(Theme.Color.labelTertiary)
@@ -565,6 +618,10 @@ struct BrowserPaneView: View {
             let count = viewModel.visibleEntries.count
             return "\(count) match\(count == 1 ? "" : "es")"
         }
+        if viewModel.isTagFiltering {
+            let count = viewModel.visibleEntries.count
+            return "\(count) match\(count == 1 ? "" : "es")"
+        }
         let total = viewModel.entries.count
         return "\(total) item\(total == 1 ? "" : "s")"
     }
@@ -574,6 +631,9 @@ struct BrowserPaneView: View {
             if viewModel.isSearching { return "Searching\u{2026}" }
             let trimmed = viewModel.searchQuery.trimmingCharacters(in: .whitespaces)
             return "No matches for \u{201C}\(trimmed)\u{201D}"
+        }
+        if let tag = viewModel.tagFilter {
+            return "No items tagged \u{201C}\(tag)\u{201D}"
         }
         return "No items"
     }
@@ -592,6 +652,27 @@ struct BrowserPaneView: View {
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return stripped.isEmpty ? nil : stripped
     }
+
+    /// Resolve the Size-column string for a row. Files use their own
+    /// `size`; directories (which enumerate with `size == nil`) show "…"
+    /// while an on-demand size walk runs, the formatted total once it lands
+    /// in the VM's `computedDirectorySizes`, or "—" until the user invokes
+    /// "Calculate Size". Same `.file`-style formatter the file rows use, so
+    /// computed folder totals format identically to file sizes.
+    private func sizeText(for entry: FileEntry) -> String {
+        if entry.isDirectory {
+            if viewModel.computingSizeIDs.contains(entry.id) { return "\u{2026}" }
+            if let size = viewModel.computedDirectorySizes[entry.id] {
+                return Self.sizeFormatter.string(fromByteCount: size)
+            }
+            return "\u{2014}"
+        }
+        return Self.sizeFormatter.string(fromByteCount: entry.size)
+    }
+
+    /// Shared `.file`-style byte formatter for the Size column — one instance
+    /// reused across every row's `sizeText(for:)` resolution.
+    private static let sizeFormatter = FileSizeFormatter()
 
     // MARK: Column header
 
@@ -822,11 +903,7 @@ struct BrowserPaneView: View {
                 if !isFocused { onFocus() }
                 if keyPress.modifiers.contains(.command),
                    let entry = viewModel.selectedEntry, entry.isDirectory {
-                    NotificationCenter.default.post(
-                        name: .mqdirOpenURLInNewTabRequested,
-                        object: nil,
-                        userInfo: ["url": entry.url]
-                    )
+                    AppCommand.openURLInNewTab(url: entry.url).post()
                 } else {
                     viewModel.openSelected()
                 }
@@ -862,7 +939,8 @@ struct BrowserPaneView: View {
                         viewModel.acceptDrop(
                             urls,
                             into: folder,
-                            copy: modifiers.contains(.option)
+                            copy: modifiers.contains(.option),
+                            normalizeHangul: normalizeHangulOnDragOut
                         )
                     }
                 }
@@ -910,6 +988,7 @@ struct BrowserPaneView: View {
             paneIsFocused: isFocused,
             isDropTarget: isRowDropTarget,
             columnWidths: viewModel.columnWidths,
+            sizeText: sizeText(for: entry),
             subtitle: searchSubtitle(for: entry),
             isRenaming: viewModel.renamingEntryID == entry.id,
             renameDraft: Binding(
@@ -931,6 +1010,14 @@ struct BrowserPaneView: View {
             cancelRename: {
                 viewModel.cancelRename()
                 DispatchQueue.main.async { listFocused = true }
+            },
+            tabRename: { forward in
+                viewModel.beginRenameAdjacent(forward: forward)
+                // If the walk ran off the ends, no row is renaming now —
+                // restore list focus so keyboard nav keeps working.
+                if viewModel.renamingEntryID == nil {
+                    DispatchQueue.main.async { listFocused = true }
+                }
             }
         )
         .contentShape(Rectangle())
@@ -939,11 +1026,7 @@ struct BrowserPaneView: View {
             // mirrors Finder. Plain double-click stays the
             // "navigate into / launch file" path.
             if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
-                NotificationCenter.default.post(
-                    name: .mqdirOpenURLInNewTabRequested,
-                    object: nil,
-                    userInfo: ["url": entry.url]
-                )
+                AppCommand.openURLInNewTab(url: entry.url).post()
             } else {
                 viewModel.open(entry)
             }
@@ -977,7 +1060,8 @@ struct BrowserPaneView: View {
                       viewModel.selection.count > 1
                 else { return [] }
                 return viewModel.selectedURLs
-            }
+            },
+            normalizeHangul: normalizeHangulOnDragOut
         )
         // Mirrors the SwiftUI tap + drag gestures above for the
         // inactive-window path: when mq-dir is in the background, the
@@ -993,6 +1077,7 @@ struct BrowserPaneView: View {
                 else { return [] }
                 return viewModel.selectedURLs
             },
+            normalizeHangul: normalizeHangulOnDragOut,
             onClick: { event in
                 if !isFocused { onFocus() }
                 let mods = event.modifierFlags
@@ -1054,7 +1139,8 @@ struct BrowserPaneView: View {
                         viewModel.acceptDrop(
                             urls,
                             into: entry.url,
-                            copy: modifiers.contains(.option)
+                            copy: modifiers.contains(.option),
+                            normalizeHangul: normalizeHangulOnDragOut
                         )
                     }
                 }
@@ -1074,6 +1160,12 @@ private struct FileEntryRow: View {
     let paneIsFocused: Bool
     let isDropTarget: Bool
     let columnWidths: PaneColumnWidths
+    /// Pre-resolved string for the Size column. Files render their formatted
+    /// byte count; directories render "—" (unknown), "…" (size walk running),
+    /// or the formatted on-demand total once "Calculate Size" completes. The
+    /// caller (`rowView`) owns this resolution because the computed-size cache
+    /// and computing set live on the VM, which the row struct doesn't hold.
+    let sizeText: String
     /// Optional second line under the name — used by recursive search to show
     /// where in the tree a hit lives. `nil` keeps the row at single-line height.
     let subtitle: String?
@@ -1084,7 +1176,9 @@ private struct FileEntryRow: View {
     @Binding var renameDraft: String
     let commitRename: () -> Void
     let cancelRename: () -> Void
-    @FocusState private var renameFieldFocused: Bool
+    /// Tab / Shift-Tab while renaming — commit then advance to the
+    /// next / previous visible row's rename (Finder-style).
+    let tabRename: (_ forward: Bool) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -1096,30 +1190,15 @@ private struct FileEntryRow: View {
                 )
                 VStack(alignment: .leading, spacing: 1) {
                     if isRenaming {
-                        TextField("", text: $renameDraft)
-                            .textFieldStyle(.plain)
-                            .font(Theme.Font.body)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Theme.Color.label.opacity(0.08))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(Theme.Color.accent, lineWidth: 1)
-                            )
-                            .focused($renameFieldFocused)
-                            .onAppear {
-                                // Defer focus so the TextField has a
-                                // chance to install before we steal
-                                // it from the file list.
-                                DispatchQueue.main.async {
-                                    renameFieldFocused = true
-                                }
-                            }
-                            .onSubmit { commitRename() }
-                            .onExitCommand { cancelRename() }
+                        RenameTextField(
+                            text: $renameDraft,
+                            isDirectory: entry.isDirectory,
+                            onCommit: commitRename,
+                            onCancel: cancelRename,
+                            onTab: tabRename
+                        )
+                        .frame(maxWidth: .infinity)
+                        .renameFieldChrome()
                     } else {
                         HStack(spacing: 5) {
                             Text(entry.name)
@@ -1153,7 +1232,7 @@ private struct FileEntryRow: View {
 
             Color.clear.frame(width: 6)
 
-            Text(Self.sizeFormatter.string(fromByteCount: entry.size))
+            Text(sizeText)
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1)
@@ -1187,6 +1266,10 @@ private struct FileEntryRow: View {
     }
 
     private var rowBackground: Color {
+        // While editing, drop the row's selection fill so the rename
+        // field's accent ring is the dominant cue, not a competing
+        // blue selection band behind it.
+        if isRenaming { return .clear }
         if !isSelected { return .clear }
         return paneIsFocused ? Theme.Color.selection : Theme.Color.selectionInactive
     }
@@ -1203,7 +1286,6 @@ private struct FileEntryRow: View {
     }
 
     private static let modifiedDateFormatter = ModifiedDateFormatter()
-    private static let sizeFormatter = FileSizeFormatter()
 }
 
 private struct ModifiedDateFormatter {

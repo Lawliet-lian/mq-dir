@@ -10,10 +10,18 @@ import SwiftUI
 /// drowned in loose files at every level.
 struct TreeFileListView: View {
     @ObservedObject var viewModel: FolderBrowserViewModel
+    /// App-level `.environmentObject(workspace)` so the tree-row drag
+    /// source can read the "normalise Hangul on drag out" preference,
+    /// matching the list view's `BrowserPaneView` path.
+    @EnvironmentObject private var workspace: WorkspaceManager
     let isFocused: Bool
     let onFocus: () -> Void
 
     @FocusState private var treeFocused: Bool
+
+    private var normalizeHangulOnDragOut: Bool {
+        workspace.workspace.settings.normalizeHangulOnDragOut
+    }
 
     var body: some View {
         // ScrollViewReader provides a proxy so arrow-key nav can keep the
@@ -26,7 +34,7 @@ struct TreeFileListView: View {
                     if let root = viewModel.folderURL,
                        let rootEntries = viewModel.treeChildren[root.path] ?? entriesForRoot()
                     {
-                        ForEach(orderedForTree(rootEntries)) { entry in
+                        ForEach(FileEntry.treeOrdered(rootEntries)) { entry in
                             treeRow(entry, depth: 0)
                         }
                     }
@@ -41,6 +49,23 @@ struct TreeFileListView: View {
             .onChange(of: isFocused) { _, newValue in
                 if newValue { treeFocused = true }
             }
+            // "Reveal in Tree" queues a row ID on the VM; scroll it into view
+            // once the expanded ancestors have rendered, then clear the
+            // signal so a later identical reveal still fires. Deferred one
+            // runloop turn so the freshly-inserted `expandedPaths` rows have
+            // materialised in the LazyVStack before the proxy looks for them.
+            .onChange(of: viewModel.pendingRevealTarget) { _, target in
+                guard let target else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(target, anchor: .center)
+                    viewModel.pendingRevealTarget = nil
+                }
+            }
+            // Root cache freshness is owned by the VM (`entries` didSet +
+            // `refreshTreeChildren`), so this view no longer mirrors entries
+            // into `treeChildren[root]`. The `entriesForRoot()` fallback in
+            // the body covers the one frame before the first `entries`
+            // assignment lands.
             // KeyPress carries the modifier state captured at the press
             // moment, where `NSEvent.modifierFlags` only reflects "now"
             // and races key-handling on macOS — that's what broke
@@ -71,11 +96,7 @@ struct TreeFileListView: View {
                 if !isFocused { onFocus() }
                 if keyPress.modifiers.contains(.command),
                    let entry = viewModel.selectedEntry, entry.isDirectory {
-                    NotificationCenter.default.post(
-                        name: .mqdirOpenURLInNewTabRequested,
-                        object: nil,
-                        userInfo: ["url": entry.url]
-                    )
+                    AppCommand.openURLInNewTab(url: entry.url).post()
                 } else {
                     viewModel.openSelected()
                 }
@@ -97,19 +118,6 @@ struct TreeFileListView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.Color.labelTertiary)
                 }
-            }
-            .onAppear {
-                // Populate the root cache the first time we render. The flat
-                // list keeps `entries` in sync, but tree mode reads from
-                // `treeChildren[root]` so the same recursion works at every
-                // depth without a special case for the root.
-                if let root = viewModel.folderURL, viewModel.treeChildren[root.path] == nil {
-                    viewModel.treeChildren[root.path] = orderedForTree(viewModel.entries)
-                }
-            }
-            .onChange(of: viewModel.entries) { _, newEntries in
-                guard let root = viewModel.folderURL else { return }
-                viewModel.treeChildren[root.path] = orderedForTree(newEntries)
             }
         }
     }
@@ -135,7 +143,7 @@ struct TreeFileListView: View {
         if !viewModel.isExpanded(entry.url) {
             viewModel.toggleExpanded(entry.url)
         } else if let firstChild = viewModel.treeChildren[entry.url.path]
-            .flatMap({ orderedForTree($0).first })
+            .flatMap({ FileEntry.treeOrdered($0).first })
         {
             viewModel.replaceSelection(firstChild.id)
             proxy.scrollTo(firstChild.id, anchor: .center)
@@ -161,17 +169,11 @@ struct TreeFileListView: View {
     }
 
     /// Fall-back when `treeChildren[root]` hasn't been populated yet —
-    /// rely on the existing flat enumeration `viewModel.entries`. The
-    /// `onAppear` above will mirror it into the cache so subsequent
-    /// renders take the fast path.
+    /// rely on the existing flat enumeration `viewModel.entries`. The VM
+    /// populates `treeChildren[root]` on every `entries` change, so this
+    /// only fires on the very first render before that assignment lands.
     private func entriesForRoot() -> [FileEntry]? {
         viewModel.entries.isEmpty ? nil : viewModel.entries
-    }
-
-    private func orderedForTree(_ entries: [FileEntry]) -> [FileEntry] {
-        let folders = entries.filter { $0.isDirectory }
-        let files = entries.filter { !$0.isDirectory }
-        return folders + files
     }
 
     /// Returns `AnyView` to break the opaque-type recursion: a `some View`
@@ -217,6 +219,12 @@ struct TreeFileListView: View {
             cancelRename: {
                 viewModel.cancelRename()
                 DispatchQueue.main.async { treeFocused = true }
+            },
+            tabRename: { forward in
+                viewModel.beginRenameAdjacent(forward: forward)
+                if viewModel.renamingEntryID == nil {
+                    DispatchQueue.main.async { treeFocused = true }
+                }
             }
         )
         .contentShape(Rectangle())
@@ -226,11 +234,7 @@ struct TreeFileListView: View {
             // Plain double-click navigates into the folder / launches
             // the file as before.
             if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
-                NotificationCenter.default.post(
-                    name: .mqdirOpenURLInNewTabRequested,
-                    object: nil,
-                    userInfo: ["url": entry.url]
-                )
+                AppCommand.openURLInNewTab(url: entry.url).post()
             } else if entry.isDirectory {
                 viewModel.openFolder(entry.url)
             } else {
@@ -263,9 +267,10 @@ struct TreeFileListView: View {
         // another app yields the real file URL (not a SwiftUI
         // drag-promise cache copy). Tree view is single-row so
         // `multiURLs` stays empty; the primary URL is enough.
-        .appKitFileDrag(primary: entry.url)
+        .appKitFileDrag(primary: entry.url, normalizeHangul: normalizeHangulOnDragOut)
         .inactiveDragSource(
             primary: entry.url,
+            normalizeHangul: normalizeHangulOnDragOut,
             onClick: { _ in
                 if !isFocused { onFocus() }
                 viewModel.replaceSelection(entry.id)
@@ -309,7 +314,7 @@ struct TreeFileListView: View {
         if isExpanded,
            let children = viewModel.treeChildren[entry.url.path]
         {
-            ForEach(orderedForTree(children)) { child in
+            ForEach(FileEntry.treeOrdered(children)) { child in
                 treeRow(child, depth: depth + 1)
             }
         }
@@ -333,7 +338,9 @@ private struct TreeRow: View {
     let onChevronTap: () -> Void
     let commitRename: () -> Void
     let cancelRename: () -> Void
-    @FocusState private var renameFieldFocused: Bool
+    /// Tab / Shift-Tab while renaming — commit then advance to the
+    /// next / previous visible tree row (Finder-style).
+    let tabRename: (_ forward: Bool) -> Void
 
     private static let indentPerDepth: CGFloat = 14
 
@@ -374,25 +381,15 @@ private struct TreeRow: View {
             )
 
             if isRenaming {
-                TextField("", text: $renameDraft)
-                    .textFieldStyle(.plain)
-                    .font(Theme.Font.body)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Theme.Color.label.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Theme.Color.accent, lineWidth: 1)
-                    )
-                    .focused($renameFieldFocused)
-                    .onAppear {
-                        DispatchQueue.main.async { renameFieldFocused = true }
-                    }
-                    .onSubmit { commitRename() }
-                    .onExitCommand { cancelRename() }
+                RenameTextField(
+                    text: $renameDraft,
+                    isDirectory: entry.isDirectory,
+                    onCommit: commitRename,
+                    onCancel: cancelRename,
+                    onTab: tabRename
+                )
+                .frame(maxWidth: .infinity)
+                .renameFieldChrome()
             } else {
                 Text(entry.name)
                     .font(Theme.Font.body)
@@ -415,6 +412,9 @@ private struct TreeRow: View {
     }
 
     private var rowBackground: Color {
+        // Drop the selection fill while editing so the rename field's
+        // accent ring is the dominant cue (mirrors the list view).
+        if isRenaming { return .clear }
         if !isSelected { return .clear }
         return paneIsFocused ? Theme.Color.selection : Theme.Color.selectionInactive
     }

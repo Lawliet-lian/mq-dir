@@ -60,65 +60,157 @@ enum ZipPreviewService {
     }
 
     static func extract(archive: URL, entry: String) async throws -> ExtractionResult {
+        // `entry` is passed to `unzip -p` as a match pattern. We do NOT
+        // use `--` to terminate option parsing because Info-ZIP doesn't
+        // honor it — a leading `-` is still read as an option flag.
+        // Instead `literalZipPattern` glob-escapes the name so it can
+        // only match itself (see helper for the leading-dash trick).
         let data = try await runUnzip(
-            arguments: ["-p", archive.path, entry],
+            arguments: ["-p", archive.path, literalZipPattern(entry)],
             cap: extractCap
         )
         return ExtractionResult(data: data, truncated: data.count >= extractCap)
+    }
+
+    /// Turn a literal archive entry name into an Info-ZIP match pattern
+    /// that only ever matches itself. Info-ZIP treats `*`, `?`, `[`, `]`
+    /// in the pattern as glob metacharacters and a leading `-` as an
+    /// option flag (and `--` is NOT respected as an end-of-options
+    /// sentinel). We neutralize each metacharacter by wrapping it in a
+    /// single-character class (`[*]`, `[?]`, `[[]`, `[]]`), which Info-ZIP
+    /// matches literally. A leading dash gets the same treatment (`-x`
+    /// → `[-]x`) so the name can never be parsed as an option.
+    static func literalZipPattern(_ entry: String) -> String {
+        var result = ""
+        result.reserveCapacity(entry.count + 4)
+        for (index, char) in entry.enumerated() {
+            switch char {
+            case "*", "?", "[", "]":
+                result.append("[")
+                result.append(char)
+                result.append("]")
+            case "-" where index == 0:
+                // Leading dash → option flag risk; escape as a class.
+                result.append("[-]")
+            default:
+                result.append(char)
+            }
+        }
+        return result
     }
 
     /// Process invocation shared between list/extract. Pulls stdout
     /// in `availableData` chunks until the process closes its end of
     /// the pipe, optionally discarding bytes past `cap` so a multi-GB
     /// extraction never balloons memory while still draining the
-    /// pipe so unzip can finish.
+    /// pipe so unzip can finish. stderr is drained concurrently on a
+    /// background thread so a chatty error stream past the ~64 KB pipe
+    /// buffer can't deadlock the child against our stdout read. Task
+    /// cancellation (rapid selection changes) terminates the child so
+    /// abandoned invocations don't leave unzip running.
     private static func runUnzip(arguments: [String], cap: Int?) async throws -> Data {
-        try await Task.detached(priority: .utility) {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-            process.arguments = arguments
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
 
-            try process.run()
+        return try await withTaskCancellationHandler {
+            try await Task.detached(priority: .utility) {
+                try process.run()
 
-            var collected = Data()
-            let handle = stdout.fileHandleForReading
-            while true {
-                let chunk = handle.availableData
-                if chunk.isEmpty { break }
-                if let cap, collected.count >= cap {
-                    // Cap reached — keep reading to drain the pipe so
-                    // the child process can exit, but drop the bytes
-                    // on the floor.
-                    continue
+                // Drain stderr concurrently on its own thread. If unzip
+                // writes more than the pipe buffer (~64 KB) to stderr,
+                // reading it only after waitUntilExit() would deadlock:
+                // the child blocks writing stderr while we block reading
+                // stdout. A background drain keeps both pipes flowing.
+                let errHandle = stderr.fileHandleForReading
+                let errBox = ErrDataBox()
+                let errThread = Thread {
+                    errBox.data = (try? errHandle.readToEnd()) ?? Data()
                 }
-                if let cap, collected.count + chunk.count > cap {
-                    collected.append(chunk.prefix(cap - collected.count))
-                } else {
-                    collected.append(chunk)
+                errThread.start()
+
+                var collected = Data()
+                let handle = stdout.fileHandleForReading
+                while true {
+                    if Task.isCancelled {
+                        // Abandoned by a newer selection — kill the child
+                        // so it doesn't keep churning through a huge zip.
+                        process.terminate()
+                        break
+                    }
+                    let chunk = handle.availableData
+                    if chunk.isEmpty { break }
+                    if let cap, collected.count >= cap {
+                        // Cap reached — keep reading to drain the pipe so
+                        // the child process can exit, but drop the bytes
+                        // on the floor.
+                        continue
+                    }
+                    if let cap, collected.count + chunk.count > cap {
+                        collected.append(chunk.prefix(cap - collected.count))
+                    } else {
+                        collected.append(chunk)
+                    }
                 }
-            }
 
-            process.waitUntilExit()
+                process.waitUntilExit()
+                // stderr is small in the success path; wait for the drain
+                // thread so the error summary below is complete.
+                while errThread.isExecuting { usleep(1_000) }
 
-            guard process.terminationStatus == 0 else {
-                let errData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
-                let trimmed = String(data: errData, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                let summary = trimmed.isEmpty
-                    ? "exit \(process.terminationStatus)"
-                    : trimmed
-                throw NSError(
-                    domain: "mq-dir.zip-preview",
-                    code: Int(process.terminationStatus),
-                    userInfo: [NSLocalizedDescriptionKey: summary]
-                )
-            }
-            return collected
-        }.value
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
+
+                guard process.terminationStatus == 0 else {
+                    let errData = errBox.data
+                    let trimmed = String(data: errData, encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let summary = trimmed.isEmpty
+                        ? "exit \(process.terminationStatus)"
+                        : trimmed
+                    throw NSError(
+                        domain: "mq-dir.zip-preview",
+                        code: Int(process.terminationStatus),
+                        userInfo: [NSLocalizedDescriptionKey: summary]
+                    )
+                }
+                return collected
+            }.value
+        } onCancel: {
+            // Fires the moment the surrounding Task is cancelled, even if
+            // the stdout read loop is parked in a blocking `availableData`.
+            if process.isRunning { process.terminate() }
+        }
+    }
+
+    /// Box so the stderr drain thread can hand its bytes back to the
+    /// reader. `@unchecked Sendable` is safe: the writer thread finishes
+    /// (joined via `isExecuting`) before any reader touches `data`.
+    private final class ErrDataBox: @unchecked Sendable {
+        var data = Data()
+    }
+
+    /// Best-effort sweep of leftover PDF-preview temp directories from a
+    /// prior run that crashed or was force-quit before `cleanupPDFTemp`
+    /// ran. Called once from `AppDelegate.applicationDidFinishLaunching`;
+    /// matches the `mq-dir-zip-preview-*` naming used by
+    /// `ZipPreviewView.decodedContent`.
+    static func sweepLeftoverTempDirs() {
+        let fm = FileManager.default
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        guard let contents = try? fm.contentsOfDirectory(
+            at: tmp,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        for dir in contents where dir.lastPathComponent.hasPrefix("mq-dir-zip-preview-") {
+            try? fm.removeItem(at: dir)
+        }
     }
 }
 
@@ -373,7 +465,12 @@ struct ZipPreviewView: View {
         await MainActor.run { self.content = .loading }
         do {
             let result = try await ZipPreviewService.extract(archive: url, entry: entry.path)
-            let resolved = decodedContent(for: entry, data: result.data, truncated: result.truncated)
+            // `decodedContent` runs on the main actor so the PDF branch can
+            // assign `pdfTempURL` synchronously before returning — see the
+            // race note in `decodedContent`.
+            let resolved = await MainActor.run {
+                decodedContent(for: entry, data: result.data, truncated: result.truncated)
+            }
             await MainActor.run { self.content = resolved }
         } catch {
             await MainActor.run { self.content = .error(error.localizedDescription) }
@@ -383,6 +480,10 @@ struct ZipPreviewView: View {
     /// Map raw extracted bytes onto a renderable preview shape.
     /// Image / PDF / text are decoded inline; everything else falls
     /// through to the Extract hint so the user knows the next step.
+    /// Runs on the main actor so the PDF branch can mutate the
+    /// `pdfTempURL` @State synchronously and ordered against
+    /// `cleanupPDFTemp`.
+    @MainActor
     private func decodedContent(
         for entry: ZipEntry,
         data: Data,
@@ -402,7 +503,15 @@ struct ZipPreviewView: View {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 let tempURL = tempDir.appendingPathComponent(entry.displayName.isEmpty ? "preview.pdf" : entry.displayName)
                 try data.write(to: tempURL)
-                Task { @MainActor in self.pdfTempURL = tempURL }
+                // Replace any previous temp dir synchronously on the main
+                // actor. Doing this via a detached `Task { @MainActor }`
+                // previously let rapid PDF→PDF selections interleave with
+                // `cleanupPDFTemp`, leaking the directory we were about to
+                // overwrite. Clean up the specific dir we're replacing.
+                if let previous = pdfTempURL, previous != tempURL {
+                    try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
+                }
+                pdfTempURL = tempURL
                 return .pdf(tempURL)
             } catch {
                 return .error(error.localizedDescription)
@@ -429,7 +538,12 @@ struct ZipPreviewView: View {
                 bad += 1
             }
         }
-        return bad < sample.unicodeScalars.count / 100
+        // Cross-multiply instead of `bad < count / 100`: integer
+        // division truncates to 0 for samples under 100 scalars, which
+        // would misclassify every short text file as binary. `bad * 100
+        // < count` keeps the same 1%-bad threshold without the divisor
+        // collapsing on small inputs.
+        return bad * 100 < sample.unicodeScalars.count
     }
 
     private func cleanupPDFTemp() {
