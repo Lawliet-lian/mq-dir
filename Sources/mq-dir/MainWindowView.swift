@@ -655,49 +655,45 @@ private struct NavigationNotifications: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenFolderRequested)) { _ in
-                focusedPane.chooseFolder()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenSelectedRequested)) { _ in
-                focusedPane.openSelected()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirRevealSelectedRequested)) { _ in
-                focusedPane.revealSelected()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirReloadRequested)) { _ in
-                focusedPane.reload()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirParentFolderRequested)) { _ in
-                focusedPane.openParentFolder()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirToggleHiddenFilesRequested)) { _ in
-                focusedPane.toggleHiddenFiles()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirGoBackRequested)) { _ in
-                focusedPane.goBack()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirGoForwardRequested)) { _ in
-                focusedPane.goForward()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirFocusSearchRequested)) { _ in
-                searchActive = true
-                // Defer focus until after the conditional TextField has been
-                // installed by the body re-render triggered above.
-                DispatchQueue.main.async { searchFocused.wrappedValue = true }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirAddCurrentFolderToFavoritesRequested)) { _ in
-                if let url = focusedPane.folderURL {
-                    sidebar.add(url: url)
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCommand)) { note in
+                guard let command = AppCommand.from(note) else { return }
+                switch command {
+                case .openFolder:
+                    focusedPane.chooseFolder()
+                case .openSelected:
+                    focusedPane.openSelected()
+                case .revealSelected:
+                    focusedPane.revealSelected()
+                case .reload:
+                    focusedPane.reload()
+                case .parentFolder:
+                    focusedPane.openParentFolder()
+                case .toggleHiddenFiles:
+                    focusedPane.toggleHiddenFiles()
+                case .goBack:
+                    focusedPane.goBack()
+                case .goForward:
+                    focusedPane.goForward()
+                case .focusSearch:
+                    searchActive = true
+                    // Defer focus until after the conditional TextField has
+                    // been installed by the body re-render triggered above.
+                    DispatchQueue.main.async { searchFocused.wrappedValue = true }
+                case .addCurrentFolderToFavorites:
+                    if let url = focusedPane.folderURL {
+                        sidebar.add(url: url)
+                    }
+                case .togglePreview:
+                    focusedPane.previewVisible.toggle()
+                case .setViewModeList:
+                    focusedPane.viewMode = .list
+                case .setViewModeTree:
+                    focusedPane.viewMode = .tree
+                // Edit / tab / pane-focus commands belong to the other
+                // modifiers in this chain; ignore them here.
+                default:
+                    break
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirTogglePreviewRequested)) { _ in
-                focusedPane.previewVisible.toggle()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirSetViewModeListRequested)) { _ in
-                focusedPane.viewMode = .list
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirSetViewModeTreeRequested)) { _ in
-                focusedPane.viewMode = .tree
             }
     }
 }
@@ -714,23 +710,24 @@ private struct EditFileActionsNotifications: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenWithDefaultAppRequested)) { _ in
-                focusedPane.openSelectedWithDefaultApp()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirDuplicateRequested)) { _ in
-                focusedPane.duplicateSelection(normalizeHangul: normalizeHangul)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyFilePathsRequested)) { _ in
-                focusedPane.copySelectedFilePathsToPasteboard()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyFolderPathRequested)) { _ in
-                focusedPane.copyCurrentFolderPath()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyNameRequested)) { _ in
-                focusedPane.copySelectedNamesToPasteboard()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirRenameRequested)) { _ in
-                focusedPane.beginRenameForActiveSelection()
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCommand)) { note in
+                guard let command = AppCommand.from(note) else { return }
+                switch command {
+                case .openWithDefaultApp:
+                    focusedPane.openSelectedWithDefaultApp()
+                case .duplicate:
+                    focusedPane.duplicateSelection(normalizeHangul: normalizeHangul)
+                case .copyFilePaths:
+                    focusedPane.copySelectedFilePathsToPasteboard()
+                case .copyFolderPath:
+                    focusedPane.copyCurrentFolderPath()
+                case .copyName:
+                    focusedPane.copySelectedNamesToPasteboard()
+                case .rename:
+                    focusedPane.beginRenameForActiveSelection()
+                default:
+                    break
+                }
             }
     }
 }
@@ -749,23 +746,24 @@ private struct EditMenuNotifications: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirSelectAllRequested)) { _ in
-                focusedPane.selectAll()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyRequested)) { _ in
-                focusedPane.copySelectionToPasteboard()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirCutRequested)) { _ in
-                focusedPane.cutSelectionToPasteboard()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirPasteRequested)) { _ in
-                focusedPane.pasteFromPasteboard(normalizeHangul: normalizeHangul)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirDeleteRequested)) { _ in
-                focusedPane.moveSelectionToTrash()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirPermanentDeleteRequested)) { _ in
-                focusedPane.permanentlyDeleteSelection()
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCommand)) { note in
+                guard let command = AppCommand.from(note) else { return }
+                switch command {
+                case .selectAll:
+                    focusedPane.selectAll()
+                case .copy:
+                    focusedPane.copySelectionToPasteboard()
+                case .cut:
+                    focusedPane.cutSelectionToPasteboard()
+                case .paste:
+                    focusedPane.pasteFromPasteboard(normalizeHangul: normalizeHangul)
+                case .delete:
+                    focusedPane.moveSelectionToTrash()
+                case .permanentDelete:
+                    focusedPane.permanentlyDeleteSelection()
+                default:
+                    break
+                }
             }
     }
 }
@@ -779,8 +777,8 @@ private struct PaneFocusNotifications: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirFocusPane)) { note in
-                guard let index = note.userInfo?["paneIndex"] as? Int else { return }
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCommand)) { note in
+                guard case let .focusPane(index) = AppCommand.from(note) else { return }
                 guard index >= 0, index < layout.paneCount else { return }
                 focusedPaneIndex = index
             }
@@ -792,32 +790,28 @@ private struct TabNotifications: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirNewTabRequested)) { _ in
-                focusedPaneVM.newTab()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirCloseTabRequested)) { _ in
-                focusedPaneVM.closeActive()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirReopenClosedTabRequested)) { _ in
-                focusedPaneVM.reopenClosed()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirNextTabRequested)) { _ in
-                focusedPaneVM.nextTab()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirPreviousTabRequested)) { _ in
-                focusedPaneVM.prevTab()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirSelectTabAtIndexRequested)) { note in
-                if let index = note.userInfo?["index"] as? Int {
+            .onReceive(NotificationCenter.default.publisher(for: .mqdirCommand)) { note in
+                guard let command = AppCommand.from(note) else { return }
+                switch command {
+                case .newTab:
+                    focusedPaneVM.newTab()
+                case .closeTab:
+                    focusedPaneVM.closeActive()
+                case .reopenClosedTab:
+                    focusedPaneVM.reopenClosed()
+                case .nextTab:
+                    focusedPaneVM.nextTab()
+                case .previousTab:
+                    focusedPaneVM.prevTab()
+                case let .selectTab(index):
                     focusedPaneVM.selectTab(at: index)
-                }
-            }
-            // ⌘-click on a folder in tree view → new tab pointing at it.
-            // Always lands in the *focused* pane so the user gets the
-            // detail view next to their tree, not in some other pane.
-            .onReceive(NotificationCenter.default.publisher(for: .mqdirOpenURLInNewTabRequested)) { note in
-                if let url = note.userInfo?["url"] as? URL {
+                // ⌘-click on a folder in tree/list view → new tab pointing at
+                // it. Always lands in the *focused* pane so the user gets the
+                // detail view next to their tree, not in some other pane.
+                case let .openURLInNewTab(url):
                     focusedPaneVM.newTab(folderURL: url)
+                default:
+                    break
                 }
             }
     }

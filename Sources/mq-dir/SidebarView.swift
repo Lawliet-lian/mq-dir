@@ -605,11 +605,7 @@ struct SidebarView: View {
             // the Finder convention used by tree-view ⌘-click).
             // Plain click → swap the focused pane's active tab to it.
             if NSEvent.modifierFlags.contains(.command) {
-                NotificationCenter.default.post(
-                    name: .mqdirOpenURLInNewTabRequested,
-                    object: nil,
-                    userInfo: ["url": url]
-                )
+                AppCommand.openURLInNewTab(url: url).post()
             } else {
                 selectedURL = url
                 onSelect(url)

@@ -67,6 +67,19 @@ struct FileEntry: Identifiable, Hashable, Sendable {
     // URL-based id avoids collisions on case-insensitive APFS volumes where
     // `url.path` would normalize "Foo.txt" and "foo.txt" to the same string.
     var id: URL { url }
+
+    /// Folders-first ordering for tree-view levels: directories keep their
+    /// incoming relative order, then files keep theirs. The single source of
+    /// truth for "folders first, then files" — both `TreeFileListView` (per
+    /// rendered level) and `FolderBrowserViewModel` (the DFS flatten that
+    /// powers arrow-key nav) route through here so the two can never drift.
+    /// A stable partition, not a re-sort: the caller has already applied the
+    /// active sort key, so this only lifts directories above files.
+    static func treeOrdered(_ entries: [FileEntry]) -> [FileEntry] {
+        let folders = entries.filter { $0.isDirectory }
+        let files = entries.filter { !$0.isDirectory }
+        return folders + files
+    }
 }
 
 enum FileEntrySortKey: String, CaseIterable, Codable, Sendable {

@@ -17,6 +17,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     @Published private(set) var folderURL: URL?
     @Published private(set) var entries: [FileEntry] = [] {
         didSet {
+            // Root cache ownership lives here, not in the tree view: the
+            // root's `treeChildren` entry tracks `entries` 1:1 (folders-first
+            // via the shared helper) on every assignment, so tree mode renders
+            // correctly even when `TreeFileListView` isn't alive to mirror it.
+            // Cheap — an array copy. `reload()` clears `treeChildren` *after*
+            // setting `entries`, so it re-populates the root itself (see
+            // `refreshTreeChildren`).
+            if let root = folderURL {
+                treeChildren[root.path] = FileEntry.treeOrdered(entries)
+            }
             rebuildEntriesIndex()
             invalidateRowCaches()
             // Status-bar / sidebar derived values read off `entries`.
@@ -297,6 +307,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func refreshTreeChildren() {
         let stillExpanded = expandedPaths
         treeChildren.removeAll()
+        // `removeAll()` drops the root entry the `entries` didSet just set;
+        // restore it so tree mode keeps a fresh root listing after a reload.
+        if let root = folderURL {
+            treeChildren[root.path] = FileEntry.treeOrdered(entries)
+        }
         for path in stillExpanded {
             loadChildren(for: URL(fileURLWithPath: path))
         }
@@ -382,9 +397,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// `TreeFileListView` (root → expanded children → expanded
     /// grandchildren …). Used by arrow-key navigation so ↑/↓ in tree mode
     /// walks the same visual order the user sees, not just the root level.
-    /// Mirrors `TreeFileListView.orderedForTree` (folders first, files
-    /// after). Cached — the DFS flatten only rebuilds when a source the tree
-    /// reads from changes, not on every keypress.
+    /// Folders-first per level via the shared `FileEntry.treeOrdered`
+    /// helper — same ordering rule `TreeFileListView` applies to each
+    /// rendered level. Cached — the DFS flatten only rebuilds when a source
+    /// the tree reads from changes, not on every keypress.
     var visibleTreeEntries: [FileEntry] {
         if let cached = cachedTreeRows { return cached }
         guard let root = folderURL else {
@@ -398,10 +414,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     private func flattenTree(_ entries: [FileEntry]) -> [FileEntry] {
-        let folders = entries.filter { $0.isDirectory }
-        let files = entries.filter { !$0.isDirectory }
         var result: [FileEntry] = []
-        for entry in folders + files {
+        for entry in FileEntry.treeOrdered(entries) {
             result.append(entry)
             if entry.isDirectory,
                isExpanded(entry.url),

@@ -34,7 +34,7 @@ struct TreeFileListView: View {
                     if let root = viewModel.folderURL,
                        let rootEntries = viewModel.treeChildren[root.path] ?? entriesForRoot()
                     {
-                        ForEach(orderedForTree(rootEntries)) { entry in
+                        ForEach(FileEntry.treeOrdered(rootEntries)) { entry in
                             treeRow(entry, depth: 0)
                         }
                     }
@@ -49,6 +49,11 @@ struct TreeFileListView: View {
             .onChange(of: isFocused) { _, newValue in
                 if newValue { treeFocused = true }
             }
+            // Root cache freshness is owned by the VM (`entries` didSet +
+            // `refreshTreeChildren`), so this view no longer mirrors entries
+            // into `treeChildren[root]`. The `entriesForRoot()` fallback in
+            // the body covers the one frame before the first `entries`
+            // assignment lands.
             // KeyPress carries the modifier state captured at the press
             // moment, where `NSEvent.modifierFlags` only reflects "now"
             // and races key-handling on macOS — that's what broke
@@ -79,11 +84,7 @@ struct TreeFileListView: View {
                 if !isFocused { onFocus() }
                 if keyPress.modifiers.contains(.command),
                    let entry = viewModel.selectedEntry, entry.isDirectory {
-                    NotificationCenter.default.post(
-                        name: .mqdirOpenURLInNewTabRequested,
-                        object: nil,
-                        userInfo: ["url": entry.url]
-                    )
+                    AppCommand.openURLInNewTab(url: entry.url).post()
                 } else {
                     viewModel.openSelected()
                 }
@@ -105,19 +106,6 @@ struct TreeFileListView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.Color.labelTertiary)
                 }
-            }
-            .onAppear {
-                // Populate the root cache the first time we render. The flat
-                // list keeps `entries` in sync, but tree mode reads from
-                // `treeChildren[root]` so the same recursion works at every
-                // depth without a special case for the root.
-                if let root = viewModel.folderURL, viewModel.treeChildren[root.path] == nil {
-                    viewModel.treeChildren[root.path] = orderedForTree(viewModel.entries)
-                }
-            }
-            .onChange(of: viewModel.entries) { _, newEntries in
-                guard let root = viewModel.folderURL else { return }
-                viewModel.treeChildren[root.path] = orderedForTree(newEntries)
             }
         }
     }
@@ -143,7 +131,7 @@ struct TreeFileListView: View {
         if !viewModel.isExpanded(entry.url) {
             viewModel.toggleExpanded(entry.url)
         } else if let firstChild = viewModel.treeChildren[entry.url.path]
-            .flatMap({ orderedForTree($0).first })
+            .flatMap({ FileEntry.treeOrdered($0).first })
         {
             viewModel.replaceSelection(firstChild.id)
             proxy.scrollTo(firstChild.id, anchor: .center)
@@ -169,17 +157,11 @@ struct TreeFileListView: View {
     }
 
     /// Fall-back when `treeChildren[root]` hasn't been populated yet —
-    /// rely on the existing flat enumeration `viewModel.entries`. The
-    /// `onAppear` above will mirror it into the cache so subsequent
-    /// renders take the fast path.
+    /// rely on the existing flat enumeration `viewModel.entries`. The VM
+    /// populates `treeChildren[root]` on every `entries` change, so this
+    /// only fires on the very first render before that assignment lands.
     private func entriesForRoot() -> [FileEntry]? {
         viewModel.entries.isEmpty ? nil : viewModel.entries
-    }
-
-    private func orderedForTree(_ entries: [FileEntry]) -> [FileEntry] {
-        let folders = entries.filter { $0.isDirectory }
-        let files = entries.filter { !$0.isDirectory }
-        return folders + files
     }
 
     /// Returns `AnyView` to break the opaque-type recursion: a `some View`
@@ -234,11 +216,7 @@ struct TreeFileListView: View {
             // Plain double-click navigates into the folder / launches
             // the file as before.
             if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
-                NotificationCenter.default.post(
-                    name: .mqdirOpenURLInNewTabRequested,
-                    object: nil,
-                    userInfo: ["url": entry.url]
-                )
+                AppCommand.openURLInNewTab(url: entry.url).post()
             } else if entry.isDirectory {
                 viewModel.openFolder(entry.url)
             } else {
@@ -318,7 +296,7 @@ struct TreeFileListView: View {
         if isExpanded,
            let children = viewModel.treeChildren[entry.url.path]
         {
-            ForEach(orderedForTree(children)) { child in
+            ForEach(FileEntry.treeOrdered(children)) { child in
                 treeRow(child, depth: depth + 1)
             }
         }

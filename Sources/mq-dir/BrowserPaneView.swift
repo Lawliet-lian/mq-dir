@@ -836,11 +836,7 @@ struct BrowserPaneView: View {
                 if !isFocused { onFocus() }
                 if keyPress.modifiers.contains(.command),
                    let entry = viewModel.selectedEntry, entry.isDirectory {
-                    NotificationCenter.default.post(
-                        name: .mqdirOpenURLInNewTabRequested,
-                        object: nil,
-                        userInfo: ["url": entry.url]
-                    )
+                    AppCommand.openURLInNewTab(url: entry.url).post()
                 } else {
                     viewModel.openSelected()
                 }
@@ -954,11 +950,7 @@ struct BrowserPaneView: View {
             // mirrors Finder. Plain double-click stays the
             // "navigate into / launch file" path.
             if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
-                NotificationCenter.default.post(
-                    name: .mqdirOpenURLInNewTabRequested,
-                    object: nil,
-                    userInfo: ["url": entry.url]
-                )
+                AppCommand.openURLInNewTab(url: entry.url).post()
             } else {
                 viewModel.open(entry)
             }
