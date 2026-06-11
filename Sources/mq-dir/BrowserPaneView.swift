@@ -132,6 +132,12 @@ struct BrowserPaneView: View {
             content
         }
         .background(Theme.Color.paneBg)
+        // Installs an NSView into the window's responder chain so this
+        // window has formal standing in Quick Look's first-responder
+        // arbitration (see QuickLookPanelBridge). The direct
+        // `.onKeyPress(.space) → QuickLookManager.toggle` path still
+        // drives the common case; this only supplements it.
+        .background(QuickLookPanelBridge())
         .overlay(
             Rectangle()
                 .strokeBorder(
