@@ -115,6 +115,21 @@ struct CmuxClient: Sendable {
 
         try process.run()
 
+        // Drain both pipes concurrently with the wait. Reading them only
+        // after `waitUntilExit()` would deadlock when a chatty
+        // `workspace.list` exceeds the ~64 KB pipe buffer: cmux blocks
+        // writing stdout while we block on the exit, the watchdog then
+        // fires at 5s and we'd report a spurious `timedOut`. Background
+        // threads keep both pipes flowing so the child can always finish.
+        let outBox = PipeDrainBox()
+        let errBox = PipeDrainBox()
+        let outHandle = stdout.fileHandleForReading
+        let errHandle = stderr.fileHandleForReading
+        let outThread = Thread { outBox.data = outHandle.readDataToEndOfFile() }
+        let errThread = Thread { errBox.data = errHandle.readDataToEndOfFile() }
+        outThread.start()
+        errThread.start()
+
         // Arm a watchdog so a hung cmux socket doesn't leave the sidebar
         // showing "Syncing…" forever. 5s is well above the 100s-of-ms a
         // healthy cold socket takes; anything past that is a real hang.
@@ -127,6 +142,10 @@ struct CmuxClient: Sendable {
         process.waitUntilExit()
         watchdog.cancel()
 
+        // Let the drain threads finish flushing the closed pipes so the
+        // collected bytes are complete before we read them below.
+        while outThread.isExecuting || errThread.isExecuting { usleep(1_000) }
+
         // SIGTERM exits with status 15 on Darwin. Distinguish that from a
         // protocol-level error so the user gets an actionable hint.
         if process.terminationReason == .uncaughtSignal {
@@ -134,8 +153,7 @@ struct CmuxClient: Sendable {
         }
 
         guard process.terminationStatus == 0 else {
-            let msg = String(data: stderr.fileHandleForReading.readDataToEndOfFile(),
-                             encoding: .utf8) ?? ""
+            let msg = String(data: errBox.data, encoding: .utf8) ?? ""
             // cmux 0.63.x rejects external apps when its socket is in
             // the default `cmuxOnly` mode — the symptom is a "Broken
             // pipe" mid-write. Bubble up a more actionable hint instead
@@ -146,10 +164,16 @@ struct CmuxClient: Sendable {
             throw CmuxError.rpcFailed(status: Int(process.terminationStatus), message: msg)
         }
 
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        let response = try JSONDecoder().decode(WorkspaceListResponse.self, from: data)
+        let response = try JSONDecoder().decode(WorkspaceListResponse.self, from: outBox.data)
         return response.workspaces.sorted { $0.index < $1.index }
     }
+}
+
+/// Box so a background drain thread can hand its collected pipe bytes
+/// back to the caller. `@unchecked Sendable` is safe because the writer
+/// thread is joined (via `isExecuting`) before any reader touches `data`.
+private final class PipeDrainBox: @unchecked Sendable {
+    var data = Data()
 }
 
 // MARK: - Wire types (only the fields we actually render)
