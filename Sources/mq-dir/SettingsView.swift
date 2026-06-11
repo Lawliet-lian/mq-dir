@@ -45,6 +45,15 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Normalize Hangul filenames to NFC on drag out", isOn: normalizeHangulBinding)
+            } header: {
+                Text("Filenames")
+            } footer: {
+                Text("Korean filenames stored in decomposed (NFD) form look broken — like \u{315E}\u{3157}\u{3134}\u{3131}\u{3161}\u{3139} instead of 한글 — when dragged or copied into other apps. Turn this on to rename them to composed (NFC) form on disk as they leave mq-dir.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 ForEach(ShortcutAction.allCases, id: \.self) { action in
                     shortcutRow(action)
                 }
@@ -81,6 +90,13 @@ struct SettingsView: View {
         Binding(
             get: { workspace.workspace.settings.colorScheme },
             set: { workspace.setColorScheme($0) }
+        )
+    }
+
+    private var normalizeHangulBinding: Binding<Bool> {
+        Binding(
+            get: { workspace.workspace.settings.normalizeHangulOnDragOut },
+            set: { workspace.setNormalizeHangulOnDragOut($0) }
         )
     }
 

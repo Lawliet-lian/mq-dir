@@ -3,9 +3,11 @@ import Darwin
 
 /// Filesystem-level helper for renaming a single file from NFD to NFC
 /// form on disk. Shared by the right-click "Normalize Filename to NFC"
-/// action (`FolderBrowserViewModel.normalizeFilenamesToNFC`) and the
-/// drag-out auto-normaliser (`AppKitFileDragModifier.startDrag`), so
-/// both paths use the same correct implementation.
+/// action (`FolderBrowserViewModel.normalizeFilenamesToNFC`), the
+/// drag-out auto-normaliser (the `appKitFileDrag` / `inactiveDragSource`
+/// modifiers, gated by the `normalizeHangulOnDragOut` setting), and the
+/// copy/move/duplicate normalise-on-write path in `FileOperationService`,
+/// so every path uses the same correct implementation.
 ///
 /// Why this exists instead of a one-liner around `FileManager.moveItem`:
 ///
@@ -25,12 +27,12 @@ import Darwin
 /// `URL(string: "file://…<percent-encoded NFC>…")` because
 /// `URL(fileURLWithPath:)` would re-NFD it on the way back into the
 /// drag pasteboard — verified empirically, not from docs.
-enum HangulNFCFilename {
+public enum HangulNFCFilename {
     /// Rename the on-disk file at `url` from NFD to NFC. Returns the
     /// new NFC-preserving URL on success, `nil` if the name was
     /// already NFC or the rename failed (logged to stderr; the
     /// caller should treat `nil` as "skip — don't block the user").
-    static func renameToNFC(_ url: URL) -> URL? {
+    public static func renameToNFC(_ url: URL) -> URL? {
         let name = url.lastPathComponent
         guard name.isDecomposedRelativeToNFC else { return nil }
         let nfc = name.precomposedStringWithCanonicalMapping

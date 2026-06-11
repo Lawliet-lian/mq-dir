@@ -102,8 +102,14 @@ struct MainWindowView: View {
                 searchFocused: $searchFocused,
                 sidebar: sidebar
             ))
-            .modifier(EditMenuNotifications(focusedPane: focusedPane))
-            .modifier(EditFileActionsNotifications(focusedPane: focusedPane))
+            .modifier(EditMenuNotifications(
+                focusedPane: focusedPane,
+                normalizeHangul: workspace.workspace.settings.normalizeHangulOnDragOut
+            ))
+            .modifier(EditFileActionsNotifications(
+                focusedPane: focusedPane,
+                normalizeHangul: workspace.workspace.settings.normalizeHangulOnDragOut
+            ))
             .modifier(PaneFocusNotifications(layout: layout, focusedPaneIndex: $focusedPaneIndex))
             .modifier(TabNotifications(focusedPaneVM: focusedPaneVM))
             .modifier(GlobalNotifications(
@@ -702,6 +708,9 @@ private struct NavigationNotifications: ViewModifier {
 /// `EditMenuNotifications`.
 private struct EditFileActionsNotifications: ViewModifier {
     let focusedPane: FolderBrowserViewModel
+    /// See `EditMenuNotifications.normalizeHangul` — wired so the ⌘D
+    /// duplicate path also normalises the resulting NFD name when on.
+    let normalizeHangul: Bool
 
     func body(content: Content) -> some View {
         content
@@ -709,7 +718,7 @@ private struct EditFileActionsNotifications: ViewModifier {
                 focusedPane.openSelectedWithDefaultApp()
             }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirDuplicateRequested)) { _ in
-                focusedPane.duplicateSelection()
+                focusedPane.duplicateSelection(normalizeHangul: normalizeHangul)
             }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirCopyFilePathsRequested)) { _ in
                 focusedPane.copySelectedFilePathsToPasteboard()
@@ -733,6 +742,10 @@ private struct EditFileActionsNotifications: ViewModifier {
 /// every `body` cheap to compile.
 private struct EditMenuNotifications: ViewModifier {
     let focusedPane: FolderBrowserViewModel
+    /// Live "normalise Hangul on drag out" setting, captured where this
+    /// modifier is built (in `MainWindowView.body`, which owns the
+    /// workspace) so the ⌘V paste path can normalise pasted-in NFD names.
+    let normalizeHangul: Bool
 
     func body(content: Content) -> some View {
         content
@@ -746,7 +759,7 @@ private struct EditMenuNotifications: ViewModifier {
                 focusedPane.cutSelectionToPasteboard()
             }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirPasteRequested)) { _ in
-                focusedPane.pasteFromPasteboard()
+                focusedPane.pasteFromPasteboard(normalizeHangul: normalizeHangul)
             }
             .onReceive(NotificationCenter.default.publisher(for: .mqdirDeleteRequested)) { _ in
                 focusedPane.moveSelectionToTrash()

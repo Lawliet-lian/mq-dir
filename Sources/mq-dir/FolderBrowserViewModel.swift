@@ -807,10 +807,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Duplicate every currently-selected entry. Wraps the existing
     /// `duplicate(_:)` so the Edit-menu ⌘D shortcut and the file
     /// context menu's "Duplicate" item share one path.
-    func duplicateSelection() {
+    func duplicateSelection(normalizeHangul: Bool = false) {
         let targets = selectedEntries
         guard !targets.isEmpty else { return }
-        duplicate(targets)
+        duplicate(targets, normalizeHangul: normalizeHangul)
     }
 
     /// Newline-joined POSIX paths of the current selection on the
@@ -1004,7 +1004,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// current folder. Mirrors Finder's ⌘V (copy) and Windows
     /// File Explorer's ⌘V-after-⌘X (move). Silently skips when the
     /// pasteboard has no file URLs or no folder is open.
-    func pasteFromPasteboard() {
+    func pasteFromPasteboard(normalizeHangul: Bool = false) {
         guard let folder = folderURL else { return }
         let pb = NSPasteboard.general
         guard let items = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
@@ -1020,7 +1020,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                 // Same standardized self-drop + descendant guards drop
                 // uses, so paste-into-same-folder and paste-into-descendant
                 // behave identically to a drag-drop.
-                FileOperationService.transfer(items, into: folder, move: isCut)
+                FileOperationService.transfer(items, into: folder, move: isCut, normalizeHangul: normalizeHangul)
             }.value
             for (source, error) in failures {
                 FileHandle.standardError.write(
@@ -1316,11 +1316,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Finder-style " 2" / " 3" suffix. Mirrors `acceptDrop`'s detached-task
     /// + system-wide reload pattern so an open second pane viewing the same
     /// folder also picks up the new copies.
-    func duplicate(_ entries: [FileEntry]) {
+    func duplicate(_ entries: [FileEntry], normalizeHangul: Bool = false) {
         let urls = entries.map(\.url)
         Task {
             let failures = await Task.detached(priority: .userInitiated) {
-                FileOperationService.duplicate(urls)
+                FileOperationService.duplicate(urls, normalizeHangul: normalizeHangul)
             }.value
             for (source, error) in failures {
                 FileHandle.standardError.write(
@@ -1380,13 +1380,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     /// Rename any decomposed-Hangul (NFD) filenames in `entries` to
-    /// NFC form on disk. Used by the right-click "Normalize Filename
-    /// to NFC" action and (via `AppKitFileDragModifier`) automatically
-    /// on drag-out when the matching workspace setting is on.
-    /// Delegates the actual rename to `HangulNFCFilename.renameToNFC`,
-    /// which bypasses `FileManager.moveItem` (a no-op on APFS for
-    /// normalisation-only renames). Reloads at the end if anything
-    /// actually changed.
+    /// NFC form on disk. This is the explicit right-click "Normalize
+    /// Filename to NFC" action. The same `HangulNFCFilename.renameToNFC`
+    /// primitive is also driven automatically — gated by the
+    /// `normalizeHangulOnDragOut` workspace setting — by the drag-out
+    /// source modifiers (`appKitFileDrag` / `inactiveDragSource`) at
+    /// drag-start and by `FileOperationService.transfer` / `duplicate`
+    /// after a copy/move/duplicate. `renameToNFC` bypasses
+    /// `FileManager.moveItem` (a no-op on APFS for normalisation-only
+    /// renames). Reloads at the end if anything actually changed.
     func normalizeFilenamesToNFC(_ entries: [FileEntry]) {
         var changed = false
         for entry in entries {
@@ -1448,10 +1450,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// `copy=true` forces copy (Option held). Default Finder semantics: same-volume = move,
     /// cross-volume = copy. On name conflict, the destination gets " 2", " 3", ... suffix
     /// (Finder convention). After completion, broadcasts a system-wide reload.
-    func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool) {
+    func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool, normalizeHangul: Bool = false) {
         Task {
             let failures = await Task.detached(priority: .userInitiated) {
-                FileOperationService.transfer(urls, into: destinationFolder, move: !copy)
+                FileOperationService.transfer(urls, into: destinationFolder, move: !copy, normalizeHangul: normalizeHangul)
             }.value
             for (source, error) in failures {
                 FileHandle.standardError.write(

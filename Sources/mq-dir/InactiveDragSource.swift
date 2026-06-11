@@ -38,6 +38,7 @@ extension View {
     func inactiveDragSource(
         primary: URL,
         multiURLs: @escaping () -> [URL] = { [] },
+        normalizeHangul: Bool = false,
         onClick: ((NSEvent) -> Void)? = nil,
         onDoubleClick: ((NSEvent) -> Void)? = nil
     ) -> some View {
@@ -45,6 +46,7 @@ extension View {
             InactiveDragSourceRepresentable(
                 primary: primary,
                 multiURLs: multiURLs,
+                normalizeHangul: normalizeHangul,
                 onClick: onClick,
                 onDoubleClick: onDoubleClick
             )
@@ -55,6 +57,7 @@ extension View {
 private struct InactiveDragSourceRepresentable: NSViewRepresentable {
     let primary: URL
     let multiURLs: () -> [URL]
+    let normalizeHangul: Bool
     let onClick: ((NSEvent) -> Void)?
     let onDoubleClick: ((NSEvent) -> Void)?
 
@@ -63,6 +66,7 @@ private struct InactiveDragSourceRepresentable: NSViewRepresentable {
         v.configure(
             primary: primary,
             multiURLs: multiURLs,
+            normalizeHangul: normalizeHangul,
             onClick: onClick,
             onDoubleClick: onDoubleClick
         )
@@ -73,6 +77,7 @@ private struct InactiveDragSourceRepresentable: NSViewRepresentable {
         nsView.configure(
             primary: primary,
             multiURLs: multiURLs,
+            normalizeHangul: normalizeHangul,
             onClick: onClick,
             onDoubleClick: onDoubleClick
         )
@@ -82,6 +87,7 @@ private struct InactiveDragSourceRepresentable: NSViewRepresentable {
 private final class InactiveDragSourceNSView: NSView, NSDraggingSource {
     private var primary: URL = URL(fileURLWithPath: "/")
     private var multiURLsProvider: () -> [URL] = { [] }
+    private var normalizeHangul = false
     private var onClick: ((NSEvent) -> Void)?
     private var onDoubleClick: ((NSEvent) -> Void)?
 
@@ -91,11 +97,13 @@ private final class InactiveDragSourceNSView: NSView, NSDraggingSource {
     func configure(
         primary: URL,
         multiURLs: @escaping () -> [URL],
+        normalizeHangul: Bool,
         onClick: ((NSEvent) -> Void)?,
         onDoubleClick: ((NSEvent) -> Void)?
     ) {
         self.primary = primary
         self.multiURLsProvider = multiURLs
+        self.normalizeHangul = normalizeHangul
         self.onClick = onClick
         self.onDoubleClick = onDoubleClick
     }
@@ -152,7 +160,10 @@ private final class InactiveDragSourceNSView: NSView, NSDraggingSource {
 
     private func startDrag(with event: NSEvent) {
         let resolvedMulti = multiURLsProvider()
-        let urls: [URL] = resolvedMulti.count > 1 ? resolvedMulti : [primary]
+        let rawURLs: [URL] = resolvedMulti.count > 1 ? resolvedMulti : [primary]
+        // Rename NFD → NFC on disk before the pasteboard captures the
+        // URLs (same path as the active-window drag in AppKitFileDrag).
+        let urls = normalizedDragURLs(rawURLs, enabled: normalizeHangul)
         let cursorInView = convert(event.locationInWindow, from: nil)
         let iconSize = NSSize(width: 32, height: 32)
         var items: [NSDraggingItem] = []

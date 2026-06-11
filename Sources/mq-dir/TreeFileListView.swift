@@ -10,10 +10,18 @@ import SwiftUI
 /// drowned in loose files at every level.
 struct TreeFileListView: View {
     @ObservedObject var viewModel: FolderBrowserViewModel
+    /// App-level `.environmentObject(workspace)` so the tree-row drag
+    /// source can read the "normalise Hangul on drag out" preference,
+    /// matching the list view's `BrowserPaneView` path.
+    @EnvironmentObject private var workspace: WorkspaceManager
     let isFocused: Bool
     let onFocus: () -> Void
 
     @FocusState private var treeFocused: Bool
+
+    private var normalizeHangulOnDragOut: Bool {
+        workspace.workspace.settings.normalizeHangulOnDragOut
+    }
 
     var body: some View {
         // ScrollViewReader provides a proxy so arrow-key nav can keep the
@@ -263,9 +271,10 @@ struct TreeFileListView: View {
         // another app yields the real file URL (not a SwiftUI
         // drag-promise cache copy). Tree view is single-row so
         // `multiURLs` stays empty; the primary URL is enough.
-        .appKitFileDrag(primary: entry.url)
+        .appKitFileDrag(primary: entry.url, normalizeHangul: normalizeHangulOnDragOut)
         .inactiveDragSource(
             primary: entry.url,
+            normalizeHangul: normalizeHangulOnDragOut,
             onClick: { _ in
                 if !isFocused { onFocus() }
                 viewModel.replaceSelection(entry.id)

@@ -19,14 +19,53 @@ extension View {
     /// body never has to materialise the whole multi-selection just to
     /// hand it to a drag modifier that is dormant 99% of the time. The
     /// closure runs at drag-start, off the SwiftUI render hot path.
-    func appKitFileDrag(primary: URL, multiURLs: @escaping () -> [URL] = { [] }) -> some View {
-        modifier(AppKitFileDragModifier(primary: primary, multiURLs: multiURLs))
+    ///
+    /// `normalizeHangul` is read from the workspace setting at the call
+    /// site. When true, each dragged URL with a decomposed-Hangul (NFD)
+    /// name is renamed to NFC form on disk at drag-start (before the
+    /// pasteboard item is built) so the receiver gets the composed name.
+    func appKitFileDrag(
+        primary: URL,
+        multiURLs: @escaping () -> [URL] = { [] },
+        normalizeHangul: Bool = false
+    ) -> some View {
+        modifier(AppKitFileDragModifier(
+            primary: primary,
+            multiURLs: multiURLs,
+            normalizeHangul: normalizeHangul
+        ))
     }
+}
+
+/// Rename each URL whose name is decomposed-Hangul (NFD) to NFC form on
+/// disk, returning the (possibly renamed) URLs to put on the pasteboard.
+/// A rename that fails falls back to the original URL silently. Posts
+/// `.mqdirFileSystemChanged` once if anything actually changed so the
+/// source pane drops the now-stale row — the per-tab FSEvents watcher
+/// would also catch it, but the explicit post makes the refresh
+/// immediate. Cheap-guards on `isDecomposedRelativeToNFC` (inside
+/// `renameToNFC`) so the common all-NFC/ASCII case does no disk work.
+@MainActor
+func normalizedDragURLs(_ urls: [URL], enabled: Bool) -> [URL] {
+    guard enabled else { return urls }
+    var didRename = false
+    let mapped = urls.map { url -> URL in
+        if let renamed = HangulNFCFilename.renameToNFC(url) {
+            didRename = true
+            return renamed
+        }
+        return url
+    }
+    if didRename {
+        NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+    }
+    return mapped
 }
 
 private struct AppKitFileDragModifier: ViewModifier {
     let primary: URL
     let multiURLs: () -> [URL]
+    let normalizeHangul: Bool
 
     @State private var dragInFlight = false
 
@@ -54,7 +93,11 @@ private struct AppKitFileDragModifier: ViewModifier {
         // extra URLs into the private mqdirSelection type is enough for
         // pane↔pane drops within mq-dir but not for anyone else.
         let resolvedMulti = multiURLs()
-        let urls: [URL] = resolvedMulti.count > 1 ? resolvedMulti : [primary]
+        let rawURLs: [URL] = resolvedMulti.count > 1 ? resolvedMulti : [primary]
+        // Rename NFD → NFC on disk before the pasteboard captures the
+        // URLs, so the receiver sees the composed name. No-op when the
+        // setting is off or no name needs it.
+        let urls = normalizedDragURLs(rawURLs, enabled: normalizeHangul)
 
         let iconSize = NSSize(width: 32, height: 32)
         let cursorInView = view.convert(event.locationInWindow, from: nil)

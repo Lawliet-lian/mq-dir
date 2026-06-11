@@ -221,6 +221,59 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertEqual(failures.first?.0, missing)
     }
 
+    // MARK: normalize-on-write (NFD → NFC)
+
+    func testTransfer_normalizeHangulTrueComposesDestinationName() throws {
+        // Source carries a decomposed (NFD) Hangul name on disk; with
+        // normalizeHangul on, the copied file's on-disk name must be NFC.
+        let nfdName = "한글".decomposedStringWithCanonicalMapping + ".txt"
+        let nfcName = nfdName.precomposedStringWithCanonicalMapping
+        let src = try writeRaw(named: nfdName, in: tempDirectory, contents: "x")
+        let dst = try makeDirectory("dst")
+
+        let failures = FileOperationService.transfer([src], into: dst, move: false, normalizeHangul: true)
+
+        XCTAssertTrue(failures.isEmpty)
+        let names = onDiskNames(in: dst)
+        XCTAssertTrue(names.contains { $0.utf8.elementsEqual(nfcName.utf8) },
+                      "destination name must be NFC bytes when normalizeHangul is true")
+        XCTAssertFalse(names.contains { $0.utf8.elementsEqual(nfdName.utf8) },
+                       "no NFD-named entry must survive in the destination")
+    }
+
+    func testTransfer_normalizeHangulFalseLeavesDestinationDecomposed() throws {
+        let nfdName = "한글".decomposedStringWithCanonicalMapping + ".txt"
+        let src = try writeRaw(named: nfdName, in: tempDirectory, contents: "x")
+        let dst = try makeDirectory("dst")
+
+        let failures = FileOperationService.transfer([src], into: dst, move: false, normalizeHangul: false)
+
+        XCTAssertTrue(failures.isEmpty)
+        let names = onDiskNames(in: dst)
+        XCTAssertTrue(names.contains { $0.utf8.elementsEqual(nfdName.utf8) },
+                      "destination name must stay NFD bytes when normalizeHangul is false")
+    }
+
+    func testDuplicate_normalizeHangulTrueComposesCopyName() throws {
+        let nfdStem = "한글".decomposedStringWithCanonicalMapping
+        let src = try writeRaw(named: nfdStem + ".txt", in: tempDirectory, contents: "x")
+
+        let failures = FileOperationService.duplicate([src], normalizeHangul: true)
+
+        XCTAssertTrue(failures.isEmpty)
+        // The duplicate's stem is " 2"-suffixed; assert the copy on disk
+        // is NFC by checking no entry still carries a decomposed name.
+        let names = onDiskNames(in: tempDirectory)
+        XCTAssertFalse(
+            names.contains { $0 != (nfdStem + ".txt") && $0.utf8.elementsEqual((nfdStem + " 2.txt").utf8) },
+            "the duplicated copy must be written/renamed to NFC, not NFD"
+        )
+        XCTAssertTrue(
+            names.contains { $0.utf8.elementsEqual((nfdStem.precomposedStringWithCanonicalMapping + " 2.txt").utf8) },
+            "the duplicate's NFC name must be present on disk"
+        )
+    }
+
     // MARK: delete
 
     func testPermanentlyDelete_removesAndRecordsFailures() throws {
@@ -417,5 +470,30 @@ final class FileOperationServiceTests: XCTestCase {
         let url = tempDirectory.appendingPathComponent(name, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    /// Create a file whose on-disk name is exactly `name`'s UTF-8 bytes
+    /// via POSIX `open`, so Foundation's URL machinery can't renormalise
+    /// an NFD component to NFC before it hits the filesystem. Required to
+    /// genuinely land a decomposed-Hangul name for the normalise-on-write
+    /// tests.
+    @discardableResult
+    private func writeRaw(named name: String, in dir: URL, contents: String) throws -> URL {
+        let fullPath = dir.path + "/" + name
+        let fd = fullPath.withCString { open($0, O_CREAT | O_WRONLY | O_TRUNC, 0o644) }
+        guard fd >= 0 else {
+            throw NSError(domain: "test", code: Int(errno),
+                          userInfo: [NSLocalizedDescriptionKey: "open failed for \(name)"])
+        }
+        let bytes = Array(contents.utf8)
+        _ = bytes.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        close(fd)
+        return URL(fileURLWithPath: fullPath)
+    }
+
+    /// Raw directory listing reading the actual on-disk byte sequences so
+    /// byte-level NFC/NFD comparisons are meaningful.
+    private func onDiskNames(in dir: URL) -> [String] {
+        (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
     }
 }

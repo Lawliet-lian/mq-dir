@@ -178,6 +178,7 @@ public enum FileOperationService {
         _ sources: [URL],
         into destinationFolder: URL,
         move: Bool,
+        normalizeHangul: Bool = false,
         fileManager: FileManager = .default
     ) -> [(URL, Error)] {
         var failures: [(URL, Error)] = []
@@ -198,11 +199,22 @@ public enum FileOperationService {
                 } else {
                     try fileManager.copyItem(at: source, to: dest)
                 }
+                normalizeIfRequested(dest, enabled: normalizeHangul)
             } catch {
                 failures.append((source, error))
             }
         }
         return failures
+    }
+
+    /// After a successful copy/move/duplicate, rename the resulting file
+    /// to NFC form on disk when `enabled` and its name is decomposed
+    /// Hangul (NFD). A rename failure is swallowed — the transfer itself
+    /// already succeeded, so the worst case is the on-disk name stays NFD
+    /// rather than the whole operation reporting failure.
+    private static func normalizeIfRequested(_ url: URL, enabled: Bool) {
+        guard enabled else { return }
+        _ = HangulNFCFilename.renameToNFC(url)
     }
 
     /// Duplicate each source in place with a Finder-style " 2" / " 3"
@@ -211,6 +223,7 @@ public enum FileOperationService {
     @discardableResult
     public static func duplicate(
         _ sources: [URL],
+        normalizeHangul: Bool = false,
         fileManager: FileManager = .default
     ) -> [(URL, Error)] {
         var failures: [(URL, Error)] = []
@@ -223,6 +236,7 @@ public enum FileOperationService {
             )
             do {
                 try fileManager.copyItem(at: source, to: dest)
+                normalizeIfRequested(dest, enabled: normalizeHangul)
             } catch {
                 failures.append((source, error))
             }

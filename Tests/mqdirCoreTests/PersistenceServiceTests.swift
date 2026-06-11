@@ -263,6 +263,51 @@ final class PersistenceServiceTests: XCTestCase {
                        "an explicit .light preference must survive a save/load cycle")
     }
 
+    func testWorkspaceSettingsMigratesMissingNormalizeHangulAsFalse() throws {
+        // A state.json written before the normalize-Hangul setting
+        // existed has a `settings` object without the key. The decoder
+        // must default it to false so the on-disk-mutating behaviour
+        // stays opt-in for upgraded users.
+        let pre = """
+        {
+          "favorites": [],
+          "favoritesSeeded": true,
+          "activeProjectID": "00000000-0000-0000-0000-000000000001",
+          "projects": [
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "name": "Default",
+              "state": {
+                "layout": 4,
+                "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 },
+                  { "tabs": [], "activeTabIndex": 0 }
+                ]
+              }
+            }
+          ],
+          "settings": { "colorScheme": "system" }
+        }
+        """
+        let workspace = try JSONDecoder().decode(WorkspaceState.self, from: Data(pre.utf8))
+        XCTAssertFalse(workspace.settings.normalizeHangulOnDragOut,
+                       "missing normalizeHangulOnDragOut must default to false, not true")
+    }
+
+    func testWorkspaceSettingsNormalizeHangulRoundTrips() throws {
+        var workspace = WorkspaceState.empty
+        workspace.settings.normalizeHangulOnDragOut = true
+
+        let data = try JSONEncoder().encode(workspace)
+        let decoded = try JSONDecoder().decode(WorkspaceState.self, from: data)
+
+        XCTAssertTrue(decoded.settings.normalizeHangulOnDragOut,
+                      "an explicit true preference must survive a save/load cycle")
+    }
+
 
     func testWorkspaceSettingsDefaultShortcutOverridesAreEmpty() {
         let settings = WorkspaceSettings()

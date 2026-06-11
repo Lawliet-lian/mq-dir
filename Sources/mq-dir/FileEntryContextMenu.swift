@@ -124,7 +124,7 @@ struct FileEntryContextMenu: View {
         Divider()
 
         Button(count > 1 ? "Duplicate \(count) Items" : "Duplicate") {
-            viewModel.duplicate(targets)
+            viewModel.duplicate(targets, normalizeHangul: workspace.workspace.settings.normalizeHangulOnDragOut)
         }
         if count == 1, let target = targets.first {
             // Rename only makes sense for a single row at a time —

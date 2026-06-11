@@ -133,6 +133,15 @@ final class WorkspaceManager: ObservableObject {
         mutate { $0.settings.colorScheme = option }
     }
 
+    /// Toggle the "normalise Hangul filenames to NFC on drag out"
+    /// preference. Read at drag-start (and at copy/move/duplicate time)
+    /// off `workspace.settings.normalizeHangulOnDragOut`; the standard
+    /// 500 ms debounced save persists it across launches.
+    func setNormalizeHangulOnDragOut(_ enabled: Bool) {
+        guard workspace.settings.normalizeHangulOnDragOut != enabled else { return }
+        mutate { $0.settings.normalizeHangulOnDragOut = enabled }
+    }
+
     /// Persist a user override for the given action. Passing `nil`
     /// for `binding` removes the override so the action falls back
     /// to its default. Settings → Shortcuts uses this for both Edit

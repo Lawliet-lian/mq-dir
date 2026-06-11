@@ -84,6 +84,14 @@ struct BrowserPaneView: View {
     let isFocused: Bool
     let onFocus: () -> Void
 
+    /// Live "normalise Hangul filenames to NFC on drag out" preference,
+    /// read off the workspace settings and handed to the drag-source
+    /// modifiers so each drag-start can rename NFD names before the
+    /// pasteboard captures them.
+    private var normalizeHangulOnDragOut: Bool {
+        workspace.workspace.settings.normalizeHangulOnDragOut
+    }
+
     @State private var paneIsDropTargeted = false
     @State private var rowDropTargeted: FileEntry.ID?
     /// Where the blue insertion-line indicator should render in this
@@ -169,7 +177,7 @@ struct BrowserPaneView: View {
 
         Divider()
 
-        Button("Paste") { viewModel.pasteFromPasteboard() }
+        Button("Paste") { viewModel.pasteFromPasteboard(normalizeHangul: normalizeHangulOnDragOut) }
             .keyboardShortcut("v", modifiers: .command)
             .disabled(!viewModel.canPasteFiles || viewModel.folderURL == nil)
 
@@ -487,8 +495,8 @@ struct BrowserPaneView: View {
             }
             .contentShape(Rectangle())
             .help(url.path)
-            .appKitFileDrag(primary: url)
-            .inactiveDragSource(primary: url)
+            .appKitFileDrag(primary: url, normalizeHangul: normalizeHangulOnDragOut)
+            .inactiveDragSource(primary: url, normalizeHangul: normalizeHangulOnDragOut)
         } else {
             Text("No folder open")
                 .foregroundStyle(Theme.Color.labelTertiary)
@@ -862,7 +870,8 @@ struct BrowserPaneView: View {
                         viewModel.acceptDrop(
                             urls,
                             into: folder,
-                            copy: modifiers.contains(.option)
+                            copy: modifiers.contains(.option),
+                            normalizeHangul: normalizeHangulOnDragOut
                         )
                     }
                 }
@@ -977,7 +986,8 @@ struct BrowserPaneView: View {
                       viewModel.selection.count > 1
                 else { return [] }
                 return viewModel.selectedURLs
-            }
+            },
+            normalizeHangul: normalizeHangulOnDragOut
         )
         // Mirrors the SwiftUI tap + drag gestures above for the
         // inactive-window path: when mq-dir is in the background, the
@@ -993,6 +1003,7 @@ struct BrowserPaneView: View {
                 else { return [] }
                 return viewModel.selectedURLs
             },
+            normalizeHangul: normalizeHangulOnDragOut,
             onClick: { event in
                 if !isFocused { onFocus() }
                 let mods = event.modifierFlags
@@ -1054,7 +1065,8 @@ struct BrowserPaneView: View {
                         viewModel.acceptDrop(
                             urls,
                             into: entry.url,
-                            copy: modifiers.contains(.option)
+                            copy: modifiers.contains(.option),
+                            normalizeHangul: normalizeHangulOnDragOut
                         )
                     }
                 }

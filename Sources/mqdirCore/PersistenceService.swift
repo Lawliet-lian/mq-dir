@@ -304,13 +304,21 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
     /// `WorkspaceSettings.binding(for:)` rather than reading this
     /// dictionary directly.
     var shortcutOverrides: [ShortcutAction: ShortcutBinding]
+    /// When true, dragging a file out of mq-dir (or copying/moving it
+    /// via paste / duplicate / drop) renames any decomposed-Hangul (NFD)
+    /// filename to NFC form on disk first, so the receiving app sees a
+    /// correctly-composed Korean name instead of `ㅎㅏㄴㄱㅡㄹ`. Defaults
+    /// off — it mutates filenames on disk, so it stays opt-in.
+    var normalizeHangulOnDragOut: Bool
 
     init(
         colorScheme: ColorSchemeOption = .system,
-        shortcutOverrides: [ShortcutAction: ShortcutBinding] = [:]
+        shortcutOverrides: [ShortcutAction: ShortcutBinding] = [:],
+        normalizeHangulOnDragOut: Bool = false
     ) {
         self.colorScheme = colorScheme
         self.shortcutOverrides = shortcutOverrides
+        self.normalizeHangulOnDragOut = normalizeHangulOnDragOut
     }
 
     /// Live binding for `action` — user override if present,
@@ -323,11 +331,13 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case colorScheme
         case shortcutOverrides
+        case normalizeHangulOnDragOut
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let colorScheme = c.decode(ColorSchemeOption.self, forKey: .colorScheme, default: .system)
+        let normalizeHangulOnDragOut = c.decode(Bool.self, forKey: .normalizeHangulOnDragOut, default: false)
 
         // Decode shortcutOverrides per-entry through an AnyCodingKey
         // container so a future build's added action (or a renamed
@@ -347,7 +357,11 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
             }
         }
 
-        self.init(colorScheme: colorScheme, shortcutOverrides: overrides)
+        self.init(
+            colorScheme: colorScheme,
+            shortcutOverrides: overrides,
+            normalizeHangulOnDragOut: normalizeHangulOnDragOut
+        )
     }
 }
 
