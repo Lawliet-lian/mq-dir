@@ -1,5 +1,49 @@
 import Foundation
 
+extension KeyedDecodingContainer {
+    /// Decode `key` if present and well-formed, otherwise fall back to
+    /// `defaultValue`. Collapses the repeated
+    /// `(try? decodeIfPresent(...)) ?? default` boilerplate used by every
+    /// hand-rolled migration decoder in this file so a missing *or* malformed
+    /// field degrades to the default instead of failing the whole decode.
+    func decode<T: Decodable>(_ type: T.Type, forKey key: Key, default defaultValue: T) -> T {
+        (try? decodeIfPresent(type, forKey: key)) ?? defaultValue
+    }
+
+    /// Decode `[Element]` element-by-element through an unkeyed container,
+    /// skipping any element that fails to decode while keeping the good ones.
+    /// Returns `nil` only when the key is absent or isn't an array at all — a
+    /// present-but-partly-corrupt array yields the surviving elements. This
+    /// mirrors the per-entry resilience of `WorkspaceSettings`'
+    /// `shortcutOverrides` decode: one bad record must not nuke the array.
+    func decodeArraySkippingInvalid<Element: Decodable>(
+        _ elementType: Element.Type,
+        forKey key: Key
+    ) -> [Element]? {
+        guard var unkeyed = try? nestedUnkeyedContainer(forKey: key) else { return nil }
+        var result: [Element] = []
+        while !unkeyed.isAtEnd {
+            if let element = try? unkeyed.decode(Element.self) {
+                result.append(element)
+            } else {
+                // The element threw — advance the cursor past it so the loop
+                // terminates instead of spinning on the same bad record.
+                _ = try? unkeyed.decode(AnyDecodableSkip.self)
+            }
+        }
+        return result
+    }
+}
+
+/// Throwaway decodable used to consume and discard one element of an
+/// unkeyed container whose real type failed to decode, advancing the
+/// decoder's cursor so element-skipping array decode can proceed.
+private struct AnyDecodableSkip: Decodable {
+    init(from decoder: Decoder) throws {
+        _ = try decoder.singleValueContainer()
+    }
+}
+
 /// Per-tab state that survives an app restart.
 ///
 /// Folder reference is stored as a security-scoped bookmark (not a raw path)
@@ -65,16 +109,16 @@ struct TabState: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            folderBookmark: try c.decodeIfPresent(Data.self, forKey: .folderBookmark),
-            sortKey: (try c.decodeIfPresent(FileEntrySortKey.self, forKey: .sortKey)) ?? .name,
-            sortAscending: (try c.decodeIfPresent(Bool.self, forKey: .sortAscending)) ?? true,
-            includeHidden: (try c.decodeIfPresent(Bool.self, forKey: .includeHidden)) ?? false,
-            columnWidths: (try c.decodeIfPresent(PaneColumnWidths.self, forKey: .columnWidths)) ?? PaneColumnWidths(),
-            selectedURLPaths: (try c.decodeIfPresent([String].self, forKey: .selectedURLPaths)) ?? [],
-            viewMode: (try c.decodeIfPresent(PaneViewMode.self, forKey: .viewMode)) ?? .list,
-            expandedPaths: (try c.decodeIfPresent([String].self, forKey: .expandedPaths)) ?? [],
-            previewVisible: (try c.decodeIfPresent(Bool.self, forKey: .previewVisible)) ?? false,
-            foldersOnTop: (try c.decodeIfPresent(Bool.self, forKey: .foldersOnTop)) ?? true
+            folderBookmark: c.decode(Data?.self, forKey: .folderBookmark, default: nil),
+            sortKey: c.decode(FileEntrySortKey.self, forKey: .sortKey, default: .name),
+            sortAscending: c.decode(Bool.self, forKey: .sortAscending, default: true),
+            includeHidden: c.decode(Bool.self, forKey: .includeHidden, default: false),
+            columnWidths: c.decode(PaneColumnWidths.self, forKey: .columnWidths, default: PaneColumnWidths()),
+            selectedURLPaths: c.decode([String].self, forKey: .selectedURLPaths, default: []),
+            viewMode: c.decode(PaneViewMode.self, forKey: .viewMode, default: .list),
+            expandedPaths: c.decode([String].self, forKey: .expandedPaths, default: []),
+            previewVisible: c.decode(Bool.self, forKey: .previewVisible, default: false),
+            foldersOnTop: c.decode(Bool.self, forKey: .foldersOnTop, default: true)
         )
     }
 }
@@ -140,6 +184,27 @@ struct Favorite: Codable, Equatable, Sendable, Identifiable {
         self.bookmark = bookmark
         self.fallbackPath = fallbackPath
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, label, bookmark, fallbackPath
+    }
+
+    /// Hand-rolled so a favorite that lost its `id` or `label` (a future
+    /// schema bump, a hand-edited file, a truncated write) decodes with
+    /// sensible defaults instead of throwing. Throwing here is what makes
+    /// `WorkspaceState`'s `try?`-wrapped favorites decode drop the *entire*
+    /// list, so a single malformed entry must never abort.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let fallbackPath = c.decode(String?.self, forKey: .fallbackPath, default: nil)
+        self.init(
+            id: c.decode(UUID.self, forKey: .id, default: UUID()),
+            label: c.decode(String.self, forKey: .label,
+                            default: fallbackPath.map { ($0 as NSString).lastPathComponent } ?? "Favorite"),
+            bookmark: c.decode(Data?.self, forKey: .bookmark, default: nil),
+            fallbackPath: fallbackPath
+        )
+    }
 }
 
 /// Window-level state that survives an app restart, scoped to a single
@@ -164,6 +229,42 @@ struct WindowState: Codable, Equatable, Sendable {
         focusedPaneIndex: 0,
         panes: Array(repeating: PaneState(), count: 4)
     )
+
+    /// Force `panes` to exactly four records: pad short arrays with empty
+    /// panes, truncate long ones. The "always four panes in storage" rule
+    /// is load-bearing for the layout shrink/grow logic, so a truncated or
+    /// hand-edited state.json with a non-4 array must normalize here rather
+    /// than reach the memberwise `precondition` and crash a load that the
+    /// `loadState()` contract says can never throw.
+    private static func normalizedToFour(_ panes: [PaneState]) -> [PaneState] {
+        if panes.count == 4 { return panes }
+        if panes.count > 4 { return Array(panes.prefix(4)) }
+        return panes + Array(repeating: PaneState(), count: 4 - panes.count)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case layout, focusedPaneIndex, panes
+    }
+
+    /// Hand-rolled so (a) a future added field defaults instead of failing
+    /// the decode of every old file, and (b) the pane array is normalized to
+    /// exactly four at the decode boundary. Mirrors how
+    /// `WorkspaceState.init(from:)` already pads its legacy pane array.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            layout: c.decode(PaneLayout.self, forKey: .layout, default: .four),
+            focusedPaneIndex: c.decode(Int.self, forKey: .focusedPaneIndex, default: 0),
+            panes: Self.normalizedToFour(c.decode([PaneState].self, forKey: .panes, default: []))
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(layout, forKey: .layout)
+        try c.encode(focusedPaneIndex, forKey: .focusedPaneIndex)
+        try c.encode(panes, forKey: .panes)
+    }
 }
 
 /// One named workspace. Carries a `WindowState` that fully describes the
@@ -226,7 +327,7 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let colorScheme = (try? c.decodeIfPresent(ColorSchemeOption.self, forKey: .colorScheme)) ?? .system
+        let colorScheme = c.decode(ColorSchemeOption.self, forKey: .colorScheme, default: .system)
 
         // Decode shortcutOverrides per-entry through an AnyCodingKey
         // container so a future build's added action (or a renamed
@@ -300,19 +401,24 @@ struct WorkspaceState: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
 
-        // New shape — has a top-level `projects` array.
-        if let rawProjects = try? c.decode([Project].self, forKey: .projects) {
+        // New shape — has a top-level `projects` array. Discriminate by key
+        // presence (not by a successful atomic decode) so a single corrupt
+        // project element no longer drops us into the legacy branch and
+        // loses every other project. Each element is decoded individually
+        // and bad ones are skipped, mirroring the shortcutOverrides pattern.
+        if c.contains(.projects) {
+            let rawProjects = c.decodeArraySkippingInvalid(Project.self, forKey: .projects) ?? []
             let projects = rawProjects.isEmpty ? [Project(name: "Default")] : rawProjects
             let active = (try? c.decode(UUID.self, forKey: .activeProjectID)) ?? projects.first!.id
             // Tolerate dangling activeProjectID — fall back to the first
             // project so a corrupt write can't lock the user out.
             let resolved = projects.contains(where: { $0.id == active }) ? active : projects.first!.id
             self.init(
-                favorites: (try? c.decodeIfPresent([Favorite].self, forKey: .favorites)) ?? [],
-                favoritesSeeded: (try? c.decodeIfPresent(Bool.self, forKey: .favoritesSeeded)) ?? false,
+                favorites: c.decodeArraySkippingInvalid(Favorite.self, forKey: .favorites) ?? [],
+                favoritesSeeded: c.decode(Bool.self, forKey: .favoritesSeeded, default: false),
                 activeProjectID: resolved,
                 projects: projects,
-                settings: (try? c.decodeIfPresent(WorkspaceSettings.self, forKey: .settings)) ?? WorkspaceSettings()
+                settings: c.decode(WorkspaceSettings.self, forKey: .settings, default: WorkspaceSettings())
             )
             return
         }
@@ -320,12 +426,12 @@ struct WorkspaceState: Codable, Equatable, Sendable {
         // Legacy shape — top-level WindowState fields. Wrap as a single
         // "Default" project so the user's last layout/panes survive the
         // upgrade unchanged.
-        let layout = (try? c.decodeIfPresent(PaneLayout.self, forKey: .layout)) ?? .four
-        let focused = (try? c.decodeIfPresent(Int.self, forKey: .focusedPaneIndex)) ?? 0
-        let panes = (try? c.decodeIfPresent([PaneState].self, forKey: .panes))
+        let layout = c.decode(PaneLayout.self, forKey: .layout, default: .four)
+        let focused = c.decode(Int.self, forKey: .focusedPaneIndex, default: 0)
+        let panes = c.decodeArraySkippingInvalid(PaneState.self, forKey: .panes)
             ?? Array(repeating: PaneState(), count: 4)
-        let favorites = (try? c.decodeIfPresent([Favorite].self, forKey: .favorites)) ?? []
-        let seeded = (try? c.decodeIfPresent(Bool.self, forKey: .favoritesSeeded)) ?? false
+        let favorites = c.decodeArraySkippingInvalid(Favorite.self, forKey: .favorites) ?? []
+        let seeded = c.decode(Bool.self, forKey: .favoritesSeeded, default: false)
 
         let migrated = Project(
             name: "Default",
@@ -411,11 +517,51 @@ struct PersistenceService: @unchecked Sendable {
     /// Returns nil when the file is missing, unreadable, or contains
     /// corrupt JSON. Callers always treat a `nil` load as "first launch".
     /// Never throws — corruption recovery is part of the contract.
+    ///
+    /// On a *decode* failure specifically (the file exists and is readable
+    /// but the JSON won't decode), the original is copied aside to
+    /// `state.corrupt-<timestamp>.json` before returning nil. Otherwise the
+    /// very next debounced `saveState` overwrites the only copy of the
+    /// user's broken-but-recoverable state, and a support request has
+    /// nothing to inspect.
     func loadState() -> WorkspaceState? {
         guard fileManager.fileExists(atPath: stateURL.path) else { return nil }
         guard let data = try? Data(contentsOf: stateURL) else { return nil }
-        return try? JSONDecoder().decode(WorkspaceState.self, from: data)
+        do {
+            return try JSONDecoder().decode(WorkspaceState.self, from: data)
+        } catch {
+            backUpCorruptStateFile(decodeError: error)
+            return nil
+        }
     }
+
+    /// Side-car the unparseable `state.json` so it isn't clobbered by the
+    /// next save, and surface the decode error on stderr for diagnosis.
+    private func backUpCorruptStateFile(decodeError: Error) {
+        let stamp = Self.corruptBackupTimestampFormatter.string(from: Date())
+        let backupURL = stateURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("state.corrupt-\(stamp).json", isDirectory: false)
+        do {
+            try fileManager.copyItem(at: stateURL, to: backupURL)
+            FileHandle.standardError.write(Data(
+                "[mq-dir persist] state.json failed to decode (\(decodeError)); backed up to \(backupURL.lastPathComponent), treating as first launch\n".utf8
+            ))
+        } catch {
+            FileHandle.standardError.write(Data(
+                "[mq-dir persist] state.json failed to decode (\(decodeError)); backup copy also failed (\(error)), treating as first launch\n".utf8
+            ))
+        }
+    }
+
+    /// Filesystem-safe timestamp (no colons) for the corrupt-file side-car.
+    private static let corruptBackupTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return formatter
+    }()
 
     /// Writes the state atomically. Throws so the caller (typically a
     /// debounced save) can log a failure without crashing.
@@ -431,10 +577,19 @@ struct PersistenceService: @unchecked Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(state)
         try data.write(to: stateURL, options: [.atomic])
-        try? fileManager.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: stateURL.path
-        )
+        do {
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: stateURL.path
+            )
+        } catch {
+            // Non-fatal: the write succeeded, the file is just more readable
+            // than ideal. Log it instead of swallowing so a multi-user box
+            // with surprising permissions leaves a trail.
+            FileHandle.standardError.write(Data(
+                "[mq-dir persist] could not tighten state.json permissions to 0600 (\(error))\n".utf8
+            ))
+        }
     }
 
     /// On-disk location of the state file (exposed for diagnostics/tests).

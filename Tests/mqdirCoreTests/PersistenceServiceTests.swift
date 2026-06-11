@@ -393,6 +393,226 @@ final class PersistenceServiceTests: XCTestCase {
                        "actions must resolve via default binding when no override is persisted")
     }
 
+    // MARK: - Pane-count normalization (WindowState)
+
+    /// A `state.json` whose `panes` array isn't exactly four (truncated,
+    /// hand-edited, or written by a future layout) must normalize to a
+    /// 4-pane state at the decode boundary — never trip the memberwise
+    /// `precondition` and crash a load that the contract says can't throw.
+    func testWorkspaceStateClampsNonFourPaneCountInsteadOfCrashing() throws {
+        func json(paneCount: Int) -> String {
+            let panes = Array(repeating: "{ \"tabs\": [{}], \"activeTabIndex\": 0 }", count: paneCount)
+                .joined(separator: ",\n")
+            return """
+            {
+              "favorites": [],
+              "favoritesSeeded": true,
+              "activeProjectID": "00000000-0000-0000-0000-000000000001",
+              "projects": [
+                {
+                  "id": "00000000-0000-0000-0000-000000000001",
+                  "name": "Default",
+                  "state": {
+                    "layout": 4,
+                    "focusedPaneIndex": 0,
+                    "panes": [
+                      \(panes)
+                    ]
+                  }
+                }
+              ]
+            }
+            """
+        }
+
+        // Two-pane file pads up to four.
+        try Data(json(paneCount: 2).utf8).write(to: stateURL)
+        let twoPane = try XCTUnwrap(PersistenceService(stateURL: stateURL).loadState(),
+                                    "a 2-pane state.json must load, not crash")
+        XCTAssertEqual(twoPane.projects[0].state.panes.count, 4,
+                       "short pane array should pad to exactly four")
+
+        // Six-pane file truncates down to four.
+        try Data(json(paneCount: 6).utf8).write(to: stateURL)
+        let sixPane = try XCTUnwrap(PersistenceService(stateURL: stateURL).loadState(),
+                                    "a 6-pane state.json must load, not crash")
+        XCTAssertEqual(sixPane.projects[0].state.panes.count, 4,
+                       "long pane array should truncate to exactly four")
+    }
+
+    /// A `WindowState` JSON missing a field must decode with the default
+    /// (here: a missing `focusedPaneIndex` defaults to 0) so a future field
+    /// addition can't refuse to load every old file.
+    func testWindowStateMigratesMissingNewField() throws {
+        let pre = """
+        {
+          "layout": 2,
+          "panes": [
+            { "tabs": [{}], "activeTabIndex": 0 },
+            { "tabs": [{}], "activeTabIndex": 0 },
+            { "tabs": [{}], "activeTabIndex": 0 },
+            { "tabs": [{}], "activeTabIndex": 0 }
+          ]
+        }
+        """
+        let window = try JSONDecoder().decode(WindowState.self, from: Data(pre.utf8))
+        XCTAssertEqual(window.focusedPaneIndex, 0,
+                       "a missing field must default rather than fail the decode")
+        XCTAssertEqual(window.layout, .twoH)
+        XCTAssertEqual(window.panes.count, 4)
+    }
+
+    // MARK: - Resilient array decode (one bad element doesn't drop all)
+
+    /// A `projects` array carrying one malformed element alongside valid
+    /// ones must keep the valid projects rather than collapsing the whole
+    /// array (and silently re-seeding a single Default project).
+    func testOneCorruptProjectDoesNotDropAllProjects() throws {
+        let goodA = UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!
+        let goodB = UUID(uuidString: "00000000-0000-0000-0000-0000000000BB")!
+        // The middle project is malformed: `state` is a string, not an object.
+        let json = """
+        {
+          "favorites": [],
+          "favoritesSeeded": true,
+          "activeProjectID": "\(goodA.uuidString)",
+          "projects": [
+            {
+              "id": "\(goodA.uuidString)",
+              "name": "Alpha",
+              "state": {
+                "layout": 4, "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 }
+                ]
+              }
+            },
+            { "id": "\(UUID().uuidString)", "name": "Corrupt", "state": "not an object" },
+            {
+              "id": "\(goodB.uuidString)",
+              "name": "Beta",
+              "state": {
+                "layout": 4, "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 }
+                ]
+              }
+            }
+          ]
+        }
+        """
+        let workspace = try JSONDecoder().decode(WorkspaceState.self, from: Data(json.utf8))
+        XCTAssertEqual(workspace.projects.count, 2,
+                       "the two valid projects must survive while the corrupt one is skipped")
+        XCTAssertEqual(workspace.projects.map(\.name), ["Alpha", "Beta"])
+        XCTAssertEqual(workspace.activeProjectID, goodA,
+                       "a still-present activeProjectID must be honoured after the skip")
+    }
+
+    /// A `favorites` array with one malformed entry must keep the valid
+    /// favorites rather than dropping the entire list (the old `try?`
+    /// behaviour wiped everything on a single bad record).
+    func testOneCorruptFavoriteDoesNotDropAllFavorites() throws {
+        // The middle favorite is structurally broken: a bare string where an
+        // object is expected, so the element decode genuinely throws and must
+        // be skipped (field-level defaults can't rescue a non-object element).
+        let json = """
+        {
+          "favorites": [
+            { "id": "\(UUID().uuidString)", "label": "Keep One", "bookmark": null, "fallbackPath": "/a" },
+            "this is not a favorite object",
+            { "id": "\(UUID().uuidString)", "label": "Keep Two", "bookmark": null, "fallbackPath": "/b" }
+          ],
+          "favoritesSeeded": true,
+          "activeProjectID": "00000000-0000-0000-0000-000000000001",
+          "projects": [
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "name": "Default",
+              "state": {
+                "layout": 4, "focusedPaneIndex": 0,
+                "panes": [
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 },
+                  { "tabs": [{}], "activeTabIndex": 0 }
+                ]
+              }
+            }
+          ]
+        }
+        """
+        let workspace = try JSONDecoder().decode(WorkspaceState.self, from: Data(json.utf8))
+        XCTAssertEqual(workspace.favorites.map(\.label), ["Keep One", "Keep Two"],
+                       "valid favorites must survive a single corrupt entry, not get wiped wholesale")
+    }
+
+    // MARK: - Favorite migration
+
+    func testFavoriteRoundTrips() throws {
+        let favorite = Favorite(
+            id: UUID(),
+            label: "Documents",
+            bookmark: Data([0x01, 0x02]),
+            fallbackPath: "/Users/me/Documents"
+        )
+        var workspace = WorkspaceState.empty
+        workspace.favorites = [favorite]
+
+        let data = try JSONEncoder().encode(workspace)
+        let decoded = try JSONDecoder().decode(WorkspaceState.self, from: data)
+
+        XCTAssertEqual(decoded.favorites, [favorite],
+                       "a fully-populated favorite must survive a save/load cycle byte-for-byte")
+    }
+
+    /// A favorite written without a `label` must decode with a sensible
+    /// fallback (the fallbackPath's last component) instead of throwing —
+    /// which would otherwise drop the whole favorites list.
+    func testFavoriteMigratesMissingLabel() throws {
+        let pre = """
+        { "id": "\(UUID().uuidString)", "bookmark": null, "fallbackPath": "/Users/me/Pictures" }
+        """
+        let favorite = try JSONDecoder().decode(Favorite.self, from: Data(pre.utf8))
+        XCTAssertEqual(favorite.label, "Pictures",
+                       "a missing label must fall back to the fallbackPath's last component")
+        XCTAssertEqual(favorite.fallbackPath, "/Users/me/Pictures")
+    }
+
+    // MARK: - Corrupt-file backup
+
+    /// A corrupt `state.json` (exists + readable, but won't decode) must be
+    /// copied aside to `state.corrupt-*.json` before `loadState` returns nil,
+    /// so the next save can't clobber the only copy of recoverable state.
+    func testCorruptStateFileIsBackedUpBeforeReturningNil() throws {
+        let service = try PersistenceService(stateURL: stateURL)
+        try Data("{ this is not valid json".utf8).write(to: stateURL)
+
+        XCTAssertNil(service.loadState(), "a corrupt file must still degrade to nil")
+
+        let siblings = try FileManager.default.contentsOfDirectory(
+            at: tempDirectory,
+            includingPropertiesForKeys: nil
+        )
+        let backups = siblings.filter {
+            $0.lastPathComponent.hasPrefix("state.corrupt-")
+                && $0.pathExtension == "json"
+        }
+        XCTAssertEqual(backups.count, 1,
+                       "exactly one state.corrupt-*.json backup must be written before returning nil")
+
+        // The backup must preserve the original (unparseable) bytes.
+        let backupData = try Data(contentsOf: try XCTUnwrap(backups.first))
+        XCTAssertEqual(String(data: backupData, encoding: .utf8), "{ this is not valid json",
+                       "the side-car must hold the original corrupt bytes for recovery")
+    }
+
     // MARK: - Default-state shape
 
     func testEmptyWorkspaceHasOneDefaultProject() {
