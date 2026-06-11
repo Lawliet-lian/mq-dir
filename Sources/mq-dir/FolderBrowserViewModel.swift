@@ -315,19 +315,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// (`Cmd+A` on ~1000 entries) into O(M×N) and hung the app.
     private var entriesByID: [FileEntry.ID: FileEntry] = [:]
 
-    /// Lazily-built ordered row sequences + their id→index maps, keyed by
-    /// view mode. Arrow-key nav (`moveSelection`) and Shift-range
-    /// (`extendSelection`) previously rebuilt the full DFS flatten *and* ran
-    /// up to three linear `firstIndex` scans per keypress — O(n) work on every
-    /// ↑/↓ in a large tree. These cache the flattened order once and answer
-    /// "where is this id?" in O(1). `nil` means "needs rebuild"; the row
-    /// sources change only on the same events that rebuild `entriesByID`
-    /// (`entries` / `treeChildren` mutations) plus `expandedPaths` and the
-    /// filter toggle, so invalidation hooks all of those.
+    /// Lazily-built ordered row sequences, keyed by view mode. Arrow-key nav
+    /// (`moveSelection`) and Shift-range (`extendSelection`) previously
+    /// rebuilt the full DFS flatten on every ↑/↓ — O(n) work per keypress in
+    /// a large tree. These cache the flattened order once; the range math
+    /// (now in `mqdirCore.SelectionModel`) walks the cached row IDs. `nil`
+    /// means "needs rebuild"; the row sources change only on the same events
+    /// that rebuild `entriesByID` (`entries` / `treeChildren` mutations) plus
+    /// `expandedPaths` and the filter toggle, so invalidation hooks all of
+    /// those.
     private var cachedTreeRows: [FileEntry]?
-    private var cachedTreeRowIndex: [FileEntry.ID: Int]?
     private var cachedListRows: [FileEntry]?
-    private var cachedListRowIndex: [FileEntry.ID: Int]?
 
     /// Memoized status-bar / sidebar derived values. The global status bar
     /// re-reads `selectedSize` and the sidebar re-reads `tagSummaries` on
@@ -339,15 +337,13 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     private var cachedSelectedSize: Int64?
     private var cachedTagSummaries: [TagSummary]?
 
-    /// Drop the lazily-built row order/index caches. Called from the `didSet`
-    /// of every source the flatten/visible-list reads (`entries`,
+    /// Drop the lazily-built row order caches. Called from the `didSet` of
+    /// every source the flatten/visible-list reads (`entries`,
     /// `treeChildren`, `expandedPaths`, `searchResults`, and the filter
     /// on/off edge of `searchQuery`). The next nav keypress rebuilds on demand.
     private func invalidateRowCaches() {
         cachedTreeRows = nil
-        cachedTreeRowIndex = nil
         cachedListRows = nil
-        cachedListRowIndex = nil
     }
 
     /// Look up a `FileEntry` by id across both the flat root listing
@@ -418,36 +414,12 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
     /// Cached version of `visibleEntries` for the nav hot path. Identical
     /// contents to `visibleEntries` but the array is reused across keypresses
-    /// instead of re-allocating `searchResults`/`entries` (and, more
-    /// importantly, paired with `cachedListRowIndex` for O(1) id lookups).
+    /// instead of re-allocating `searchResults`/`entries`.
     private var cachedVisibleEntries: [FileEntry] {
         if let cached = cachedListRows { return cached }
         let rows = visibleEntries
         cachedListRows = rows
         return rows
-    }
-
-    /// O(1) position of `id` within the nav row order for the current view
-    /// mode, building (and memoizing) the id→index map on first use. Replaces
-    /// the per-keypress `firstIndex(where:)` scans in `moveSelection` /
-    /// `extendSelection`, which were O(n) each and ran up to three times per
-    /// arrow press.
-    private func rowIndex(of id: FileEntry.ID, inTreeMode treeMode: Bool) -> Int? {
-        if treeMode {
-            if let map = cachedTreeRowIndex { return map[id] }
-            let rows = visibleTreeEntries
-            var map = [FileEntry.ID: Int](minimumCapacity: rows.count)
-            for (idx, entry) in rows.enumerated() { map[entry.id] = idx }
-            cachedTreeRowIndex = map
-            return map[id]
-        } else {
-            if let map = cachedListRowIndex { return map[id] }
-            let rows = cachedVisibleEntries
-            var map = [FileEntry.ID: Int](minimumCapacity: rows.count)
-            for (idx, entry) in rows.enumerated() { map[entry.id] = idx }
-            cachedListRowIndex = map
-            return map[id]
-        }
     }
 
     var isFiltering: Bool {
@@ -899,20 +871,39 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
     // MARK: Selection (multi-select with cmd / shift)
 
+    /// The range math lives in `mqdirCore.SelectionModel` (pure, value-type,
+    /// unit-tested). The VM keeps the three `@Published` properties as the
+    /// source of truth views bind to — and other paths (`reload`, `navigate`)
+    /// write them directly — so each mutation method snapshots the *current*
+    /// published state into a model, runs the pure operation, and writes the
+    /// result back. Snapshotting per call (rather than holding a long-lived
+    /// mirror) means an external write to `selection`/`selectionAnchor`/
+    /// `selectionCursor` is always respected on the next selection gesture.
+    private var selectionModel: SelectionModel {
+        SelectionModel(selectedIDs: selection, anchor: selectionAnchor, cursor: selectionCursor)
+    }
+
+    /// Push a mutated `SelectionModel` back onto the `@Published` properties.
+    /// Each assignment is guarded so we only fire `objectWillChange` /
+    /// `didSet` for the fields that actually moved — `selection`'s `didSet`
+    /// invalidates the selected-size cache, so a redundant write there isn't
+    /// free.
+    private func applySelection(_ model: SelectionModel) {
+        if selection != model.selectedIDs { selection = model.selectedIDs }
+        if selectionAnchor != model.anchor { selectionAnchor = model.anchor }
+        if selectionCursor != model.cursor { selectionCursor = model.cursor }
+    }
+
     func replaceSelection(_ id: FileEntry.ID) {
-        selection = [id]
-        selectionAnchor = id
-        selectionCursor = id
+        var model = selectionModel
+        model.replace(with: id)
+        applySelection(model)
     }
 
     func toggleSelection(_ id: FileEntry.ID) {
-        if selection.contains(id) {
-            selection.remove(id)
-        } else {
-            selection.insert(id)
-        }
-        selectionAnchor = id
-        selectionCursor = id
+        var model = selectionModel
+        model.toggle(id)
+        applySelection(model)
     }
 
     func extendSelection(to id: FileEntry.ID) {
@@ -920,50 +911,37 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // not the flat `entries` array — using `entries` for the
         // range walk made Shift+click silently collapse to a single-
         // row replace whenever either endpoint sat in an expanded
-        // subtree. `selectionOrderedRows` picks the right axis for
+        // subtree. `selectionOrderedRowIDs` picks the right axis for
         // the current view mode.
-        let treeMode = viewMode == .tree
-        let ordered = selectionOrderedRows
-        guard let anchor = selectionAnchor,
-              let anchorIdx = rowIndex(of: anchor, inTreeMode: treeMode),
-              let targetIdx = rowIndex(of: id, inTreeMode: treeMode)
-        else {
-            replaceSelection(id)
-            return
-        }
-        let lower = min(anchorIdx, targetIdx)
-        let upper = max(anchorIdx, targetIdx)
-        selection = Set(ordered[lower...upper].map(\.id))
-        selectionCursor = id
+        var model = selectionModel
+        model.extend(to: id, in: selectionOrderedRowIDs)
+        applySelection(model)
     }
 
-    /// Row sequence Shift-range selection should walk over. Tree mode
-    /// uses the flattened DFS of every visible (expanded) row;
-    /// list mode uses the standard flat enumeration (or search
-    /// results when a filter is active). Reads the cached arrays so a
-    /// Shift-extend doesn't re-flatten the tree.
-    private var selectionOrderedRows: [FileEntry] {
-        viewMode == .tree ? visibleTreeEntries : cachedVisibleEntries
+    /// Row ID sequence Shift-range selection should walk over. Tree mode
+    /// uses the flattened DFS of every visible (expanded) row; list mode
+    /// uses the standard flat enumeration (or search results when a filter
+    /// is active). Reads the cached arrays so a Shift-extend doesn't
+    /// re-flatten the tree.
+    private var selectionOrderedRowIDs: [FileEntry.ID] {
+        (viewMode == .tree ? visibleTreeEntries : cachedVisibleEntries).map(\.id)
     }
 
     /// Wipe the selection. Used by the file list when the user clicks
     /// empty pane background — Finder's deselect-on-empty-click pattern.
     func clearSelection() {
-        guard !selection.isEmpty else { return }
-        selection.removeAll()
-        selectionAnchor = nil
-        selectionCursor = nil
+        var model = selectionModel
+        guard model.clear() else { return }
+        applySelection(model)
     }
 
     /// Select every row currently visible in the list (`visibleEntries`,
     /// which honours the active search filter). Anchors on the first
     /// entry so a follow-up shift-extend has a sensible starting point.
     func selectAll() {
-        let all = visibleEntries
-        guard !all.isEmpty else { return }
-        selection = Set(all.map(\.id))
-        selectionAnchor = all.first?.id
-        selectionCursor = all.last?.id
+        var model = selectionModel
+        model.selectAll(in: visibleEntries.map(\.id))
+        applySelection(model)
     }
 
     /// Write the currently selected file URLs to the system pasteboard
@@ -1229,48 +1207,13 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // the user sees). In list mode keep the existing flat-listing
         // walk so search-result navigation also works. Both read the cached
         // arrays so a held arrow key doesn't re-flatten/re-allocate per repeat.
-        let treeMode = viewMode == .tree
-        let visible = treeMode ? visibleTreeEntries : cachedVisibleEntries
-        guard !visible.isEmpty else { return }
-
-        // `currentIdx` is the row the keypress moves *from*. When
-        // extending we step the cursor (the trailing edge), keeping
-        // the anchor fixed; without extending we step from the
-        // anchor, which then becomes the new cursor via
-        // `replaceSelection`. The previous code stepped from the
-        // anchor in both branches, which capped Shift+↓ at two rows
-        // because each press recomputed `anchor + 1` instead of
-        // `cursor + 1`.
-        let pivotID: FileEntry.ID? = extending ? (selectionCursor ?? selectionAnchor) : selectionAnchor
-        let currentIdx: Int
-        if let pivot = pivotID,
-           let idx = rowIndex(of: pivot, inTreeMode: treeMode) {
-            currentIdx = idx
-        } else if let firstID = selection.first,
-                  let idx = rowIndex(of: firstID, inTreeMode: treeMode) {
-            currentIdx = idx
-        } else {
-            // No prior selection — arrow-down lands on the first row,
-            // arrow-up on the last (Finder convention).
-            guard let target = offset >= 0 ? visible.first : visible.last
-            else { return }
-            replaceSelection(target.id)
-            return
-        }
-
-        let newIdx = max(0, min(visible.count - 1, currentIdx + offset))
-        let target = visible[newIdx]
-
-        if extending,
-           let anchor = selectionAnchor,
-           let anchorIdx = rowIndex(of: anchor, inTreeMode: treeMode) {
-            let lower = min(anchorIdx, newIdx)
-            let upper = max(anchorIdx, newIdx)
-            selection = Set(visible[lower...upper].map(\.id))
-            selectionCursor = target.id
-        } else {
-            replaceSelection(target.id)
-        }
+        // The pivot/clamp/extend math (including the documented Shift-growth
+        // fix — stepping from the cursor, not the anchor) lives in
+        // `SelectionModel.move`.
+        let visible = (viewMode == .tree ? visibleTreeEntries : cachedVisibleEntries).map(\.id)
+        var model = selectionModel
+        model.move(by: offset, extending: extending, in: visible)
+        applySelection(model)
     }
 
     /// Every currently-selected entry, resolved across the flat root
