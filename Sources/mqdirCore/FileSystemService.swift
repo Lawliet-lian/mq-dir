@@ -195,6 +195,12 @@ struct FileSystemService {
             guard let base = buf.baseAddress else { return -1 }
             return getxattr(path, key, base, length, 0, 0)
         }
+        // Deliberate bail-to-empty on the two-call getxattr TOCTOU: the first
+        // call sizes the buffer, the second fills it. If another writer
+        // retagged the file between the two calls the second read returns a
+        // different length; rather than parse a torn buffer we treat the file
+        // as untagged for this pass. The next enumeration re-reads it cleanly.
+        // This is intentional, not a missing retry loop.
         guard read == length else { return [] }
         guard let raw = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
               let entries = raw as? [String]
@@ -237,6 +243,14 @@ struct FileSystemService {
     /// this key since 10.9 and macOS normalises the xattr layout +
     /// fires the Spotlight / Finder sync side effects either way.
     public static func setTags(_ tags: [(name: String, colour: Int)], on url: URL) throws {
+        // Round-trip asymmetry by design: `currentTags` (via parseUserTagsXattr)
+        // reads only the first two lines `"<name>\n<colour>"` and drops Apple's
+        // optional third "system tag" flag line. We rewrite in the same two-line
+        // form, so a `currentTags` → `setTags` cycle strips that flag. For the
+        // plain user tags this app creates (name + colour) the toggle round-trip
+        // is lossless; only the rarely-present internal flag is discarded, and
+        // macOS re-derives it as needed. Not a bug — don't "fix" by re-emitting
+        // a flag line we never parse back.
         let formatted = tags.map { tag -> String in
             guard (1...7).contains(tag.colour) else { return tag.name }
             return "\(tag.name)\n\(tag.colour)"

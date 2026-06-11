@@ -669,6 +669,62 @@ final class PersistenceServiceTests: XCTestCase {
         XCTAssertEqual(empty.activeProjectID, empty.projects[0].id)
     }
 
+    // MARK: - PaneState decode edges
+
+    /// `PaneState.init` clamps `activeTabIndex` into bounds via
+    /// `max(0, min(idx, count-1))`. A persisted index past the end (here 99
+    /// with 2 tabs) must clamp to the last valid tab on decode rather than
+    /// leave a dangling index that would crash a `tabs[activeTabIndex]` read.
+    func testPaneStateClampsOutOfRangeActiveTabIndex() throws {
+        let json = #"{ "tabs": [{}, {}], "activeTabIndex": 99 }"#
+        let pane = try JSONDecoder().decode(PaneState.self, from: Data(json.utf8))
+        XCTAssertEqual(pane.tabs.count, 2)
+        XCTAssertEqual(pane.activeTabIndex, 1,
+                       "an out-of-range activeTabIndex must clamp to the last valid tab (count - 1)")
+    }
+
+    /// Pre-tabs `state.json` stored each pane as a flat `TabState` object
+    /// with no `tabs` key. The `PaneState` decoder must detect that shape and
+    /// promote it to a single-tab pane. Driving the `PaneState` decoder
+    /// directly (not the whole workspace) isolates the legacy-promotion branch.
+    func testPaneStateDecoderPromotesLegacyFlatTabShape() throws {
+        let legacyFlatPane = """
+        {
+          "folderBookmark": null,
+          "sortKey": "size",
+          "sortAscending": false,
+          "includeHidden": true,
+          "columnWidths": { "kind": 120, "modified": 160, "size": 90 },
+          "selectedURLPaths": ["/legacy/flat.txt"],
+          "viewMode": "list",
+          "expandedPaths": []
+        }
+        """
+        let pane = try JSONDecoder().decode(PaneState.self, from: Data(legacyFlatPane.utf8))
+        XCTAssertEqual(pane.tabs.count, 1, "a flat (no-tabs-key) pane must promote to a single-tab pane")
+        XCTAssertEqual(pane.activeTabIndex, 0)
+        XCTAssertEqual(pane.tabs[0].selectedURLPaths, ["/legacy/flat.txt"],
+                       "the legacy tab's content must carry into the promoted single tab")
+        XCTAssertEqual(pane.tabs[0].sortKey, .size)
+        XCTAssertTrue(pane.tabs[0].includeHidden)
+    }
+
+    // MARK: - File permissions
+
+    /// `saveState` tightens `state.json` to owner-only `0o600` after writing,
+    /// because the JSON carries security-scoped bookmarks (effectively
+    /// folder-access tokens) that shouldn't be world-readable on a
+    /// multi-user box. Read the posix permission bits back to confirm.
+    func testSaveStateWritesOwnerOnlyPermissions() throws {
+        let service = try PersistenceService(stateURL: stateURL)
+        try service.saveState(sampleWorkspaceState())
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: stateURL.path)
+        let perms = try XCTUnwrap(attrs[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(perms.int16Value, 0o600,
+                       "state.json must be locked to owner read/write (0600) after save")
+    }
+
     // MARK: - Helpers
 
     private func sampleWorkspaceState() -> WorkspaceState {

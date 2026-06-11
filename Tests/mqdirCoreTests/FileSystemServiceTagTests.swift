@@ -138,6 +138,37 @@ final class FileSystemServiceTagTests: XCTestCase {
         XCTAssertTrue(entry.tagNames.isEmpty)
     }
 
+    /// Round-trip asymmetry pin (review finding): a file tagged in Apple's
+    /// three-line `"<name>\n<colour>\n<flag>"` form, read back via
+    /// `currentTags`, and rewritten via `setTags`, keeps its name + colour
+    /// but DROPS the trailing flag line — `currentTags`/`parseUserTagsXattr`
+    /// only ever read lines 0 and 1, so the rewrite can't re-emit a flag it
+    /// never parsed. This is deliberate, not a bug: for the plain user tags
+    /// mq-dir creates (name + colour) the toggle round-trip is lossless.
+    func testCurrentTagsToSetTagsRoundTripPreservesNameAndColour() throws {
+        let file = try writeTaggedFile("rewrite.txt", rawEntries: ["Red\n6\n1", "업무\n2\n0"])
+
+        // currentTags reads only name + colour (line 2 flag is invisible to it).
+        let read = FileSystemService.currentTags(for: file)
+        XCTAssertEqual(read.map(\.name), ["Red", "업무"])
+        XCTAssertEqual(read.map(\.colour), [6, 2])
+
+        // Rewrite the exact set we read back. Name + colour must survive;
+        // the flag line is intentionally gone on the new write.
+        try FileSystemService.setTags(read, on: file)
+
+        let afterRewrite = FileSystemService.currentTags(for: file)
+        XCTAssertEqual(afterRewrite.map(\.name), ["Red", "업무"],
+                       "tag names (incl. Korean) must survive a currentTags->setTags round-trip")
+        XCTAssertEqual(afterRewrite.map(\.colour), [6, 2],
+                       "tag colours must survive a currentTags->setTags round-trip")
+
+        // And the enumeration projection agrees with the rewritten xattr.
+        let entries = try FileSystemService().enumerateDirectory(at: tempDirectory)
+        let entry = try XCTUnwrap(entries.first { $0.name == "rewrite.txt" })
+        XCTAssertEqual(entry.tagColors, [6, 2])
+    }
+
     // MARK: helpers
 
     /// Stamp `rawEntries` into a fresh file's `_kMDItemUserTags` xattr

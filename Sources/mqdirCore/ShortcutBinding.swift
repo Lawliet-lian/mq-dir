@@ -125,11 +125,16 @@ public enum ShortcutKey: Codable, Sendable, Hashable {
         switch kind {
         case "character":
             let str = try c.decode(String.self, forKey: .character)
-            guard let first = str.first else {
+            // A character key is exactly one Character. Reject empty *and*
+            // multi-character strings rather than silently truncating to the
+            // first scalar — a hand-edited or corrupt `"character": "ab"`
+            // would otherwise bind to "a" with no diagnostic, mirroring the
+            // out-of-range rejection the functionKey case already enforces.
+            guard str.count == 1, let first = str.first else {
                 throw DecodingError.dataCorruptedError(
                     forKey: .character,
                     in: c,
-                    debugDescription: "ShortcutKey.character decoded with empty string"
+                    debugDescription: "ShortcutKey.character expects exactly one character, got \"\(str)\""
                 )
             }
             self = .character(first)
