@@ -781,9 +781,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// behaviour from the empty-area context menu and the ⌘⇧N shortcut.
     func createNewFolder() {
         guard let folder = folderURL else { return }
-        let target = uniqueDestination(for: folder.appendingPathComponent("untitled folder"))
         do {
-            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+            try FileOperationService.createDirectory(
+                at: folder.appendingPathComponent("untitled folder")
+            )
             reload()
         } catch {
             FileHandle.standardError.write(
@@ -1015,31 +1016,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // the resolved `isCut` flag plus the URLs.
         let isCut = pb.types?.contains(Self.cutMarkerType) == true
         Task {
-            await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                for source in items {
-                    var dest = folder.appendingPathComponent(source.lastPathComponent)
-                    // Same standardized self-drop + descendant guards drop
-                    // uses, so paste-into-same-folder and paste-into-descendant
-                    // behave identically to a drag-drop.
-                    if source.standardizedFileURL == dest.standardizedFileURL { continue }
-                    if fm.fileExists(atPath: dest.path) {
-                        dest = Self.uniqueDestination(for: source, in: folder)
-                    }
-                    if dest.path.hasPrefix(source.path + "/") { continue }
-                    do {
-                        if isCut {
-                            try fm.moveItem(at: source, to: dest)
-                        } else {
-                            try fm.copyItem(at: source, to: dest)
-                        }
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
-                }
+            let failures = await Task.detached(priority: .userInitiated) {
+                // Same standardized self-drop + descendant guards drop
+                // uses, so paste-into-same-folder and paste-into-descendant
+                // behave identically to a drag-drop.
+                FileOperationService.transfer(items, into: folder, move: isCut)
             }.value
+            for (source, error) in failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
             // After a cut+paste the source URLs are gone, so wipe the
             // pasteboard to avoid a follow-up paste silently failing on
             // missing files. Plain-copy paste leaves the clipboard alone
@@ -1090,16 +1077,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
         Task {
             let failures: [(URL, String)] = await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                var failed: [(URL, String)] = []
-                for url in urls {
-                    do {
-                        try fm.removeItem(at: url)
-                    } catch {
-                        failed.append((url, error.localizedDescription))
-                    }
-                }
-                return failed
+                FileOperationService.permanentlyDelete(urls)
+                    .map { ($0.0, $0.1.localizedDescription) }
             }.value
 
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
@@ -1137,11 +1116,13 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Cross-folder selections are rejected because zip's relative
     /// pathing assumes a single working directory.
     func compress(_ entries: [FileEntry]) {
-        let urls = entries.map(\.url)
-        guard !urls.isEmpty else { return }
-        guard let parent = urls.first?.deletingLastPathComponent() else { return }
-        let sameParent = urls.allSatisfy { $0.deletingLastPathComponent() == parent }
-        guard sameParent else {
+        guard !entries.isEmpty else { return }
+        let plan: (parent: URL, destination: URL, sourceNames: [String])?
+        do {
+            plan = try FileOperationService.planCompression(
+                urls: entries.map { (url: $0.url, isDirectory: $0.isDirectory) }
+            )
+        } catch FileOperationService.CompressError.crossFolder {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Can't compress items from different folders"
@@ -1149,24 +1130,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return
+        } catch {
+            return
         }
-
-        let stem: String
-        if entries.count == 1 {
-            let only = entries[0]
-            stem = only.isDirectory
-                ? only.url.lastPathComponent
-                : only.url.deletingPathExtension().lastPathComponent
-        } else {
-            stem = "Archive"
-        }
-        let destination = Self.uniqueZipDestination(in: parent, stem: stem)
-        let sourceNames = urls.map(\.lastPathComponent)
+        guard let (parent, destination, sourceNames) = plan else { return }
 
         Task {
             let failure: String? = await Task.detached(priority: .utility) {
                 do {
-                    try Self.runCompression(
+                    try FileOperationService.runCompression(
                         parent: parent,
                         sources: sourceNames,
                         destination: destination
@@ -1190,63 +1162,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         }
     }
 
-    /// Pick a non-existing `<stem>.zip` under `parent`, falling back
-    /// to "<stem> 2.zip", "<stem> 3.zip", … on collision (Finder
-    /// convention). Same shape as `uniqueExtractionDirectory`.
-    nonisolated static func uniqueZipDestination(in parent: URL, stem: String) -> URL {
-        let fm = FileManager.default
-        let primary = parent.appendingPathComponent("\(stem).zip")
-        if !fm.fileExists(atPath: primary.path) { return primary }
-        for n in 2...999 {
-            let candidate = parent.appendingPathComponent("\(stem) \(n).zip")
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        let stamp = Int(Date().timeIntervalSince1970)
-        return parent.appendingPathComponent("\(stem) \(stamp).zip")
-    }
-
-    /// Drive /usr/bin/zip with `currentDirectoryURL = parent` so the
-    /// archive stores relative paths (`foo/bar` rather than absolute
-    /// `/Users/…/foo/bar`). `-r` recurses into directories, `-y`
-    /// preserves symlinks rather than chasing them, `-q` silences
-    /// per-file progress so stderr only carries real errors.
-    nonisolated static func runCompression(
-        parent: URL,
-        sources: [String],
-        destination: URL
-    ) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", "-y", "-q", destination.path] + sources
-        process.currentDirectoryURL = parent
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = Pipe()
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
-            let trimmed = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
-            throw NSError(
-                domain: "mq-dir.compress",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: summary]
-            )
-        }
-    }
-
     /// True when every entry in `entries` is an archive we know how
     /// to extract (case-insensitive .zip / .tar / .tgz / .tar.gz).
     /// Used by the context menu to decide whether the "Extract"
     /// item is enabled. An empty list returns false so the entry is
-    /// hidden when no rows are selected.
+    /// hidden when no rows are selected. Thin wrapper over
+    /// `FileOperationService.canExtract`.
     nonisolated static func canExtract(_ entries: [FileEntry]) -> Bool {
-        guard !entries.isEmpty else { return false }
-        return entries.allSatisfy { entry in
-            archiveKind(for: entry.url) != nil && !entry.isDirectory
-        }
+        FileOperationService.canExtract(
+            entries.map { (url: $0.url, isDirectory: $0.isDirectory) }
+        )
     }
 
     /// Extract every supported archive in `entries` into a sibling
@@ -1257,9 +1182,9 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// open pane on the same folder picks up the new directory, and
     /// surfaces a single NSAlert with the archives that failed.
     func extractArchives(_ entries: [FileEntry]) {
-        let archives: [(URL, ArchiveKind)] = entries.compactMap { entry in
+        let archives: [(URL, FileOperationService.ArchiveKind)] = entries.compactMap { entry in
             guard !entry.isDirectory,
-                  let kind = Self.archiveKind(for: entry.url) else { return nil }
+                  let kind = FileOperationService.archiveKind(for: entry.url) else { return nil }
             return (entry.url, kind)
         }
         guard !archives.isEmpty else { return }
@@ -1268,11 +1193,8 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             let failures: [(URL, String)] = await Task.detached(priority: .utility) {
                 var failed: [(URL, String)] = []
                 for (url, kind) in archives {
-                    let parent = url.deletingLastPathComponent()
-                    let stem = Self.archiveStem(for: url, kind: kind)
-                    let dest = Self.uniqueExtractionDirectory(in: parent, stem: stem)
                     do {
-                        try Self.runExtraction(kind: kind, archive: url, destination: dest)
+                        try FileOperationService.extract(archive: url, kind: kind)
                     } catch {
                         failed.append((url, error.localizedDescription))
                     }
@@ -1296,118 +1218,6 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                 alert.runModal()
             }
         }
-    }
-
-    /// Archive kinds we recognize; drives both the extension test in
-    /// `archiveKind(for:)` and the tool/argument selection in
-    /// `runExtraction`.
-    enum ArchiveKind {
-        case zip
-        case tar
-        case tarGz
-    }
-
-    /// Map a URL's extension to a known archive kind, case-insensitive.
-    /// Treats `.tgz` as gzip-compressed tar; `.tar.gz` is detected by
-    /// looking at the full filename, not just the last extension.
-    nonisolated static func archiveKind(for url: URL) -> ArchiveKind? {
-        let name = url.lastPathComponent.lowercased()
-        if name.hasSuffix(".zip") { return .zip }
-        if name.hasSuffix(".tar.gz") || name.hasSuffix(".tgz") { return .tarGz }
-        if name.hasSuffix(".tar") { return .tar }
-        return nil
-    }
-
-    /// Strip the archive extension from a filename so we can name the
-    /// extraction folder after the contents. ".tar.gz" gets both
-    /// extensions trimmed; everything else loses the last one.
-    nonisolated static func archiveStem(for url: URL, kind: ArchiveKind) -> String {
-        let base = url.lastPathComponent
-        switch kind {
-        case .tarGz where base.lowercased().hasSuffix(".tar.gz"):
-            return String(base.dropLast(".tar.gz".count))
-        case .zip, .tar, .tarGz:
-            return url.deletingPathExtension().lastPathComponent
-        }
-    }
-
-    /// Pick a non-existing folder under `parent` named `stem`, falling
-    /// back to "stem 2", "stem 3", … on collision (Finder convention).
-    /// Caps at 999 attempts and finally appends a timestamp so the
-    /// extraction never silently overwrites.
-    nonisolated static func uniqueExtractionDirectory(in parent: URL, stem: String) -> URL {
-        let fm = FileManager.default
-        let primary = parent.appendingPathComponent(stem)
-        if !fm.fileExists(atPath: primary.path) { return primary }
-        for n in 2...999 {
-            let candidate = parent.appendingPathComponent("\(stem) \(n)")
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        let stamp = Int(Date().timeIntervalSince1970)
-        return parent.appendingPathComponent("\(stem) \(stamp)")
-    }
-
-    /// Drive ditto/tar against the archive. ditto's -x -k handles zip
-    /// (preserves resource forks); tar's -xf handles plain tar and
-    /// transparently picks up gzip via -xzf for .tar.gz/.tgz.
-    /// `destination` must NOT exist yet — both tools create it with
-    /// the right mode bits when given a fresh path.
-    nonisolated static func runExtraction(
-        kind: ArchiveKind,
-        archive: URL,
-        destination: URL
-    ) throws {
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        let process = Process()
-        let stderr = Pipe()
-        process.standardError = stderr
-        process.standardOutput = Pipe()
-        switch kind {
-        case .zip:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-            process.arguments = ["-x", "-k", archive.path, destination.path]
-        case .tar:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            process.arguments = ["-xf", archive.path, "-C", destination.path]
-        case .tarGz:
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-            process.arguments = ["-xzf", archive.path, "-C", destination.path]
-        }
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            // readToEnd() is throws -> Data?, so try? wraps it as
-            // Data??; flatten with ?? nil before falling back to
-            // an empty Data() so the next String(data:) sees a
-            // single-level optional.
-            let stderrData = (try? stderr.fileHandleForReading.readToEnd()) ?? nil ?? Data()
-            let trimmed = String(data: stderrData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let summary = trimmed.isEmpty ? "exit \(process.terminationStatus)" : trimmed
-            throw NSError(
-                domain: "mq-dir.extract",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: summary]
-            )
-        }
-    }
-
-    /// If `target` already exists, append " 2", " 3", … before the
-    /// extension until a free slot opens. Mirrors Finder's "untitled
-    /// folder 2" behaviour for paste-into-same-dir.
-    private func uniqueDestination(for target: URL) -> URL {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: target.path) else { return target }
-        let parent = target.deletingLastPathComponent()
-        let ext = target.pathExtension
-        let stem = target.deletingPathExtension().lastPathComponent
-        for i in 2...999 {
-            let candidate = parent.appendingPathComponent(
-                ext.isEmpty ? "\(stem) \(i)" : "\(stem) \(i).\(ext)"
-            )
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return target
     }
 
     /// Move the selection up or down by `offset` rows in `visibleEntries`,
@@ -1509,20 +1319,14 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func duplicate(_ entries: [FileEntry]) {
         let urls = entries.map(\.url)
         Task {
-            await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                for source in urls {
-                    let parent = source.deletingLastPathComponent()
-                    let dest = Self.uniqueDestination(for: source, in: parent)
-                    do {
-                        try fm.copyItem(at: source, to: dest)
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir duplicate] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
-                }
+            let failures = await Task.detached(priority: .userInitiated) {
+                FileOperationService.duplicate(urls)
             }.value
+            for (source, error) in failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir duplicate] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
     }
@@ -1559,15 +1363,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != entry.name else { return }
 
-        let dest = entry.url.deletingLastPathComponent().appendingPathComponent(trimmed)
-        let fm = FileManager.default
-        guard !fm.fileExists(atPath: dest.path) else {
-            errorMessage = "An item named '\(trimmed)' already exists in this folder."
-            return
-        }
         do {
-            try fm.moveItem(at: entry.url, to: dest)
+            try FileOperationService.rename(entry.url, to: trimmed)
             reload()
+        } catch FileOperationService.RenameError.destinationExists(let name) {
+            errorMessage = "An item named '\(name)' already exists in this folder."
         } catch {
             errorMessage = "Couldn't rename: \(error.localizedDescription)"
         }
@@ -1632,18 +1432,14 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func moveToTrash(_ entries: [FileEntry]) {
         let urls = entries.map(\.url)
         Task {
-            await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                for url in urls {
-                    do {
-                        try fm.trashItem(at: url, resultingItemURL: nil)
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir trash] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
-                }
+            let failures = await Task.detached(priority: .userInitiated) {
+                FileOperationService.moveToTrash(urls)
             }.value
+            for (url, error) in failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir trash] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
     }
@@ -1654,53 +1450,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// (Finder convention). After completion, broadcasts a system-wide reload.
     func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool) {
         Task {
-            await Task.detached(priority: .userInitiated) {
-                let fm = FileManager.default
-                for source in urls {
-                    var dest = destinationFolder.appendingPathComponent(source.lastPathComponent)
-                    // Standardize both sides so a trailing-slash or
-                    // percent-encoding mismatch can't slip a no-op self-drop
-                    // past the equality check.
-                    if source.standardizedFileURL == dest.standardizedFileURL { continue }
-                    // Auto-rename on conflict instead of skipping.
-                    if fm.fileExists(atPath: dest.path) {
-                        dest = Self.uniqueDestination(for: source, in: destinationFolder)
-                    }
-                    // Reject dropping a folder into itself or any descendant.
-                    // Checked against the *post-rename* dest so a conflict
-                    // rename can't sneak a descendant target past the guard.
-                    if dest.path.hasPrefix(source.path + "/") { continue }
-                    do {
-                        if copy {
-                            try fm.copyItem(at: source, to: dest)
-                        } else {
-                            try fm.moveItem(at: source, to: dest)
-                        }
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir drop] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
-                }
+            let failures = await Task.detached(priority: .userInitiated) {
+                FileOperationService.transfer(urls, into: destinationFolder, move: !copy)
             }.value
+            for (source, error) in failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir drop] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                )
+            }
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
-    }
-
-    /// Generates "name 2.ext", "name 3.ext", ... for the first non-existent path.
-    /// Caps at 500 attempts; falls back to a timestamped name to avoid hanging.
-    nonisolated static func uniqueDestination(for source: URL, in folder: URL) -> URL {
-        let fm = FileManager.default
-        let stem = source.deletingPathExtension().lastPathComponent
-        let ext = source.pathExtension
-        for n in 2...500 {
-            let suffix = ext.isEmpty ? "\(stem) \(n)" : "\(stem) \(n).\(ext)"
-            let candidate = folder.appendingPathComponent(suffix)
-            if !fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        let stamp = Int(Date().timeIntervalSince1970)
-        let fallback = ext.isEmpty ? "\(stem)-\(stamp)" : "\(stem)-\(stamp).\(ext)"
-        return folder.appendingPathComponent(fallback)
     }
 }
 
