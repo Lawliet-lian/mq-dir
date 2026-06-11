@@ -29,6 +29,28 @@ struct MainWindowView: View {
     /// reload pane state in place.
     private let projectID: UUID
 
+    /// Last persistable state pushed into the workspace, cached so
+    /// `scheduleSave()` can early-return when an `objectWillChange` carried
+    /// no persistable delta. Every pane VM forwards *every* nested tab's
+    /// `@Published` change (selection moves, `isLoading` flips, search
+    /// keystrokes, rename-draft edits) — most of which never touch the
+    /// serialized snapshot. Without this gate a held arrow key rebuilds and
+    /// re-pushes a full 4-pane `WindowState` on every key-repeat. `WindowState`
+    /// and `Favorite` are `Equatable`, so the compare is a cheap value-type
+    /// walk. `nil` until the first save schedules so the very first mutation
+    /// always lands.
+    @State private var lastScheduledState: WindowState?
+    @State private var lastScheduledFavorites: [Favorite]?
+
+    /// Cached free-space string for the focused pane's volume. `freeSpaceString()`
+    /// did a synchronous `volumeAvailableCapacityForImportantUsage` stat on
+    /// every status-bar re-render (so a stat on each keystroke, selection
+    /// move, hover); that's per-render disk I/O on the main actor. We recompute
+    /// only when the focused folder changes (a new folder can sit on a
+    /// different volume) and on filesystem-change broadcasts (so a big copy
+    /// finishing updates the number). `nil` until the first computation lands.
+    @State private var freeSpaceCache: String?
+
     init(
         workspace: WorkspaceManager,
         updateManager: UpdateManager,
@@ -112,7 +134,8 @@ struct MainWindowView: View {
                 repoCallout: repoCallout,
                 cmux: cmux,
                 selectedURL: $sidebarSelection,
-                tagsSummary: focusedPane.entries.uniqueTagSummaries(),
+                // VM-memoized — see `FolderBrowserViewModel.tagSummaries`.
+                tagsSummary: focusedPane.tagSummaries,
                 onTagSelected: { tag in
                     // Phase 3B 1차: substring search via the existing
                     // searchQuery path. A dedicated tag-aware match mode
@@ -161,13 +184,30 @@ struct MainWindowView: View {
     /// `WorkspaceManager` owns the debounce window and the disk write —
     /// this view just keeps the in-memory model current after every
     /// observable mutation.
+    ///
+    /// Gated on a value-equality compare against the last-pushed snapshot:
+    /// the pane VMs fan out *every* transient `@Published` change (selection
+    /// moves do persist via `selectedURLPaths`, but `isLoading` / `isSearching`
+    /// / `searchResults` / `renameDraft` churn does not), so without this most
+    /// emissions would rebuild and re-push an identical `WindowState`. The
+    /// snapshot itself is still built per emission — that's unavoidable while
+    /// the change signal is a bare `objectWillChange` — but the `updateActive`
+    /// / `setFavorites` round-trip (which each schedule a 500 ms debounced disk
+    /// write) only fires for the half that actually changed.
     @MainActor
     private func scheduleSave() {
         let state = snapshot()
-        workspace.updateActive { $0.state = state }
+        if state != lastScheduledState {
+            workspace.updateActive { $0.state = state }
+            lastScheduledState = state
+        }
         // Favorites edit through the sidebar VM also feed in here so the
         // workspace's cross-project list stays in sync.
-        workspace.setFavorites(sidebar.favorites)
+        let favorites = sidebar.favorites
+        if favorites != lastScheduledFavorites {
+            workspace.setFavorites(favorites)
+            lastScheduledFavorites = favorites
+        }
     }
 
     /// On app termination — flush the latest snapshot synchronously so
@@ -476,9 +516,9 @@ struct MainWindowView: View {
         let totalCount = focusedPane.entries.count
         let visibleCount = focusedPane.visibleEntries.count
         let selectedCount = focusedPane.selection.count
-        let selectedSize = focusedPane.selectedEntries
-            .compactMap { $0.size }
-            .reduce(0, +)
+        // VM-memoized — see `FolderBrowserViewModel.selectedSize`. Avoids the
+        // O(selection) compactMap/reduce on every status-bar re-render.
+        let selectedSize = focusedPane.selectedSize
 
         return HStack(spacing: 8) {
             if selectedCount > 0 {
@@ -507,7 +547,7 @@ struct MainWindowView: View {
                 Text("·").foregroundStyle(Theme.Color.labelTertiary)
             }
 
-            if let free = freeSpaceString() {
+            if let free = freeSpaceCache {
                 Text(free).foregroundStyle(Theme.Color.labelSecondary)
             }
         }
@@ -515,14 +555,30 @@ struct MainWindowView: View {
         .padding(.horizontal, 12)
         .frame(height: Theme.Metrics.statusBarHeight)
         .background(Theme.Color.statusBarBg)
+        // Refresh the cached free-space number only when the focused folder
+        // moves (possibly onto another volume) or the filesystem changes —
+        // never per render. `freeSpaceString()` used to stat the volume on
+        // every body pass, which is synchronous disk I/O on the main actor.
+        .onAppear { refreshFreeSpace() }
+        .onChange(of: focusedPane.folderURL) { _, _ in refreshFreeSpace() }
+        .onReceive(NotificationCenter.default.publisher(for: .mqdirFileSystemChanged)) { _ in
+            refreshFreeSpace()
+        }
     }
 
-    private func freeSpaceString() -> String? {
-        guard let url = focusedPane.folderURL ?? FileManager.default.homeDirectoryForCurrentUser as URL?,
-              let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+    /// Recompute the cached free-space string for the focused volume. Cheap
+    /// enough to run on the triggering events (folder change, fs change); the
+    /// win is *not* running it on every status-bar re-render.
+    @MainActor
+    private func refreshFreeSpace() {
+        let url = focusedPane.folderURL ?? FileManager.default.homeDirectoryForCurrentUser
+        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
               let bytes = values.volumeAvailableCapacityForImportantUsage
-        else { return nil }
-        return "\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) free"
+        else {
+            freeSpaceCache = nil
+            return
+        }
+        freeSpaceCache = "\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) free"
     }
 
     // MARK: Helpers

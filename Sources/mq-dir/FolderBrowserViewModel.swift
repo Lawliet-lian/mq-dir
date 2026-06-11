@@ -16,9 +16,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
     @Published private(set) var folderURL: URL?
     @Published private(set) var entries: [FileEntry] = [] {
-        didSet { rebuildEntriesIndex() }
+        didSet {
+            rebuildEntriesIndex()
+            invalidateRowCaches()
+            // Status-bar / sidebar derived values read off `entries`.
+            cachedTagSummaries = nil
+            cachedSelectedSize = nil
+        }
     }
-    @Published var selection: Set<FileEntry.ID> = []
+    @Published var selection: Set<FileEntry.ID> = [] {
+        didSet { cachedSelectedSize = nil }
+    }
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published var includeHidden = false {
@@ -31,12 +39,21 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// schedules a debounced background walk that populates `searchResults`.
     /// Not persisted — transient view state.
     @Published var searchQuery: String = "" {
-        didSet { scheduleSearch() }
+        didSet {
+            // `isFiltering` flips with the first/last character, swapping
+            // which axis `visibleEntries` returns — invalidate the list-mode
+            // row cache so a keypress right after typing doesn't scan a stale
+            // index. The recursive walk itself is scheduled below.
+            if oldValue.isEmpty != searchQuery.isEmpty { invalidateRowCaches() }
+            scheduleSearch()
+        }
     }
     /// Recursive matches for the active `searchQuery`. Empty when not
     /// filtering, or while the first results of a fresh query are still
     /// being gathered.
-    @Published private(set) var searchResults: [FileEntry] = []
+    @Published private(set) var searchResults: [FileEntry] = [] {
+        didSet { invalidateRowCaches() }
+    }
     /// True between a non-empty `searchQuery` arriving and the resulting
     /// recursive walk completing. Drives the spinner / "Searching…" hint.
     @Published private(set) var isSearching: Bool = false
@@ -64,14 +81,22 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Set of expanded directory paths in tree mode. Stored as paths so
     /// it survives serialization without bookmark plumbing — losing access
     /// to a path just collapses that node, never breaks the view.
-    @Published var expandedPaths: Set<String> = []
+    @Published var expandedPaths: Set<String> = [] {
+        didSet { invalidateRowCaches() }
+    }
     /// Cached children per directory path for tree mode. Populated on
     /// expand, evicted on `reload()`. Doesn't bloat memory in normal use
     /// because the user only expands what they actively browse. The
     /// setter is open so `TreeFileListView` can mirror the root entries
     /// into the cache without a dedicated method on the VM.
     @Published var treeChildren: [String: [FileEntry]] = [:] {
-        didSet { rebuildEntriesIndex() }
+        didSet {
+            rebuildEntriesIndex()
+            invalidateRowCaches()
+            // Tree-mode selections live in `treeChildren`, so their sizes do
+            // too — a subtree refresh can change the selected-size total.
+            cachedSelectedSize = nil
+        }
     }
     @Published private(set) var backStack: [NavigationFrame] = []
     @Published private(set) var forwardStack: [NavigationFrame] = []
@@ -159,10 +184,22 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             self.folderURL = resolved
             reload()
             updateDirectoryWatcher()
-            // Pre-warm any expanded subtrees so the tree view doesn't
-            // spend its first render flickering placeholders.
-            for path in expandedPaths {
-                loadChildren(for: URL(fileURLWithPath: path))
+            // Pre-warm any expanded subtrees so the tree view settles onto
+            // its real rows quickly — but OFF the synchronous init path. Each
+            // `loadChildren` is a blocking directory enumeration; running N of
+            // them inline here stalled the very first window paint by however
+            // long the deepest restored tree took to walk. Deferring to a
+            // post-render `Task` lets the window come up immediately; the tree
+            // renders the root via `TreeFileListView`'s `entries` fallback and
+            // fills expanded subfolders in as this hydration lands (each
+            // `treeChildren` assignment re-renders the affected rows).
+            let pathsToWarm = expandedPaths
+            if !pathsToWarm.isEmpty {
+                Task { @MainActor [weak self] in
+                    for path in pathsToWarm {
+                        self?.loadChildren(for: URL(fileURLWithPath: path))
+                    }
+                }
             }
         }
     }
@@ -195,18 +232,45 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     // MARK: Tree mode
 
     /// Toggle expansion for a directory in tree mode. Lazy-loads children
-    /// on first expand; collapsing keeps the cached children so re-expand
-    /// is instant. Cache invalidates only on `reload()`.
+    /// on first expand. On collapse, evicts this path's cached children AND
+    /// every descendant path's children: a collapsed subtree is invisible, so
+    /// holding its (potentially deep) listing just bloats `treeChildren` and
+    /// makes every later `rebuildEntriesIndex` walk more rows than are on
+    /// screen. The "instant re-expand" we'd keep is marginal next to that
+    /// unbounded-growth cost — re-expanding simply re-enumerates one folder.
+    /// The root path is never a collapsible node here, so it's untouched.
     func toggleExpanded(_ url: URL) {
         let path = url.path
         if expandedPaths.contains(path) {
             expandedPaths.remove(path)
+            evictCachedSubtree(under: path)
         } else {
             expandedPaths.insert(path)
             if treeChildren[path] == nil {
                 loadChildren(for: url)
             }
         }
+    }
+
+    /// Drop `path`'s cached children plus every descendant path's children
+    /// from `treeChildren`. Descendants are matched by the standard
+    /// `"<path>/"` prefix test (the same shape the drop/self-drop guards use).
+    /// Skips the early-return-friendly no-op when nothing matches so an
+    /// unrelated collapse doesn't dirty the cache.
+    private func evictCachedSubtree(under path: String) {
+        let descendantPrefix = path + "/"
+        let doomed = treeChildren.keys.filter {
+            $0 == path || $0.hasPrefix(descendantPrefix)
+        }
+        guard !doomed.isEmpty else { return }
+        // Mutate a local copy and assign once so the `treeChildren` `didSet`
+        // (rebuildEntriesIndex + cache invalidation) fires a single time, not
+        // once per removed key.
+        var pruned = treeChildren
+        for key in doomed {
+            pruned.removeValue(forKey: key)
+        }
+        treeChildren = pruned
     }
 
     func isExpanded(_ url: URL) -> Bool {
@@ -251,6 +315,41 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// (`Cmd+A` on ~1000 entries) into O(M×N) and hung the app.
     private var entriesByID: [FileEntry.ID: FileEntry] = [:]
 
+    /// Lazily-built ordered row sequences + their id→index maps, keyed by
+    /// view mode. Arrow-key nav (`moveSelection`) and Shift-range
+    /// (`extendSelection`) previously rebuilt the full DFS flatten *and* ran
+    /// up to three linear `firstIndex` scans per keypress — O(n) work on every
+    /// ↑/↓ in a large tree. These cache the flattened order once and answer
+    /// "where is this id?" in O(1). `nil` means "needs rebuild"; the row
+    /// sources change only on the same events that rebuild `entriesByID`
+    /// (`entries` / `treeChildren` mutations) plus `expandedPaths` and the
+    /// filter toggle, so invalidation hooks all of those.
+    private var cachedTreeRows: [FileEntry]?
+    private var cachedTreeRowIndex: [FileEntry.ID: Int]?
+    private var cachedListRows: [FileEntry]?
+    private var cachedListRowIndex: [FileEntry.ID: Int]?
+
+    /// Memoized status-bar / sidebar derived values. The global status bar
+    /// re-reads `selectedSize` and the sidebar re-reads `tagSummaries` on
+    /// every `MainWindowView` body re-render — without these, each render
+    /// re-ran an O(selection) size reduce and an O(entries) tag walk. `nil`
+    /// means "needs recompute"; invalidated from the `didSet` of the sources
+    /// each reads (`selection`/`entries`/`treeChildren` for the size,
+    /// `entries` for the tag summaries).
+    private var cachedSelectedSize: Int64?
+    private var cachedTagSummaries: [TagSummary]?
+
+    /// Drop the lazily-built row order/index caches. Called from the `didSet`
+    /// of every source the flatten/visible-list reads (`entries`,
+    /// `treeChildren`, `expandedPaths`, `searchResults`, and the filter
+    /// on/off edge of `searchQuery`). The next nav keypress rebuilds on demand.
+    private func invalidateRowCaches() {
+        cachedTreeRows = nil
+        cachedTreeRowIndex = nil
+        cachedListRows = nil
+        cachedListRowIndex = nil
+    }
+
     /// Look up a `FileEntry` by id across both the flat root listing
     /// (`entries`) and every cached tree subtree (`treeChildren`). Tree
     /// view selections live deep in `treeChildren`, never in
@@ -288,11 +387,18 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// grandchildren …). Used by arrow-key navigation so ↑/↓ in tree mode
     /// walks the same visual order the user sees, not just the root level.
     /// Mirrors `TreeFileListView.orderedForTree` (folders first, files
-    /// after).
+    /// after). Cached — the DFS flatten only rebuilds when a source the tree
+    /// reads from changes, not on every keypress.
     var visibleTreeEntries: [FileEntry] {
-        guard let root = folderURL else { return [] }
+        if let cached = cachedTreeRows { return cached }
+        guard let root = folderURL else {
+            cachedTreeRows = []
+            return []
+        }
         let rootEntries = treeChildren[root.path] ?? entries
-        return flattenTree(rootEntries)
+        let rows = flattenTree(rootEntries)
+        cachedTreeRows = rows
+        return rows
     }
 
     private func flattenTree(_ entries: [FileEntry]) -> [FileEntry] {
@@ -308,6 +414,40 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             }
         }
         return result
+    }
+
+    /// Cached version of `visibleEntries` for the nav hot path. Identical
+    /// contents to `visibleEntries` but the array is reused across keypresses
+    /// instead of re-allocating `searchResults`/`entries` (and, more
+    /// importantly, paired with `cachedListRowIndex` for O(1) id lookups).
+    private var cachedVisibleEntries: [FileEntry] {
+        if let cached = cachedListRows { return cached }
+        let rows = visibleEntries
+        cachedListRows = rows
+        return rows
+    }
+
+    /// O(1) position of `id` within the nav row order for the current view
+    /// mode, building (and memoizing) the id→index map on first use. Replaces
+    /// the per-keypress `firstIndex(where:)` scans in `moveSelection` /
+    /// `extendSelection`, which were O(n) each and ran up to three times per
+    /// arrow press.
+    private func rowIndex(of id: FileEntry.ID, inTreeMode treeMode: Bool) -> Int? {
+        if treeMode {
+            if let map = cachedTreeRowIndex { return map[id] }
+            let rows = visibleTreeEntries
+            var map = [FileEntry.ID: Int](minimumCapacity: rows.count)
+            for (idx, entry) in rows.enumerated() { map[entry.id] = idx }
+            cachedTreeRowIndex = map
+            return map[id]
+        } else {
+            if let map = cachedListRowIndex { return map[id] }
+            let rows = cachedVisibleEntries
+            var map = [FileEntry.ID: Int](minimumCapacity: rows.count)
+            for (idx, entry) in rows.enumerated() { map[entry.id] = idx }
+            cachedListRowIndex = map
+            return map[id]
+        }
     }
 
     var isFiltering: Bool {
@@ -781,10 +921,11 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // row replace whenever either endpoint sat in an expanded
         // subtree. `selectionOrderedRows` picks the right axis for
         // the current view mode.
+        let treeMode = viewMode == .tree
         let ordered = selectionOrderedRows
         guard let anchor = selectionAnchor,
-              let anchorIdx = ordered.firstIndex(where: { $0.id == anchor }),
-              let targetIdx = ordered.firstIndex(where: { $0.id == id })
+              let anchorIdx = rowIndex(of: anchor, inTreeMode: treeMode),
+              let targetIdx = rowIndex(of: id, inTreeMode: treeMode)
         else {
             replaceSelection(id)
             return
@@ -798,9 +939,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// Row sequence Shift-range selection should walk over. Tree mode
     /// uses the flattened DFS of every visible (expanded) row;
     /// list mode uses the standard flat enumeration (or search
-    /// results when a filter is active).
+    /// results when a filter is active). Reads the cached arrays so a
+    /// Shift-extend doesn't re-flatten the tree.
     private var selectionOrderedRows: [FileEntry] {
-        viewMode == .tree ? visibleTreeEntries : visibleEntries
+        viewMode == .tree ? visibleTreeEntries : cachedVisibleEntries
     }
 
     /// Wipe the selection. Used by the file list when the user clicks
@@ -1275,8 +1417,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func moveSelection(by offset: Int, extending: Bool) {
         // In tree mode walk the flat DFS of expanded rows (matches what
         // the user sees). In list mode keep the existing flat-listing
-        // walk so search-result navigation also works.
-        let visible = viewMode == .tree ? visibleTreeEntries : visibleEntries
+        // walk so search-result navigation also works. Both read the cached
+        // arrays so a held arrow key doesn't re-flatten/re-allocate per repeat.
+        let treeMode = viewMode == .tree
+        let visible = treeMode ? visibleTreeEntries : cachedVisibleEntries
         guard !visible.isEmpty else { return }
 
         // `currentIdx` is the row the keypress moves *from*. When
@@ -1290,10 +1434,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         let pivotID: FileEntry.ID? = extending ? (selectionCursor ?? selectionAnchor) : selectionAnchor
         let currentIdx: Int
         if let pivot = pivotID,
-           let idx = visible.firstIndex(where: { $0.id == pivot }) {
+           let idx = rowIndex(of: pivot, inTreeMode: treeMode) {
             currentIdx = idx
         } else if let firstID = selection.first,
-                  let idx = visible.firstIndex(where: { $0.id == firstID }) {
+                  let idx = rowIndex(of: firstID, inTreeMode: treeMode) {
             currentIdx = idx
         } else {
             // No prior selection — arrow-down lands on the first row,
@@ -1309,7 +1453,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
         if extending,
            let anchor = selectionAnchor,
-           let anchorIdx = visible.firstIndex(where: { $0.id == anchor }) {
+           let anchorIdx = rowIndex(of: anchor, inTreeMode: treeMode) {
             let lower = min(anchorIdx, newIdx)
             let upper = max(anchorIdx, newIdx)
             selection = Set(visible[lower...upper].map(\.id))
@@ -1332,6 +1476,30 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// each independently.
     var selectedURLs: [URL] {
         selectedEntries.map(\.url)
+    }
+
+    /// Total byte size of the current selection, summed across the O(1)
+    /// entry index. Memoized so the global status bar's per-render read
+    /// doesn't re-run the `compactMap`/`reduce` on every `MainWindowView`
+    /// body invalidation; recomputes only when selection or entry data moves.
+    var selectedSize: Int64 {
+        if let cached = cachedSelectedSize { return cached }
+        let total = selection.reduce(Int64(0)) { running, id in
+            running + (findEntry(id: id)?.size ?? 0)
+        }
+        cachedSelectedSize = total
+        return total
+    }
+
+    /// Deduplicated tag summaries for the current folder's entries, feeding
+    /// the sidebar's Tags section. Memoized so the sidebar's per-render read
+    /// doesn't re-walk every entry's tags on each `MainWindowView` body pass;
+    /// recomputes only when `entries` changes.
+    var tagSummaries: [TagSummary] {
+        if let cached = cachedTagSummaries { return cached }
+        let summaries = entries.uniqueTagSummaries()
+        cachedTagSummaries = summaries
+        return summaries
     }
 
     /// Right-click "Duplicate" → for each entry, copy in place with a
