@@ -207,6 +207,12 @@ struct TreeFileListView: View {
             cancelRename: {
                 viewModel.cancelRename()
                 DispatchQueue.main.async { treeFocused = true }
+            },
+            tabRename: { forward in
+                viewModel.beginRenameAdjacent(forward: forward)
+                if viewModel.renamingEntryID == nil {
+                    DispatchQueue.main.async { treeFocused = true }
+                }
             }
         )
         .contentShape(Rectangle())
@@ -320,7 +326,9 @@ private struct TreeRow: View {
     let onChevronTap: () -> Void
     let commitRename: () -> Void
     let cancelRename: () -> Void
-    @FocusState private var renameFieldFocused: Bool
+    /// Tab / Shift-Tab while renaming — commit then advance to the
+    /// next / previous visible tree row (Finder-style).
+    let tabRename: (_ forward: Bool) -> Void
 
     private static let indentPerDepth: CGFloat = 14
 
@@ -361,25 +369,15 @@ private struct TreeRow: View {
             )
 
             if isRenaming {
-                TextField("", text: $renameDraft)
-                    .textFieldStyle(.plain)
-                    .font(Theme.Font.body)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Theme.Color.label.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Theme.Color.accent, lineWidth: 1)
-                    )
-                    .focused($renameFieldFocused)
-                    .onAppear {
-                        DispatchQueue.main.async { renameFieldFocused = true }
-                    }
-                    .onSubmit { commitRename() }
-                    .onExitCommand { cancelRename() }
+                RenameTextField(
+                    text: $renameDraft,
+                    isDirectory: entry.isDirectory,
+                    onCommit: commitRename,
+                    onCancel: cancelRename,
+                    onTab: tabRename
+                )
+                .frame(maxWidth: .infinity)
+                .renameFieldChrome()
             } else {
                 Text(entry.name)
                     .font(Theme.Font.body)
@@ -402,6 +400,9 @@ private struct TreeRow: View {
     }
 
     private var rowBackground: Color {
+        // Drop the selection fill while editing so the rename field's
+        // accent ring is the dominant cue (mirrors the list view).
+        if isRenaming { return .clear }
         if !isSelected { return .clear }
         return paneIsFocused ? Theme.Color.selection : Theme.Color.selectionInactive
     }

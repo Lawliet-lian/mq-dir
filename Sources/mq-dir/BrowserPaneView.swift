@@ -942,6 +942,14 @@ struct BrowserPaneView: View {
             cancelRename: {
                 viewModel.cancelRename()
                 DispatchQueue.main.async { listFocused = true }
+            },
+            tabRename: { forward in
+                viewModel.beginRenameAdjacent(forward: forward)
+                // If the walk ran off the ends, no row is renaming now —
+                // restore list focus so keyboard nav keeps working.
+                if viewModel.renamingEntryID == nil {
+                    DispatchQueue.main.async { listFocused = true }
+                }
             }
         )
         .contentShape(Rectangle())
@@ -1094,7 +1102,9 @@ private struct FileEntryRow: View {
     @Binding var renameDraft: String
     let commitRename: () -> Void
     let cancelRename: () -> Void
-    @FocusState private var renameFieldFocused: Bool
+    /// Tab / Shift-Tab while renaming — commit then advance to the
+    /// next / previous visible row's rename (Finder-style).
+    let tabRename: (_ forward: Bool) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -1106,30 +1116,15 @@ private struct FileEntryRow: View {
                 )
                 VStack(alignment: .leading, spacing: 1) {
                     if isRenaming {
-                        TextField("", text: $renameDraft)
-                            .textFieldStyle(.plain)
-                            .font(Theme.Font.body)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Theme.Color.label.opacity(0.08))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(Theme.Color.accent, lineWidth: 1)
-                            )
-                            .focused($renameFieldFocused)
-                            .onAppear {
-                                // Defer focus so the TextField has a
-                                // chance to install before we steal
-                                // it from the file list.
-                                DispatchQueue.main.async {
-                                    renameFieldFocused = true
-                                }
-                            }
-                            .onSubmit { commitRename() }
-                            .onExitCommand { cancelRename() }
+                        RenameTextField(
+                            text: $renameDraft,
+                            isDirectory: entry.isDirectory,
+                            onCommit: commitRename,
+                            onCancel: cancelRename,
+                            onTab: tabRename
+                        )
+                        .frame(maxWidth: .infinity)
+                        .renameFieldChrome()
                     } else {
                         HStack(spacing: 5) {
                             Text(entry.name)
@@ -1197,6 +1192,10 @@ private struct FileEntryRow: View {
     }
 
     private var rowBackground: Color {
+        // While editing, drop the row's selection fill so the rename
+        // field's accent ring is the dominant cue, not a competing
+        // blue selection band behind it.
+        if isRenaming { return .clear }
         if !isSelected { return .clear }
         return paneIsFocused ? Theme.Color.selection : Theme.Color.selectionInactive
     }

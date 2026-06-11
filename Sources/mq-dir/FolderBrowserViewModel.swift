@@ -676,6 +676,17 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
                         entries.contains { $0.id == selectedID }
                     }
                 }
+                // A reload can fire mid-rename (e.g. another app touches the
+                // folder and the watcher reloads us). `renamingEntryID` is
+                // URL-keyed, so it survives the re-enumeration as long as the
+                // entry is still on disk — keep rename mode and the live draft
+                // intact. If the renamed file vanished, drop out of rename mode
+                // cleanly so we don't leave a field bound to a dead row.
+                if let renamingID = renamingEntryID,
+                   !entries.contains(where: { $0.id == renamingID }) {
+                    renamingEntryID = nil
+                    renameDraft = ""
+                }
                 isLoading = false
                 // Re-fetch any expanded subtrees so the tree view reflects
                 // the same on-disk state the flat list just refreshed against.
@@ -687,6 +698,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
                 entries = []
                 selection.removeAll()
+                // Folder became unreadable mid-rename — there's no row to bind
+                // the field to, so drop rename mode cleanly.
+                renamingEntryID = nil
+                renameDraft = ""
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
@@ -939,6 +954,21 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// re-flatten the tree.
     private var selectionOrderedRowIDs: [FileEntry.ID] {
         (viewMode == .tree ? visibleTreeEntries : cachedVisibleEntries).map(\.id)
+    }
+
+    /// Swap one `FileEntry.ID` (a URL) for another across the selection
+    /// set, anchor, and cursor. Used by `commitRename`: after a rename the
+    /// renamed row's ID changes (ID == URL), so without this the renamed
+    /// row would deselect on the next reload. Writes the published props
+    /// directly — selection-model snapshotting isn't needed for a plain
+    /// member substitution.
+    private func migrateSelection(from old: FileEntry.ID, to new: FileEntry.ID) {
+        if selection.contains(old) {
+            selection.remove(old)
+            selection.insert(new)
+        }
+        if selectionAnchor == old { selectionAnchor = new }
+        if selectionCursor == old { selectionCursor = new }
     }
 
     /// Wipe the selection. Used by the file list when the user clicks
@@ -1289,9 +1319,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     /// Begin inline rename for `entry`. Seeds the draft with the
-    /// current name and selects the row so the TextField that the
-    /// FileEntryRow renders is pointed at the right item.
+    /// current name and selects the row so the rename field the row
+    /// renders is pointed at the right item. If a *different* row is
+    /// already mid-rename, commit it first — only one row is ever in
+    /// rename mode, and starting a fresh rename shouldn't silently
+    /// discard the in-flight edit (Finder commits the old one).
     func beginRename(_ entry: FileEntry) {
+        if let active = renamingEntryID, active != entry.id {
+            commitRename()
+        }
         renamingEntryID = entry.id
         renameDraft = entry.name
         replaceSelection(entry.id)
@@ -1301,6 +1337,23 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// the ⌘⇧R menu shortcut. No-op if nothing is selected.
     func beginRenameForActiveSelection() {
         guard let entry = selectedEntry else { return }
+        beginRename(entry)
+    }
+
+    /// Tab / Shift-Tab while renaming: commit the current edit, then begin
+    /// renaming the next (`forward`) or previous visible row, Finder-style.
+    /// Walks the same row order arrow-key nav uses (tree DFS in tree mode,
+    /// the flat visible list otherwise). No-op past the first / last row.
+    func beginRenameAdjacent(forward: Bool) {
+        guard let currentID = renamingEntryID else { return }
+        // commitRename clears renamingEntryID; capture the order first.
+        let rows = selectionOrderedRowIDs
+        commitRename()
+        guard let idx = rows.firstIndex(of: currentID) else { return }
+        let nextIdx = forward ? idx + 1 : idx - 1
+        guard rows.indices.contains(nextIdx),
+              let entry = findEntry(id: rows[nextIdx])
+        else { return }
         beginRename(entry)
     }
 
@@ -1321,7 +1374,13 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard !trimmed.isEmpty, trimmed != entry.name else { return }
 
         do {
-            try FileOperationService.rename(entry.url, to: trimmed)
+            let newURL = try FileOperationService.rename(entry.url, to: trimmed)
+            // FileEntry.ID is the URL, so the renamed row gets a brand-new ID
+            // after the fs-changed reload. Migrate the selection / anchor /
+            // cursor from the old ID to the new URL *now* so the renamed row
+            // stays selected — and so it sticks even if the file watcher's
+            // reload races `reload()` below (the set already holds the new URL).
+            migrateSelection(from: entry.id, to: newURL)
             reload()
         } catch FileOperationService.RenameError.destinationExists(let name) {
             errorMessage = "An item named '\(name)' already exists in this folder."
