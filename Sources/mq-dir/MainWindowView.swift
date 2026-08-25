@@ -329,16 +329,20 @@ struct MainWindowView: View {
         Button(L("mqdir.main.copyPath")) { focusedPane.copyCurrentFolderPath() }
             .disabled(focusedPane.folderURL == nil)
         Divider()
-        Button("Open in Terminal") { focusedPane.openCurrentFolderInTerminal() }
+        // 在终端中打开当前目录
+        Button(L("mqdir.breadcrumb.openInTerminal")) { focusedPane.openCurrentFolderInTerminal() }
             .disabled(focusedPane.folderURL == nil)
         if focusedPane.canOpenInCmux {
-            Button("Open in cmux") { focusedPane.openCurrentFolderInCmux() }
+            // 在 cmux 中打开当前目录（需要 cmux 服务可用）
+            Button(L("mqdir.breadcrumb.openInCmux")) { focusedPane.openCurrentFolderInCmux() }
                 .disabled(focusedPane.folderURL == nil)
         }
-        Button("Open in Finder") { focusedPane.openCurrentFolderInFinder() }
+        // 在访达中打开当前目录
+        Button(L("mqdir.breadcrumb.openInFinder")) { focusedPane.openCurrentFolderInFinder() }
             .disabled(focusedPane.folderURL == nil)
         Divider()
-        Button("Open Folder…") { focusedPane.chooseFolder() }
+        // 弹出 NSOpenPanel 让用户选择新文件夹打开
+        Button(L("mqdir.breadcrumb.openFolder")) { focusedPane.chooseFolder() }
     }
 
     private var searchField: some View {

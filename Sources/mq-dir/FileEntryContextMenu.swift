@@ -2,6 +2,14 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+// 本地化便捷函数（与其他视图保持同签名）。
+// 放在文件私有作用域，避免与其他文件中的同名 L 函数冲突。
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 /// Right-click menu shared by the list view (BrowserPaneView) and the tree
 /// view (TreeFileListView). Lifts the menu beyond the v0.1.0-alpha "Open /
 /// Reveal in Finder" pair to a Finder-parity set: Open With submenu, Get
@@ -69,64 +77,64 @@ struct FileEntryContextMenu: View {
     }
 
     var body: some View {
-        Button(count > 1 ? "Open \(count) Items" : "Open") {
+        // 打开选中项：单项直接"Open"，多项显示具体数量
+        Button(count > 1
+               ? L("mqdir.context.openNItems", count)
+               : L("mqdir.context.open")) {
             targets.forEach { viewModel.open($0) }
         }
 
         if allFiles, let firstURL = targets.first?.url {
             let apps = applicationURLs(for: firstURL)
-            Menu("Open With") {
+            // 打开方式子菜单：推荐 app 列表 + 其他选择入口
+            Menu(L("mqdir.context.openWith")) {
                 ForEach(apps, id: \.self) { app in
                     Button(applicationName(for: app)) {
                         openEntries(targets, with: app)
                     }
                 }
                 if !apps.isEmpty { Divider() }
-                Button("Other\u{2026}") { chooseAndOpenWith(targets) }
+                // 其他…：弹出 NSOpenPanel 让用户任选 /Applications 下的 app
+                Button(L("mqdir.context.openWithOther")) { chooseAndOpenWith(targets) }
             }
         }
 
         Divider()
 
-        Button(count > 1 ? "Get Info (\(count))" : "Get Info") {
+        // 显示简介：Finder 自带的 Get Info 面板
+        Button(count > 1
+               ? L("mqdir.context.getInfoN", count)
+               : L("mqdir.context.getInfo")) {
             showGetInfo(for: targets)
         }
-        Button("Reveal in Finder") {
+        Button(L("mqdir.context.revealInFinder")) {
             NSWorkspace.shared.activateFileViewerSelecting(targets.map(\.url))
         }
 
-        // "Reveal in Tree" surfaces a single entry in tree mode with its
-        // ancestors expanded — most useful for a deep recursive-search hit,
-        // whose row otherwise only shows a subtitle path. Single-target only
-        // (revealing N scattered hits at once has no coherent scroll target);
-        // shown whenever the entry sits below the current folder root.
+        // 在树形视图中显示：搜索结果快速定位到原位置（单条目才有意义）
         if count == 1, let target = targets.first, canRevealInTree(target) {
-            Button("Reveal in Tree") {
+            Button(L("mqdir.context.revealInTree")) {
                 viewModel.revealInTree(target)
             }
         }
 
-        // Folders carry no size until walked on demand. Show the action only
-        // when the selection actually contains a directory — for an all-files
-        // selection every size is already known and the item would be inert.
+        // 计算大小：目录需在树上遍历，比较耗时；选择中包含目录时才显示
         if FolderBrowserViewModel.canCalculateSize(targets) {
-            Button(count > 1 ? "Calculate Size (\(count))" : "Calculate Size") {
+            Button(count > 1
+                   ? L("mqdir.context.calcSizeN", count)
+                   : L("mqdir.context.calcSize")) {
                 viewModel.calculateSize(targets)
             }
         }
 
         Divider()
 
-        Menu("Tags") {
+        // 标签子菜单：Finder 七种标准色 + 清除
+        Menu(L("mqdir.context.tags")) {
             ForEach(TagColor.allLabels, id: \.self) { label in
                 Button {
                     viewModel.toggleColorTag(label, on: targets)
                 } label: {
-                    // `Label` with an `Image(nsImage:)` icon is the
-                    // only path that survives SwiftUI's NSMenuItem
-                    // conversion with full colour — SF Symbols inside
-                    // a Menu Button get template-rendered and lose
-                    // any `.foregroundStyle` we set on them.
                     Label {
                         Text(TagColor.displayName(forLabel: label)
                              + (appliedColours.contains(label) ? "  ✓" : ""))
@@ -139,7 +147,8 @@ struct FileEntryContextMenu: View {
                 }
             }
             Divider()
-            Button("Clear Tags") {
+            // 清除所有已打标签（当前没打任何标签时禁用）
+            Button(L("mqdir.context.clearTags")) {
                 viewModel.toggleColorTag(0, on: targets)
             }
             .disabled(appliedColours.isEmpty)
@@ -147,54 +156,72 @@ struct FileEntryContextMenu: View {
 
         Divider()
 
-        Button(count > 1 ? "Copy \(count) Items" : "Copy \u{201C}\(primaryName)\u{201D}") {
+        // 拷贝（文件 URL 到剪贴板，Finder ⌘C 兼容）
+        Button(count > 1
+               ? L("mqdir.context.copyItems", count)
+               : L("mqdir.context.copyOne", primaryName)) {
             copyToPasteboard(targets)
         }
-        Button("Copy Path") {
+        // 拷贝路径（字符串，便于粘贴到终端/编辑器）
+        Button(L("mqdir.context.copyPath")) {
             copyPathsToPasteboard(targets)
         }
 
         Divider()
 
-        Button(count > 1 ? "Duplicate \(count) Items" : "Duplicate") {
+        // 拷贝副本（同目录下复制一份）
+        Button(count > 1
+               ? L("mqdir.context.duplicateN", count)
+               : L("mqdir.context.duplicate")) {
             viewModel.duplicate(targets, normalizeHangul: workspace.workspace.settings.normalizeHangulOnDragOut)
         }
         if count == 1, let target = targets.first {
-            // Rename only makes sense for a single row at a time —
-            // multi-rename is its own UX and lives elsewhere.
-            Button("Rename") { viewModel.beginRename(target) }
+            // 重命名：仅单文件时显示（多选重命名是另一个 UX 场景）
+            Button(L("mqdir.context.rename")) { viewModel.beginRename(target) }
                 .keyboardShortcut(workspace.workspace.settings.binding(for: .rename))
         }
         if anyNeedsNFCNormalization {
-            Button(count > 1 ? "Normalize \(count) Filenames to NFC" : "Normalize Filename to NFC") {
+            // 韩文 NFD → NFC 规范化（选中项有分解形式文件名时显示）
+            Button(count > 1
+                   ? L("mqdir.context.normalizeNFCN", count)
+                   : L("mqdir.context.normalizeNFC")) {
                 viewModel.normalizeFilenamesToNFC(targets)
             }
         }
-        Button(count > 1 ? "Move \(count) Items to Trash" : "Move to Trash") {
+        // 移到废纸篓：可撤销
+        Button(count > 1
+               ? L("mqdir.context.moveNToTrash", count)
+               : L("mqdir.context.moveToTrash")) {
             viewModel.moveToTrash(targets)
         }
-        Button(count > 1 ? "Delete \(count) Items Immediately\u{2026}" : "Delete Immediately\u{2026}") {
+        // 立即删除：不可恢复，带确认对话框
+        Button(count > 1
+               ? L("mqdir.context.deleteNImmediately", count)
+               : L("mqdir.context.deleteImmediately")) {
             viewModel.permanentlyDelete(targets)
         }
 
         Divider()
+        // 压缩：单文件显示"压缩 <文件名>"，多文件显示"压缩 N 项"
         Button(compressLabel(for: targets)) {
             viewModel.compress(targets)
         }
         if FolderBrowserViewModel.canExtract(targets) {
-            Button(count > 1 ? "Extract \(count) Archives" : "Extract") {
+            // 解压：选中项全是已知归档格式时才显示
+            Button(count > 1
+                   ? L("mqdir.context.extractN", count)
+                   : L("mqdir.context.extract")) {
                 viewModel.extractArchives(targets)
             }
         }
     }
 
-    /// Finder-style label for the Compress action: single selection
-    /// uses the item name in quotes, multi-selection shows the count.
+    // 压缩菜单项的文案：单选显示"压缩 <文件名>"，多选显示"压缩 N 项"
     private func compressLabel(for entries: [FileEntry]) -> String {
         if entries.count == 1, let only = entries.first {
-            return "Compress \u{201C}\(only.name)\u{201D}"
+            return L("mqdir.context.compressOne", only.name)
         }
-        return "Compress \(entries.count) Items"
+        return L("mqdir.context.compressN", entries.count)
     }
 
     // MARK: Open With
@@ -228,12 +255,11 @@ struct FileEntryContextMenu: View {
         )
     }
 
-    /// "Other…" branch — let the user pick any .app under /Applications,
-    /// then route the selection through the same `open(_:with:)` path the
-    /// suggested apps use.
+    // "其他…"分支：弹出 NSOpenPanel 让用户任选 /Applications 下的 .app，
+    // 然后使用同样的 open(_:with:) 路径打开。
     private func chooseAndOpenWith(_ entries: [FileEntry]) {
         let panel = NSOpenPanel()
-        panel.title = "Choose Application"
+        panel.title = L("mqdir.context.chooseApp")
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

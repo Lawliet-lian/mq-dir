@@ -1,6 +1,13 @@
 import AppKit
 import Foundation
 
+// 文件级本地化辅助函数：默认收藏夹标签需要随系统语言本地化。
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 /// Owns the sidebar's user-editable Favorites list. The Locations section
 /// remains hardcoded and lives in `SidebarView` itself.
 ///
@@ -99,20 +106,23 @@ final class SidebarViewModel: ObservableObject {
     /// Folders that don't exist on this machine are simply skipped.
     static func defaultSeed() -> [Favorite] {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates: [(String, String)] = [
-            ("Desktop", "Desktop"),
-            ("Documents", "Documents"),
-            ("Downloads", "Downloads"),
-            ("Pictures", "Pictures"),
-            ("Movies", "Movies"),
-            ("Music", "Music"),
+        // 系统目录候选：(显示标签 key, 路径组件)
+        // 标签使用本地化 key，中文下显示"桌面/文稿/下载…"，英文下保留原名。
+        let candidates: [(labelKey: String, component: String)] = [
+            ("mqdir.favorites.desktop",   "Desktop"),
+            ("mqdir.favorites.documents", "Documents"),
+            ("mqdir.favorites.downloads", "Downloads"),
+            ("mqdir.favorites.pictures",  "Pictures"),
+            ("mqdir.favorites.movies",    "Movies"),
+            ("mqdir.favorites.music",     "Music"),
         ]
 
-        return candidates.compactMap { label, component in
-            let url = home.appendingPathComponent(component)
+        return candidates.compactMap { entry in
+            let url = home.appendingPathComponent(entry.component)
             guard FileManager.default.fileExists(atPath: url.path) else { return nil }
             let bookmark = try? PersistenceService.makeBookmark(for: url)
-            return Favorite(label: label, bookmark: bookmark, fallbackPath: url.path)
+            // 显示标签走本地化，fallbackPath 保留真实路径供恢复时使用
+            return Favorite(label: L(entry.labelKey), bookmark: bookmark, fallbackPath: url.path)
         }
     }
 

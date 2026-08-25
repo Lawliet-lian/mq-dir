@@ -300,7 +300,10 @@ struct TreeFileListView: View {
         )
         .contextMenu {
             if entry.isDirectory {
-                Button(isExpanded ? "Collapse" : "Expand") {
+                // 展开/折叠目录：根据当前展开态切换文案
+                Button(isExpanded
+                       ? L("mqdir.misc.collapse")
+                       : L("mqdir.misc.expand")) {
                     viewModel.toggleExpanded(entry.url)
                 }
                 Divider()

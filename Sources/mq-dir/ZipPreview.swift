@@ -344,7 +344,8 @@ struct ZipPreviewView: View {
     private var previewArea: some View {
         switch content {
         case .idle:
-            placeholder("Select an entry to preview")
+            // ZIP 预览未选中条目时的占位符
+            placeholder(L("mqdir.misc.selectEntryToPreview"))
         case .loading:
             ProgressView()
                 .controlSize(.small)

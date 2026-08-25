@@ -76,7 +76,8 @@ struct PreviewPanel: View {
         let selectedEntries = currentlySelectedEntries
 
         if selectedEntries.isEmpty {
-            emptyState("Select a file to preview")
+            // 预览面板空状态：提示用户选中一个文件以预览
+            emptyState(L("mqdir.misc.selectFileToPreview"))
         } else if selectedEntries.count > 1 {
             multiSelectionSummary(selectedEntries)
         } else if let entry = selectedEntries.first {

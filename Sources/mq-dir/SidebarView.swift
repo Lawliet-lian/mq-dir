@@ -107,13 +107,17 @@ struct SidebarView: View {
 
     private var helpMenu: some View {
         Menu {
-            Button("Welcome to mq-dir") { openURL("https://mqdir.com") }
-            Button("Send Feedback") { showingFeedback = true }
-            Button("⭐ Star on GitHub") {
+            // 欢迎页链接：打开产品官网
+            Button(L("mqdir.sidebar.help.welcome")) { openURL("https://mqdir.com") }
+            // 反馈表单入口：打开内置的 FeedbackSheet
+            Button(L("mqdir.sidebar.feedback")) { showingFeedback = true }
+            // GitHub 仓库：鼓励用户为项目 Star
+            Button(L("mqdir.sidebar.starGithub")) {
                 repoCallout.openRepo()
             }
             Divider()
-            Button("Check for Updates") {
+            // 手动检查更新：走 Sparkle 的 UI 入口
+            Button(L("mqdir.sidebar.checkUpdates")) {
                 updateManager.checkForUpdatesAndShowUI()
             }
         } label: {
@@ -151,11 +155,12 @@ struct SidebarView: View {
         .help(L("mqdir.sidebar.installUpdate"))
     }
 
+    // 更新提示 Pill 的文字：有版本号时显示具体版本
     private var pillLabel: String {
         if let version = updateManager.availableVersion {
-            return "Update Available: \(version)"
+            return L("mqdir.sidebar.updateAvailableVersion", version)
         }
-        return "Update Available"
+        return L("mqdir.sidebar.updateAvailable")
     }
 
     /// Repo callout. Mirrors `updatePill`'s capsule style with a yellow
@@ -183,7 +188,8 @@ struct SidebarView: View {
         .buttonStyle(.plain)
         .help(L("mqdir.sidebar.githubHint"))
         .contextMenu {
-            Button("Don't show this again") {
+            // 永久隐藏 Star 提示胶囊
+            Button(L("mqdir.sidebar.dismissPill")) {
                 repoCallout.dismissPermanently()
             }
         }
@@ -198,7 +204,8 @@ struct SidebarView: View {
 
     private var favoritesSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("Favorites")
+            // 使用本地化的 section key，交由 sectionHeader() 统一渲染（含大写转换等）
+            sectionHeader(L("mqdir.sidebar.section.favorites"))
 
             if viewModel.favorites.isEmpty {
                 emptyFavoritesHint
@@ -237,7 +244,8 @@ struct SidebarView: View {
 
     private var tagsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("Tags")
+            // 使用本地化 section key（中文下直接显示「标签」，英文下 sectionHeader 会转大写）
+            sectionHeader(L("mqdir.sidebar.section.tags"))
             if tagsSummary.isEmpty {
                 Text(L("mqdir.sidebar.tags.empty"))
                     .font(.system(size: 10))
@@ -329,7 +337,7 @@ struct SidebarView: View {
             }
         }
         .contentShape(Rectangle())
-        .help(isStale ? (favorite.fallbackPath ?? "Folder unavailable") : (resolved?.path ?? favorite.label))
+        .help(isStale ? (favorite.fallbackPath ?? L("mqdir.sidebar.folderUnavailable")) : (resolved?.path ?? favorite.label))
         .onTapGesture {
             guard !isEditing else { return }
             if let url = resolved {
@@ -338,9 +346,11 @@ struct SidebarView: View {
             }
         }
         .contextMenu {
-            Button("Rename") { startRename(favorite) }
+            // 重命名收藏夹条目：开始内联编辑
+            Button(L("mqdir.sidebar.rename")) { startRename(favorite) }
                 .disabled(isStale)
-            Button("Remove from Sidebar", role: .destructive) {
+            // 从侧边栏移除该收藏夹
+            Button(L("mqdir.sidebar.removeFavorite"), role: .destructive) {
                 viewModel.remove(favorite.id)
             }
         }
@@ -474,8 +484,10 @@ struct SidebarView: View {
             workspace.switchTo(projectID: project.id)
         }
         .contextMenu {
-            Button("Rename") { startProjectRename(project) }
-            Button("Delete", role: .destructive) {
+            // 重命名项目：开始内联编辑
+            Button(L("mqdir.sidebar.rename")) { startProjectRename(project) }
+            // 删除项目（最后一个项目禁用，因为 App 需要至少一个项目作为容器）
+            Button(L("mqdir.sidebar.deleteProject"), role: .destructive) {
                 workspace.delete(project.id)
             }
             // Last-project guard. The manager refuses too, but disabling
@@ -572,7 +584,10 @@ struct SidebarView: View {
                         .scaleEffect(0.6)
                         .frame(width: 8, height: 8)
                 }
-                Text(cmux.isSyncing ? "Syncing\u{2026}" : "Sync")
+                // 同步按钮文案：同步中显示"Syncing…"，否则"Sync"
+                Text(cmux.isSyncing
+                     ? L("mqdir.sidebar.cmux.syncing")
+                     : L("mqdir.sidebar.cmux.syncAction"))
                     .font(.system(size: 10, weight: .medium))
             }
             .foregroundStyle(Theme.Color.label)
@@ -595,10 +610,11 @@ struct SidebarView: View {
     /// distinct states the previous version collapsed to one message:
     /// (1) sync errored, (2) sync ran but cmux genuinely has no
     /// workspaces, (3) we haven't synced yet.
+    // cmux 空状态文案：三态（有错误 / 已同步但空 / 尚未同步）
     private var cmuxEmptyStateMessage: String {
         if let err = cmux.lastError { return err }
-        if cmux.lastSyncDate != nil { return "No cmux workspaces yet." }
-        return "Press Sync to fetch cmux workspaces."
+        if cmux.lastSyncDate != nil { return L("mqdir.sidebar.cmux.noWorkspaces") }
+        return L("mqdir.sidebar.cmux.pressSync")
     }
 
     private func cmuxRow(_ ws: CmuxWorkspace) -> some View {
@@ -650,13 +666,25 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .disabled(cwd == nil)
-        .help(ws.currentDirectory ?? "no working directory")
+        // cwd 为 nil 时提供兜底的本地化帮助文本
+        .help(ws.currentDirectory ?? L("mqdir.sidebar.cmux.noWorkingDir"))
     }
 
     // MARK: Section chrome
 
+    // 自定义 section header 渲染：仅 ASCII 字符强制大写。
+    // 理由：英文惯例 FAVORITES / TAGS 用大写全角分隔效果，但中文没有大小写，强行 uppercased()
+    // 会导致某些非拉丁语系在 Foundation 下的大小写转换出现意料外行为，故仅对 ASCII 大写。
+    // 注意：由于函数体有 >1 条语句（let + if/else），Swift 不再走"单表达式隐式 return"，
+    // 所以 Text(...).modifiers 链必须显式 return，否则会报 opaque type 无法推断 + padding unused。
     private func sectionHeader(_ title: String) -> some View {
-        Text(title.uppercased())
+        let transformed: String
+        if title.allSatisfy(\.isASCII) {
+            transformed = title.uppercased()
+        } else {
+            transformed = title
+        }
+        return Text(transformed)
             .font(Theme.Font.sidebarHeader)
             .tracking(0.5)
             .foregroundStyle(Theme.Color.labelTertiary)

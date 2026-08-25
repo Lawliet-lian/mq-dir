@@ -126,8 +126,34 @@
 
 "mqdir.sidebar.dropHere" = "将文件夹拖到此处添加";
 
+// 新增：侧边栏 section header 和帮助菜单
+"mqdir.sidebar.section.favorites" = "收藏夹";
+"mqdir.sidebar.section.tags" = "标签";
 "mqdir.sidebar.section.projects" = "项目";
 "mqdir.sidebar.project.new" = "新建项目";
+
+"mqdir.sidebar.help.welcome" = "欢迎使用 mq-dir";
+"mqdir.sidebar.feedback" = "发送反馈";
+"mqdir.sidebar.starGithub" = "⭐ 在 GitHub 上标星";
+"mqdir.sidebar.checkUpdates" = "检查更新";
+"mqdir.sidebar.dismissPill" = "不再显示此提示";
+
+// 新增：侧边栏上下文菜单（收藏夹 / 项目）
+"mqdir.sidebar.rename" = "重命名";
+"mqdir.sidebar.removeFavorite" = "从边栏移除";
+"mqdir.sidebar.deleteProject" = "删除";
+
+// 新增：侧边栏更新提示 pill 标签
+"mqdir.sidebar.updateAvailable" = "有可用更新";
+"mqdir.sidebar.updateAvailableVersion" = "有可用更新：%@";
+
+// 新增：cmux 同步提示和空状态
+"mqdir.sidebar.cmux.syncing" = "同步中…";
+"mqdir.sidebar.cmux.syncAction" = "同步";
+"mqdir.sidebar.cmux.noWorkspaces" = "暂无 cmux 工作区。";
+"mqdir.sidebar.cmux.pressSync" = "点击「同步」以获取 cmux 工作区。";
+"mqdir.sidebar.cmux.noWorkingDir" = "无工作目录";
+"mqdir.sidebar.folderUnavailable" = "文件夹不可用";
 
 "mqdir.sidebar.tags.empty" = "此文件夹中没有标签";
 "mqdir.sidebar.tags.filterHint" = "按「%@」过滤当前标签页";
@@ -164,6 +190,31 @@
 "mqdir.browser.empty.retry" = "重试";
 "mqdir.browser.empty.noItems" = "无内容";
 "mqdir.browser.empty.placeholder" = "—";
+
+// 新增：列标题
+"mqdir.browser.column.name" = "名称";
+"mqdir.browser.column.modified" = "修改日期";
+"mqdir.browser.column.size" = "大小";
+"mqdir.browser.column.kind" = "种类";
+
+// 新增：排序菜单
+"mqdir.browser.sortBy" = "排序方式";
+"mqdir.browser.sort.dateModified" = "修改日期";
+"mqdir.browser.sort.foldersOnTop" = "文件夹置顶";
+"mqdir.browser.sort.showHiddenFiles" = "显示隐藏文件";
+
+// 新增：标签页默认标题
+"mqdir.browser.tab.untitled" = "未命名";
+
+// 新增：项目数/匹配数 (BrowserPaneView 右上角/空状态文本)
+"mqdir.browser.status.searching" = "搜索中…";
+"mqdir.browser.status.matches" = "%lu 个匹配%@";
+"mqdir.browser.status.matchesPlural" = "";
+"mqdir.browser.status.items" = "%lu 项%@";
+"mqdir.browser.status.itemsPlural" = "";
+"mqdir.browser.empty.searching" = "搜索中…";
+"mqdir.browser.empty.noMatches" = "没有匹配「%@」的结果";
+"mqdir.browser.empty.noTaggedItems" = "没有标有「%@」的项目";
 
 // MARK: - 预览面板
 
@@ -224,3 +275,72 @@
 "mqdir.common.clear" = "清除";
 "mqdir.common.search" = "搜索";
 "mqdir.common.done" = "完成";
+"mqdir.common.delete" = "删除";
+"mqdir.common.ok" = "好";
+
+// 新增：通用上下文菜单（文件右键）
+"mqdir.context.open" = "打开";
+"mqdir.context.openNItems" = "打开 %lu 个项目";
+"mqdir.context.openWith" = "打开方式";
+"mqdir.context.openWithOther" = "其他…";
+"mqdir.context.getInfo" = "显示简介";
+"mqdir.context.getInfoN" = "显示简介 (%lu)";
+"mqdir.context.revealInFinder" = "在访达中显示";
+"mqdir.context.revealInTree" = "在树形视图中显示";
+"mqdir.context.calcSize" = "计算大小";
+"mqdir.context.calcSizeN" = "计算大小 (%lu)";
+"mqdir.context.tags" = "标签";
+"mqdir.context.clearTags" = "清除标签";
+"mqdir.context.copyItems" = "拷贝 %lu 个项目";
+"mqdir.context.copyOne" = "拷贝「%@」";
+"mqdir.context.copyPath" = "拷贝路径";
+"mqdir.context.duplicate" = "拷贝副本";
+"mqdir.context.duplicateN" = "拷贝 %lu 个副本";
+"mqdir.context.rename" = "重命名";
+"mqdir.context.normalizeNFC" = "将文件名规范化为 NFC";
+"mqdir.context.normalizeNFCN" = "将 %lu 个文件名规范化为 NFC";
+"mqdir.context.moveToTrash" = "移到废纸篓";
+"mqdir.context.moveNToTrash" = "将 %lu 个项目移到废纸篓";
+"mqdir.context.deleteImmediately" = "立即删除…";
+"mqdir.context.deleteNImmediately" = "立即删除 %lu 个项目…";
+"mqdir.context.compressOne" = "压缩「%@」";
+"mqdir.context.compressN" = "压缩 %lu 个项目";
+"mqdir.context.extract" = "解压";
+"mqdir.context.extractN" = "解压 %lu 个归档";
+"mqdir.context.chooseApp" = "选择应用程序";
+
+// 新增：对话框文本（删除/压缩失败）
+"mqdir.dialog.deleteOnePermanently" = "是否要永久删除「%@」？";
+"mqdir.dialog.deleteNPermanently" = "是否要永久删除 %lu 个项目？";
+"mqdir.dialog.deleteHint" = "这些项目将被立即删除，你无法撤销此操作。";
+"mqdir.dialog.deleteFailedOne" = "未能删除「%@」";
+"mqdir.dialog.deleteFailedN" = "未能删除 %lu 个项目";
+"mqdir.dialog.compressCrossFolder" = "无法压缩来自不同文件夹的项目";
+"mqdir.dialog.compressCrossFolderHint" = "请选择同一文件夹中的项目一起压缩。";
+"mqdir.dialog.compressFailedOne" = "未能压缩「%@」";
+
+// 新增：面包屑右键菜单
+"mqdir.breadcrumb.openInTerminal" = "在终端中打开";
+"mqdir.breadcrumb.openInCmux" = "在 cmux 中打开";
+"mqdir.breadcrumb.openInFinder" = "在访达中打开";
+"mqdir.breadcrumb.openFolder" = "打开文件夹…";
+
+// 新增：杂项（视图模式 tooltip / 展开折叠 / 侧边栏默认收藏夹 / 选择文件夹面板 / 空面板占位符）
+"mqdir.misc.listView" = "列表视图";
+"mqdir.misc.treeView" = "树形视图";
+"mqdir.misc.expand" = "展开";
+"mqdir.misc.collapse" = "折叠";
+"mqdir.misc.noFolderSelected" = "未选择文件夹";
+"mqdir.misc.openFolderPanelTitle" = "打开文件夹";
+"mqdir.misc.openFolderPanelPrompt" = "打开";
+"mqdir.misc.openFolderPanelMessage" = "选择一个文件夹在 mq-dir 中浏览。";
+"mqdir.misc.selectFileToPreview" = "选择一个文件以预览";
+"mqdir.misc.selectEntryToPreview" = "选择一个条目以预览";
+
+// 新增：侧边栏默认收藏夹（系统目录名，中文下使用访达本地化名称）
+"mqdir.favorites.desktop" = "桌面";
+"mqdir.favorites.documents" = "文稿";
+"mqdir.favorites.downloads" = "下载";
+"mqdir.favorites.pictures" = "图片";
+"mqdir.favorites.movies" = "影片";
+"mqdir.favorites.music" = "音乐";

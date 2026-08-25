@@ -195,18 +195,25 @@ struct BrowserPaneView: View {
 
         Divider()
 
-        Menu("Sort By") {
-            sortMenuItem("Name", key: .name)
-            sortMenuItem("Date Modified", key: .modified)
-            sortMenuItem("Size", key: .size)
-            sortMenuItem("Kind", key: .kind)
+        // 空区域右键菜单的「排序方式」子菜单，与列头排序、Finder 排序方式对齐
+        Menu(L("mqdir.browser.sortBy")) {
+            sortMenuItem(L("mqdir.browser.column.name"), key: .name)
+            sortMenuItem(L("mqdir.browser.sort.dateModified"), key: .modified)
+            sortMenuItem(L("mqdir.browser.column.size"), key: .size)
+            sortMenuItem(L("mqdir.browser.column.kind"), key: .kind)
             Divider()
-            Button(viewModel.foldersOnTop ? "✓ Folders on Top" : "Folders on Top") {
+            // 文件夹置顶（勾选态：当前已开启时前面显示 √）
+            Button(viewModel.foldersOnTop
+                   ? "✓ \(L("mqdir.browser.sort.foldersOnTop"))"
+                   : L("mqdir.browser.sort.foldersOnTop")) {
                 viewModel.setFoldersOnTop(!viewModel.foldersOnTop)
             }
         }
 
-        Button(viewModel.includeHidden ? "✓ Show Hidden Files" : "Show Hidden Files") {
+        // 显示隐藏文件（勾选态同上面模式）
+        Button(viewModel.includeHidden
+               ? "✓ \(L("mqdir.browser.sort.showHiddenFiles"))"
+               : L("mqdir.browser.sort.showHiddenFiles")) {
             viewModel.toggleHiddenFiles()
         }
         .keyboardShortcut(workspace.workspace.settings.binding(for: .toggleHiddenFiles))
@@ -336,7 +343,8 @@ struct BrowserPaneView: View {
     @ViewBuilder
     private func tabChip(for tab: FolderBrowserViewModel, at idx: Int) -> some View {
         let isActive = paneVM.activeIndex == idx
-        let title = tab.folderURL?.lastPathComponent ?? "Untitled"
+        // 没有打开文件夹时，标签页标题回退为本地化的"未命名/Untitled"
+        let title = tab.folderURL?.lastPathComponent ?? L("mqdir.browser.tab.untitled")
         let id = ObjectIdentifier(tab)
 
         HStack(spacing: 6) {
@@ -561,8 +569,10 @@ struct BrowserPaneView: View {
     private var viewModeToggle: some View {
         HStack(spacing: 4) {
             HStack(spacing: 0) {
-                viewModeButton(.list, symbol: "list.bullet", help: "List View")
-                viewModeButton(.tree, symbol: "rectangle.split.3x1", help: "Tree View")
+                // 列表视图（平铺列）
+                viewModeButton(.list, symbol: "list.bullet", help: L("mqdir.misc.listView"))
+                // 树形视图（可展开子目录，VS Code 风格）
+                viewModeButton(.tree, symbol: "rectangle.split.3x1", help: L("mqdir.misc.treeView"))
             }
             .padding(1)
             .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
@@ -618,30 +628,40 @@ struct BrowserPaneView: View {
         .help(help)
     }
 
+    // 条目计数标签（显示在面板右上，区分搜索/标签过滤/普通浏览三种模式）
     private var itemCountLabel: String {
         if viewModel.isFiltering {
-            if viewModel.isSearching { return "searching\u{2026}" }
+            // 正在搜索（可能还在遍历子目录）
+            if viewModel.isSearching { return L("mqdir.browser.status.searching") }
+            // 已有搜索/过滤结果
             let count = viewModel.visibleEntries.count
-            return "\(count) match\(count == 1 ? "" : "es")"
+            return L("mqdir.browser.status.matches", count, count == 1 ? "" : L("mqdir.browser.status.matchesPlural"))
         }
+        // 仅按标签过滤
         if viewModel.isTagFiltering {
             let count = viewModel.visibleEntries.count
-            return "\(count) match\(count == 1 ? "" : "es")"
+            return L("mqdir.browser.status.matches", count, count == 1 ? "" : L("mqdir.browser.status.matchesPlural"))
         }
+        // 正常显示所有条目
         let total = viewModel.entries.count
-        return "\(total) item\(total == 1 ? "" : "s")"
+        return L("mqdir.browser.status.items", total, total == 1 ? "" : L("mqdir.browser.status.itemsPlural"))
     }
 
+    // 空状态主文案（配合不同过滤状态给出有意义的提示）
     private var emptyStateLabel: String {
         if viewModel.isFiltering {
-            if viewModel.isSearching { return "Searching\u{2026}" }
+            // 还在遍历子目录时的中间状态
+            if viewModel.isSearching { return L("mqdir.browser.empty.searching") }
+            // 有搜索关键词但无命中
             let trimmed = viewModel.searchQuery.trimmingCharacters(in: .whitespaces)
-            return "No matches for \u{201C}\(trimmed)\u{201D}"
+            return L("mqdir.browser.empty.noMatches", trimmed)
         }
+        // 按标签过滤但无命中
         if let tag = viewModel.tagFilter {
-            return "No items tagged \u{201C}\(tag)\u{201D}"
+            return L("mqdir.browser.empty.noTaggedItems", tag)
         }
-        return "No items"
+        // 文件夹本身就是空的
+        return L("mqdir.browser.empty.noItems")
     }
 
     /// While a recursive search is active, show the entry's parent folder
@@ -680,11 +700,11 @@ struct BrowserPaneView: View {
     /// reused across every row's `sizeText(for:)` resolution.
     private static let sizeFormatter = FileSizeFormatter()
 
-    // MARK: Column header
-
+    // 列标题栏：Name/Modified/Size/Kind 四列，支持点击排序和拖拽改列宽
     private var columnHeader: some View {
         HStack(spacing: 0) {
-            sortHeader("Name", key: .name, alignment: .leading)
+            // 名称列：弹性填充（剩余空间都给它）
+            sortHeader(L("mqdir.browser.column.name"), key: .name, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             ColumnResizeHandle { delta in
@@ -693,7 +713,8 @@ struct BrowserPaneView: View {
                 viewModel.columnWidths.modified = next
             }
 
-            sortHeader("Modified", key: .modified, alignment: .leading)
+            // 修改日期列：固定宽度（用户可调）
+            sortHeader(L("mqdir.browser.column.modified"), key: .modified, alignment: .leading)
                 .frame(width: viewModel.columnWidths.modified, alignment: .leading)
 
             ColumnResizeHandle { delta in
@@ -706,7 +727,8 @@ struct BrowserPaneView: View {
                 }
             }
 
-            sortHeader("Size", key: .size, alignment: .trailing)
+            // 大小列：右对齐（数字列视觉惯例）
+            sortHeader(L("mqdir.browser.column.size"), key: .size, alignment: .trailing)
                 .frame(width: viewModel.columnWidths.size, alignment: .trailing)
 
             ColumnResizeHandle { delta in
@@ -719,7 +741,8 @@ struct BrowserPaneView: View {
                 }
             }
 
-            sortHeader("Kind", key: .kind, alignment: .leading)
+            // 种类列：描述文件类型（Application / Folder / Image 等）
+            sortHeader(L("mqdir.browser.column.kind"), key: .kind, alignment: .leading)
                 .frame(width: viewModel.columnWidths.kind, alignment: .leading)
         }
         .font(Theme.Font.columnHeader)
@@ -732,6 +755,7 @@ struct BrowserPaneView: View {
         }
     }
 
+    // 单个排序表头：点击切换排序键，当前键再点一次切换升降序
     private func sortHeader(_ title: String, key: FileEntrySortKey, alignment: HorizontalAlignment) -> some View {
         let isActive = viewModel.sortKey == key
         return Button {
@@ -753,15 +777,13 @@ struct BrowserPaneView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // Right-click any column header to toggle folder pinning. Same
-        // surface as the sort key affordance, so users discover it
-        // when they're already thinking about how the list is sorted.
+        // 右键列头：切换"文件夹置顶"
         .contextMenu {
             Button {
                 viewModel.setFoldersOnTop(!viewModel.foldersOnTop)
             } label: {
                 Label(
-                    "Folders on Top",
+                    L("mqdir.browser.sort.foldersOnTop"),
                     systemImage: viewModel.foldersOnTop ? "checkmark" : ""
                 )
             }

@@ -126,8 +126,34 @@
 
 "mqdir.sidebar.dropHere" = "Drag folders here to add";
 
+// 新增：侧边栏 section header 和帮助菜单
+"mqdir.sidebar.section.favorites" = "FAVORITES";
+"mqdir.sidebar.section.tags" = "TAGS";
 "mqdir.sidebar.section.projects" = "PROJECTS";
 "mqdir.sidebar.project.new" = "New Project";
+
+"mqdir.sidebar.help.welcome" = "Welcome to mq-dir";
+"mqdir.sidebar.feedback" = "Send Feedback";
+"mqdir.sidebar.starGithub" = "⭐ Star on GitHub";
+"mqdir.sidebar.checkUpdates" = "Check for Updates";
+"mqdir.sidebar.dismissPill" = "Don't show this again";
+
+// 新增：侧边栏上下文菜单（收藏夹 / 项目）
+"mqdir.sidebar.rename" = "Rename";
+"mqdir.sidebar.removeFavorite" = "Remove from Sidebar";
+"mqdir.sidebar.deleteProject" = "Delete";
+
+// 新增：侧边栏更新提示 pill 标签
+"mqdir.sidebar.updateAvailable" = "Update Available";
+"mqdir.sidebar.updateAvailableVersion" = "Update Available: %@";
+
+// 新增：cmux 同步提示和空状态
+"mqdir.sidebar.cmux.syncing" = "Syncing…";
+"mqdir.sidebar.cmux.syncAction" = "Sync";
+"mqdir.sidebar.cmux.noWorkspaces" = "No cmux workspaces yet.";
+"mqdir.sidebar.cmux.pressSync" = "Press Sync to fetch cmux workspaces.";
+"mqdir.sidebar.cmux.noWorkingDir" = "no working directory";
+"mqdir.sidebar.folderUnavailable" = "Folder unavailable";
 
 "mqdir.sidebar.tags.empty" = "No tags in this folder";
 "mqdir.sidebar.tags.filterHint" = "Filter the focused tab by “%@”";
@@ -164,6 +190,31 @@
 "mqdir.browser.empty.retry" = "Try Again";
 "mqdir.browser.empty.noItems" = "No items";
 "mqdir.browser.empty.placeholder" = "—";
+
+// 新增：列标题
+"mqdir.browser.column.name" = "Name";
+"mqdir.browser.column.modified" = "Modified";
+"mqdir.browser.column.size" = "Size";
+"mqdir.browser.column.kind" = "Kind";
+
+// 新增：排序菜单
+"mqdir.browser.sortBy" = "Sort By";
+"mqdir.browser.sort.dateModified" = "Date Modified";
+"mqdir.browser.sort.foldersOnTop" = "Folders on Top";
+"mqdir.browser.sort.showHiddenFiles" = "Show Hidden Files";
+
+// 新增：标签页默认标题
+"mqdir.browser.tab.untitled" = "Untitled";
+
+// 新增：项目数/匹配数 (BrowserPaneView 右上角/空状态文本)
+"mqdir.browser.status.searching" = "searching…";
+"mqdir.browser.status.matches" = "%lu match%@";
+"mqdir.browser.status.matchesPlural" = "es";
+"mqdir.browser.status.items" = "%lu item%@";
+"mqdir.browser.status.itemsPlural" = "s";
+"mqdir.browser.empty.searching" = "Searching…";
+"mqdir.browser.empty.noMatches" = "No matches for “%@”";
+"mqdir.browser.empty.noTaggedItems" = "No items tagged “%@”";
 
 // MARK: - Preview panel
 
@@ -224,3 +275,72 @@
 "mqdir.common.clear" = "Clear";
 "mqdir.common.search" = "Search";
 "mqdir.common.done" = "Done";
+"mqdir.common.delete" = "Delete";
+"mqdir.common.ok" = "OK";
+
+// 新增：通用上下文菜单（文件右键）
+"mqdir.context.open" = "Open";
+"mqdir.context.openNItems" = "Open %lu Items";
+"mqdir.context.openWith" = "Open With";
+"mqdir.context.openWithOther" = "Other…";
+"mqdir.context.getInfo" = "Get Info";
+"mqdir.context.getInfoN" = "Get Info (%lu)";
+"mqdir.context.revealInFinder" = "Reveal in Finder";
+"mqdir.context.revealInTree" = "Reveal in Tree";
+"mqdir.context.calcSize" = "Calculate Size";
+"mqdir.context.calcSizeN" = "Calculate Size (%lu)";
+"mqdir.context.tags" = "Tags";
+"mqdir.context.clearTags" = "Clear Tags";
+"mqdir.context.copyItems" = "Copy %lu Items";
+"mqdir.context.copyOne" = "Copy “%@”";
+"mqdir.context.copyPath" = "Copy Path";
+"mqdir.context.duplicate" = "Duplicate";
+"mqdir.context.duplicateN" = "Duplicate %lu Items";
+"mqdir.context.rename" = "Rename";
+"mqdir.context.normalizeNFC" = "Normalize Filename to NFC";
+"mqdir.context.normalizeNFCN" = "Normalize %lu Filenames to NFC";
+"mqdir.context.moveToTrash" = "Move to Trash";
+"mqdir.context.moveNToTrash" = "Move %lu Items to Trash";
+"mqdir.context.deleteImmediately" = "Delete Immediately…";
+"mqdir.context.deleteNImmediately" = "Delete %lu Items Immediately…";
+"mqdir.context.compressOne" = "Compress “%@”";
+"mqdir.context.compressN" = "Compress %lu Items";
+"mqdir.context.extract" = "Extract";
+"mqdir.context.extractN" = "Extract %lu Archives";
+"mqdir.context.chooseApp" = "Choose Application";
+
+// 新增：对话框文本（删除/压缩失败）
+"mqdir.dialog.deleteOnePermanently" = "Delete “%@” permanently?";
+"mqdir.dialog.deleteNPermanently" = "Delete %lu items permanently?";
+"mqdir.dialog.deleteHint" = "These items will be deleted immediately. You can't undo this action.";
+"mqdir.dialog.deleteFailedOne" = "Couldn't delete “%@”";
+"mqdir.dialog.deleteFailedN" = "Couldn't delete %lu items";
+"mqdir.dialog.compressCrossFolder" = "Can't compress items from different folders";
+"mqdir.dialog.compressCrossFolderHint" = "Select items from one folder to compress them together.";
+"mqdir.dialog.compressFailedOne" = "Couldn't compress “%@”";
+
+// 新增：面包屑右键菜单
+"mqdir.breadcrumb.openInTerminal" = "Open in Terminal";
+"mqdir.breadcrumb.openInCmux" = "Open in cmux";
+"mqdir.breadcrumb.openInFinder" = "Open in Finder";
+"mqdir.breadcrumb.openFolder" = "Open Folder…";
+
+// 新增：杂项（视图模式 tooltip / 展开折叠 / 侧边栏默认收藏夹 / 选择文件夹面板 / 空面板占位符）
+"mqdir.misc.listView" = "List View";
+"mqdir.misc.treeView" = "Tree View";
+"mqdir.misc.expand" = "Expand";
+"mqdir.misc.collapse" = "Collapse";
+"mqdir.misc.noFolderSelected" = "No folder selected";
+"mqdir.misc.openFolderPanelTitle" = "Open Folder";
+"mqdir.misc.openFolderPanelPrompt" = "Open";
+"mqdir.misc.openFolderPanelMessage" = "Choose a folder to browse in mq-dir.";
+"mqdir.misc.selectFileToPreview" = "Select a file to preview";
+"mqdir.misc.selectEntryToPreview" = "Select an entry to preview";
+
+// 新增：侧边栏默认收藏夹（系统目录名，英文下保留原名）
+"mqdir.favorites.desktop" = "Desktop";
+"mqdir.favorites.documents" = "Documents";
+"mqdir.favorites.downloads" = "Downloads";
+"mqdir.favorites.pictures" = "Pictures";
+"mqdir.favorites.movies" = "Movies";
+"mqdir.favorites.music" = "Music";

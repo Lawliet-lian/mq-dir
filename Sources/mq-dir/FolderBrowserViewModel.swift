@@ -2,6 +2,14 @@ import AppKit
 import CoreGraphics
 import Foundation
 
+// 文件级本地化辅助函数，与其他视图保持相同签名。
+// FolderBrowserViewModel 主要包含 NSAlert 对话框文本，需要走相同的 key 命名空间。
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 // `PaneColumnWidths` and `FileEntrySortKey` now live in `Sources/Core/` so
 // that persisted pane state is fully testable from `swift test`. They are
 // re-exported by being members of the same Xcode module.
@@ -566,14 +574,18 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     }
 
     var folderDisplayPath: String {
-        folderURL?.path(percentEncoded: false) ?? "No folder selected"
+        // 未选择文件夹时提供兜底的本地化文本
+        folderURL?.path(percentEncoded: false) ?? L("mqdir.misc.noFolderSelected")
     }
 
     func chooseFolder() {
         let panel = NSOpenPanel()
-        panel.title = "Open Folder"
-        panel.prompt = "Open"
-        panel.message = "Choose a folder to browse in mq-dir."
+        // 选择文件夹面板的标题
+        panel.title = L("mqdir.misc.openFolderPanelTitle")
+        // 面板右下角确认按钮的文案
+        panel.prompt = L("mqdir.misc.openFolderPanelPrompt")
+        // 面板顶部引导语
+        panel.message = L("mqdir.misc.openFolderPanelMessage")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -1224,12 +1236,15 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
+        // 单文件：显示"删除 <文件名>？"，多文件："删除 N 个项目？"
         alert.messageText = urls.count == 1
-            ? "Delete \u{201C}\(urls[0].lastPathComponent)\u{201D} permanently?"
-            : "Delete \(urls.count) items permanently?"
-        alert.informativeText = "These items will be deleted immediately. You can't undo this action."
-        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
+            ? L("mqdir.dialog.deleteOnePermanently", urls[0].lastPathComponent)
+            : L("mqdir.dialog.deleteNPermanently", urls.count)
+        // 提示用户该操作无法撤销
+        alert.informativeText = L("mqdir.dialog.deleteHint")
+        // 第一个按钮"删除"标记为 destructive 样式（系统会渲染红色）
+        alert.addButton(withTitle: L("mqdir.common.delete")).hasDestructiveAction = true
+        alert.addButton(withTitle: L("mqdir.common.cancel"))
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
@@ -1244,14 +1259,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             if !failures.isEmpty {
                 let report = NSAlert()
                 report.alertStyle = .warning
+                // 删除失败报告：单文件"未删除 <文件名>"，多文件"未能删除 N 个项目"
                 report.messageText = failures.count == 1
-                    ? "Couldn't delete \u{201C}\(failures[0].0.lastPathComponent)\u{201D}"
-                    : "Couldn't delete \(failures.count) items"
+                    ? L("mqdir.dialog.deleteFailedOne", failures[0].0.lastPathComponent)
+                    : L("mqdir.dialog.deleteFailedN", failures.count)
+                // 最多罗列前 8 个失败项，避免 alert 过高
                 report.informativeText = failures
                     .prefix(8)
                     .map { "• \($0.0.lastPathComponent): \($0.1)" }
                     .joined(separator: "\n")
-                report.addButton(withTitle: "OK")
+                report.addButton(withTitle: L("mqdir.common.ok"))
                 report.runModal()
             }
         }
@@ -1283,9 +1300,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         } catch FileOperationService.CompressError.crossFolder {
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Can't compress items from different folders"
-            alert.informativeText = "Select items from one folder to compress them together."
-            alert.addButton(withTitle: "OK")
+            // 跨文件夹压缩不支持（zip 命令假设同一工作目录）
+            alert.messageText = L("mqdir.dialog.compressCrossFolder")
+            alert.informativeText = L("mqdir.dialog.compressCrossFolderHint")
+            alert.addButton(withTitle: L("mqdir.common.ok"))
             alert.runModal()
             return
         } catch {
@@ -1312,9 +1330,10 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
             if let failure {
                 let alert = NSAlert()
                 alert.alertStyle = .warning
-                alert.messageText = "Couldn't compress \u{201C}\(destination.lastPathComponent)\u{201D}"
+                // 压缩失败：显示目标文件名（如"Archive.zip"）和具体错误
+                alert.messageText = L("mqdir.dialog.compressFailedOne", destination.lastPathComponent)
                 alert.informativeText = failure
-                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: L("mqdir.common.ok"))
                 alert.runModal()
             }
         }
