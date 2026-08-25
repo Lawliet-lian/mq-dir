@@ -10,6 +10,7 @@ private func L(_ key: String, _ args: CVarArg...) -> String {
 
 struct MenuCommands: Commands {
     @ObservedObject var workspace: WorkspaceManager
+    @ObservedObject private var undoManager = AppUndoManager.shared
 
     /// Resolved binding for a customisable action — user override
     /// from `WorkspaceSettings`, falling back to the default. Used
@@ -45,6 +46,30 @@ struct MenuCommands: Commands {
             Divider()
             Button(L("mqdir.menu.file.addToFavorites")) { post(.addCurrentFolderToFavorites) }
                 .keyboardShortcut(binding(.addToFavorites))
+        }
+
+        // 替换系统撤销/重做组，使用我们自己的文件操作撤销栈
+        CommandGroup(replacing: .undoRedo) {
+            Button {
+                Task { @MainActor in
+                    undoManager.undo()
+                }
+            } label: {
+                Text(L("mqdir.menu.edit.undo"))
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            .disabled(!undoManager.canUndo)
+
+            Button {
+                Task { @MainActor in
+                    undoManager.redo()
+                }
+            } label: {
+                Text(L("mqdir.menu.edit.redo"))
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!undoManager.canRedo)
+            Divider()
         }
 
         // Replace the system pasteboard group entirely so file-level

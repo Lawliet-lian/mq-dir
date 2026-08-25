@@ -45,6 +45,9 @@
 "mqdir.menu.file.revealInFinder" = "Reveal in Finder";
 "mqdir.menu.file.addToFavorites" = "Add to Favorites";
 
+"mqdir.menu.edit.undo" = "Undo";
+"mqdir.menu.edit.redo" = "Redo";
+
 "mqdir.menu.edit.cut" = "Cut";
 "mqdir.menu.edit.copy" = "Copy";
 "mqdir.menu.edit.paste" = "Paste";

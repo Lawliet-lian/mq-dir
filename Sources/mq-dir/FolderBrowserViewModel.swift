@@ -1186,17 +1186,22 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         // the resolved `isCut` flag plus the URLs.
         let isCut = pb.types?.contains(Self.cutMarkerType) == true
         Task {
-            let failures = await Task.detached(priority: .userInitiated) {
+            let result = await Task.detached(priority: .userInitiated) {
                 // Same standardized self-drop + descendant guards drop
                 // uses, so paste-into-same-folder and paste-into-descendant
                 // behave identically to a drag-drop.
                 FileOperationService.transfer(items, into: folder, move: isCut, normalizeHangul: normalizeHangul)
             }.value
-            for (source, error) in failures {
+            for (source, errorDesc) in result.failures {
                 FileHandle.standardError.write(
-                    Data("[mq-dir paste] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                    Data("[mq-dir paste] \(source.lastPathComponent): \(errorDesc)\n".utf8)
                 )
             }
+            // 注册撤销操作
+            await AppUndoManager.shared.registerOperation(
+                operationType: isCut ? .move : .copy,
+                result: result
+            )
             // After a cut+paste the source URLs are gone, so wipe the
             // pasteboard to avoid a follow-up paste silently failing on
             // missing files. Plain-copy paste leaves the clipboard alone
@@ -1250,8 +1255,7 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
         Task {
             let failures: [(URL, String)] = await Task.detached(priority: .userInitiated) {
-                FileOperationService.permanentlyDelete(urls)
-                    .map { ($0.0, $0.1.localizedDescription) }
+                FileOperationService.permanentlyDelete(urls).failures
             }.value
 
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
@@ -1503,14 +1507,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func duplicate(_ entries: [FileEntry], normalizeHangul: Bool = false) {
         let urls = entries.map(\.url)
         Task {
-            let failures = await Task.detached(priority: .userInitiated) {
+            let result = await Task.detached(priority: .userInitiated) {
                 FileOperationService.duplicate(urls, normalizeHangul: normalizeHangul)
             }.value
-            for (source, error) in failures {
+            for (source, errorDesc) in result.failures {
                 FileHandle.standardError.write(
-                    Data("[mq-dir duplicate] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                    Data("[mq-dir duplicate] \(source.lastPathComponent): \(errorDesc)\n".utf8)
                 )
             }
+            // 注册撤销操作（duplicate 本质是 copy）
+            await AppUndoManager.shared.registerOperation(operationType: .copy, result: result)
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
     }
@@ -1571,7 +1577,12 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
         guard !trimmed.isEmpty, trimmed != entry.name else { return }
 
         do {
+            let oldURL = entry.url
             let newURL = try FileOperationService.rename(entry.url, to: trimmed)
+            // 注册撤销操作
+            Task {
+                await AppUndoManager.shared.registerRename(oldURL: oldURL, newURL: newURL)
+            }
             // FileEntry.ID is the URL, so the renamed row gets a brand-new ID
             // after the fs-changed reload. Migrate the selection / anchor /
             // cursor from the old ID to the new URL *now* so the renamed row
@@ -1647,14 +1658,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     func moveToTrash(_ entries: [FileEntry]) {
         let urls = entries.map(\.url)
         Task {
-            let failures = await Task.detached(priority: .userInitiated) {
+            let result = await Task.detached(priority: .userInitiated) {
                 FileOperationService.moveToTrash(urls)
             }.value
-            for (url, error) in failures {
+            for (url, errorDesc) in result.failures {
                 FileHandle.standardError.write(
-                    Data("[mq-dir trash] \(url.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                    Data("[mq-dir trash] \(url.lastPathComponent): \(errorDesc)\n".utf8)
                 )
             }
+            // 注册撤销操作
+            await AppUndoManager.shared.registerOperation(operationType: .trash, result: result)
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
     }
@@ -1665,14 +1678,19 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// (Finder convention). After completion, broadcasts a system-wide reload.
     func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool, normalizeHangul: Bool = false) {
         Task {
-            let failures = await Task.detached(priority: .userInitiated) {
+            let result = await Task.detached(priority: .userInitiated) {
                 FileOperationService.transfer(urls, into: destinationFolder, move: !copy, normalizeHangul: normalizeHangul)
             }.value
-            for (source, error) in failures {
+            for (source, errorDesc) in result.failures {
                 FileHandle.standardError.write(
-                    Data("[mq-dir drop] \(source.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                    Data("[mq-dir drop] \(source.lastPathComponent): \(errorDesc)\n".utf8)
                 )
             }
+            // 注册撤销操作：move 或 copy
+            await AppUndoManager.shared.registerOperation(
+                operationType: copy ? .copy : .move,
+                result: result
+            )
             NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
         }
     }

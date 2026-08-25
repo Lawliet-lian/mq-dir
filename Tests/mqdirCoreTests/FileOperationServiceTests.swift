@@ -133,12 +133,12 @@ final class FileOperationServiceTests: XCTestCase {
     func testTransfer_copyBasicSuccess() throws {
         try writeFile("src.txt", contents: "hello")
         let dst = try makeDirectory("dst")
-        let failures = FileOperationService.transfer(
+        let result = FileOperationService.transfer(
             [tempDirectory.appendingPathComponent("src.txt")],
             into: dst,
             move: false
         )
-        XCTAssertTrue(failures.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst.appendingPathComponent("src.txt").path))
         // Copy leaves the source.
         XCTAssertTrue(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("src.txt").path))
@@ -147,12 +147,12 @@ final class FileOperationServiceTests: XCTestCase {
     func testTransfer_moveRemovesSource() throws {
         try writeFile("src.txt", contents: "hello")
         let dst = try makeDirectory("dst")
-        let failures = FileOperationService.transfer(
+        let result = FileOperationService.transfer(
             [tempDirectory.appendingPathComponent("src.txt")],
             into: dst,
             move: true
         )
-        XCTAssertTrue(failures.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst.appendingPathComponent("src.txt").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("src.txt").path))
     }
@@ -162,12 +162,12 @@ final class FileOperationServiceTests: XCTestCase {
         try writeFile("src.txt", contents: "new")
         // Pre-seed a colliding file in dst.
         try Data("old".utf8).write(to: dst.appendingPathComponent("src.txt"))
-        let failures = FileOperationService.transfer(
+        let result = FileOperationService.transfer(
             [tempDirectory.appendingPathComponent("src.txt")],
             into: dst,
             move: false
         )
-        XCTAssertTrue(failures.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst.appendingPathComponent("src.txt").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst.appendingPathComponent("src 2.txt").path))
     }
@@ -177,9 +177,9 @@ final class FileOperationServiceTests: XCTestCase {
         try writeFile("good.txt", contents: "x")
         let missing = tempDirectory.appendingPathComponent("nonexistent.txt")
         let good = tempDirectory.appendingPathComponent("good.txt")
-        let failures = FileOperationService.transfer([missing, good], into: dst, move: false)
-        XCTAssertEqual(failures.count, 1)
-        XCTAssertEqual(failures.first?.0, missing)
+        let result = FileOperationService.transfer([missing, good], into: dst, move: false)
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertEqual(result.failures.first?.0, missing)
         // The good file still transferred despite the earlier failure.
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst.appendingPathComponent("good.txt").path))
     }
@@ -188,8 +188,8 @@ final class FileOperationServiceTests: XCTestCase {
         try writeFile("file.txt", contents: "x")
         let src = tempDirectory.appendingPathComponent("file.txt")
         // Dropping into its own parent folder: dest == source, skipped, no rename copy made.
-        let failures = FileOperationService.transfer([src], into: tempDirectory, move: false)
-        XCTAssertTrue(failures.isEmpty)
+        let result = FileOperationService.transfer([src], into: tempDirectory, move: false)
+        XCTAssertTrue(result.failures.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("file 2.txt").path))
     }
 
@@ -198,8 +198,8 @@ final class FileOperationServiceTests: XCTestCase {
         let child = parent.appendingPathComponent("child", isDirectory: true)
         try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
         // Move "parent" into "parent/child" — descendant target, must be rejected.
-        let failures = FileOperationService.transfer([parent], into: child, move: true)
-        XCTAssertTrue(failures.isEmpty)
+        let result = FileOperationService.transfer([parent], into: child, move: true)
+        XCTAssertTrue(result.failures.isEmpty)
         // parent still exists where it was, nothing was moved into child.
         XCTAssertTrue(FileManager.default.fileExists(atPath: parent.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: child.appendingPathComponent("parent").path))
@@ -209,16 +209,16 @@ final class FileOperationServiceTests: XCTestCase {
 
     func testDuplicate_namesWithSpaceSuffix() throws {
         try writeFile("photo.png", contents: "x")
-        let failures = FileOperationService.duplicate([tempDirectory.appendingPathComponent("photo.png")])
-        XCTAssertTrue(failures.isEmpty)
+        let result = FileOperationService.duplicate([tempDirectory.appendingPathComponent("photo.png")])
+        XCTAssertTrue(result.failures.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("photo 2.png").path))
     }
 
     func testDuplicate_failureRecorded() {
         let missing = tempDirectory.appendingPathComponent("ghost.txt")
-        let failures = FileOperationService.duplicate([missing])
-        XCTAssertEqual(failures.count, 1)
-        XCTAssertEqual(failures.first?.0, missing)
+        let result = FileOperationService.duplicate([missing])
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertEqual(result.failures.first?.0, missing)
     }
 
     // MARK: normalize-on-write (NFD → NFC)
@@ -231,9 +231,9 @@ final class FileOperationServiceTests: XCTestCase {
         let src = try writeRaw(named: nfdName, in: tempDirectory, contents: "x")
         let dst = try makeDirectory("dst")
 
-        let failures = FileOperationService.transfer([src], into: dst, move: false, normalizeHangul: true)
+        let result = FileOperationService.transfer([src], into: dst, move: false, normalizeHangul: true)
 
-        XCTAssertTrue(failures.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty)
         let names = onDiskNames(in: dst)
         XCTAssertTrue(names.contains { $0.utf8.elementsEqual(nfcName.utf8) },
                       "destination name must be NFC bytes when normalizeHangul is true")
@@ -246,9 +246,9 @@ final class FileOperationServiceTests: XCTestCase {
         let src = try writeRaw(named: nfdName, in: tempDirectory, contents: "x")
         let dst = try makeDirectory("dst")
 
-        let failures = FileOperationService.transfer([src], into: dst, move: false, normalizeHangul: false)
+        let result = FileOperationService.transfer([src], into: dst, move: false, normalizeHangul: false)
 
-        XCTAssertTrue(failures.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty)
         let names = onDiskNames(in: dst)
         XCTAssertTrue(names.contains { $0.utf8.elementsEqual(nfdName.utf8) },
                       "destination name must stay NFD bytes when normalizeHangul is false")
@@ -258,9 +258,9 @@ final class FileOperationServiceTests: XCTestCase {
         let nfdStem = "한글".decomposedStringWithCanonicalMapping
         let src = try writeRaw(named: nfdStem + ".txt", in: tempDirectory, contents: "x")
 
-        let failures = FileOperationService.duplicate([src], normalizeHangul: true)
+        let result = FileOperationService.duplicate([src], normalizeHangul: true)
 
-        XCTAssertTrue(failures.isEmpty)
+        XCTAssertTrue(result.failures.isEmpty)
         // The duplicate's stem is " 2"-suffixed; assert the copy on disk
         // is NFC by checking no entry still carries a decomposed name.
         let names = onDiskNames(in: tempDirectory)
@@ -280,10 +280,10 @@ final class FileOperationServiceTests: XCTestCase {
         try writeFile("doomed.txt", contents: "x")
         let doomed = tempDirectory.appendingPathComponent("doomed.txt")
         let missing = tempDirectory.appendingPathComponent("absent.txt")
-        let failures = FileOperationService.permanentlyDelete([doomed, missing])
+        let result = FileOperationService.permanentlyDelete([doomed, missing])
         XCTAssertFalse(FileManager.default.fileExists(atPath: doomed.path))
-        XCTAssertEqual(failures.count, 1)
-        XCTAssertEqual(failures.first?.0, missing)
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertEqual(result.failures.first?.0, missing)
     }
 
     // MARK: createDirectory / rename

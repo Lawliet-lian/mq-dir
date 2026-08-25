@@ -45,6 +45,9 @@
 "mqdir.menu.file.revealInFinder" = "在访达中显示";
 "mqdir.menu.file.addToFavorites" = "添加到收藏夹";
 
+"mqdir.menu.edit.undo" = "撤销";
+"mqdir.menu.edit.redo" = "重做";
+
 "mqdir.menu.edit.cut" = "剪切";
 "mqdir.menu.edit.copy" = "拷贝";
 "mqdir.menu.edit.paste" = "粘贴";

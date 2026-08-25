@@ -162,7 +162,7 @@ struct MainWindowView: View {
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
                 focusedPane.openFolder(url)
             }
-            .frame(minWidth: 160, idealWidth: Theme.Metrics.sidebarWidth, maxWidth: 280)
+            .frame(minWidth: 140, idealWidth: Theme.Metrics.sidebarWidth, maxWidth: 280)
 
             VStack(spacing: 0) {
                 toolbar

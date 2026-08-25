@@ -84,7 +84,7 @@ enum Theme {
         static let columnHeaderHeight: CGFloat  = 22
         static let rowHeight: CGFloat           = 22
         static let statusBarHeight: CGFloat     = 24
-        static let sidebarWidth: CGFloat        = 184
+        static let sidebarWidth: CGFloat        = 140
         static let focusBorderWidth: CGFloat    = 2
     }
 

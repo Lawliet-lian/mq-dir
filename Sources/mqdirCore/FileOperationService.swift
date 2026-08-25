@@ -13,6 +13,18 @@ import Foundation
 /// batch. Callers decide how to present (alert, stderr log, …).
 public enum FileOperationService {
 
+    // MARK: - Operation Result
+
+    /// 文件操作的统一返回结果：包含成功项和失败项。
+    /// `successes` 记录每一项操作前后的 URL 映射，供上层撤销管理器构造反向操作。
+    /// `failures` 存储失败项的 URL 和错误描述（使用 String 而非 Error 以满足 Sendable）。
+    public struct TransferResult: Sendable {
+        public var successes: [(source: URL, destination: URL)] = []
+        public var failures: [(URL, String)] = []
+
+        public init() {}
+    }
+
     // MARK: Collision-rename (unified)
 
     /// The single collision-rename primitive. Returns the first
@@ -180,11 +192,13 @@ public enum FileOperationService {
         move: Bool,
         normalizeHangul: Bool = false,
         fileManager: FileManager = .default
-    ) -> [(URL, Error)] {
-        var failures: [(URL, Error)] = []
+    ) -> TransferResult {
+        var result = TransferResult()
         for source in sources {
             var dest = destinationFolder.appendingPathComponent(source.lastPathComponent)
-            if source.standardizedFileURL == dest.standardizedFileURL { continue }
+            // 只有 move 场景下「把文件放回自己所在目录」才是 no-op 直接跳过；
+            // copy 场景下需要生成 " 2" 后缀副本（如同目录 Cmd+C/V），不能跳过。
+            if move, source.standardizedFileURL == dest.standardizedFileURL { continue }
             if fileManager.fileExists(atPath: dest.path) {
                 dest = conflictRenamedDestination(
                     for: source,
@@ -200,11 +214,12 @@ public enum FileOperationService {
                     try fileManager.copyItem(at: source, to: dest)
                 }
                 normalizeIfRequested(dest, enabled: normalizeHangul)
+                result.successes.append((source: source, destination: dest))
             } catch {
-                failures.append((source, error))
+                result.failures.append((source, error.localizedDescription))
             }
         }
-        return failures
+        return result
     }
 
     /// After a successful copy/move/duplicate, rename the resulting file
@@ -225,8 +240,8 @@ public enum FileOperationService {
         _ sources: [URL],
         normalizeHangul: Bool = false,
         fileManager: FileManager = .default
-    ) -> [(URL, Error)] {
-        var failures: [(URL, Error)] = []
+    ) -> TransferResult {
+        var result = TransferResult()
         for source in sources {
             let parent = source.deletingLastPathComponent()
             let dest = conflictRenamedDestination(
@@ -237,11 +252,12 @@ public enum FileOperationService {
             do {
                 try fileManager.copyItem(at: source, to: dest)
                 normalizeIfRequested(dest, enabled: normalizeHangul)
+                result.successes.append((source: source, destination: dest))
             } catch {
-                failures.append((source, error))
+                result.failures.append((source, error.localizedDescription))
             }
         }
-        return failures
+        return result
     }
 
     /// Move each URL to the trash via `FileManager.trashItem`. Mirrors the
@@ -252,16 +268,22 @@ public enum FileOperationService {
     public static func moveToTrash(
         _ urls: [URL],
         fileManager: FileManager = .default
-    ) -> [(URL, Error)] {
-        var failures: [(URL, Error)] = []
+    ) -> TransferResult {
+        var result = TransferResult()
         for url in urls {
             do {
-                try fileManager.trashItem(at: url, resultingItemURL: nil)
+                var resultingURL: NSURL?
+                try fileManager.trashItem(at: url, resultingItemURL: &resultingURL)
+                if let trashURL = resultingURL as? URL {
+                    result.successes.append((source: url, destination: trashURL))
+                } else {
+                    result.successes.append((source: url, destination: url))
+                }
             } catch {
-                failures.append((url, error))
+                result.failures.append((url, error.localizedDescription))
             }
         }
-        return failures
+        return result
     }
 
     /// Permanently remove each URL via `FileManager.removeItem`. Mirrors
@@ -272,16 +294,16 @@ public enum FileOperationService {
     public static func permanentlyDelete(
         _ urls: [URL],
         fileManager: FileManager = .default
-    ) -> [(URL, Error)] {
-        var failures: [(URL, Error)] = []
+    ) -> TransferResult {
+        var result = TransferResult()
         for url in urls {
             do {
                 try fileManager.removeItem(at: url)
             } catch {
-                failures.append((url, error))
+                result.failures.append((url, error.localizedDescription))
             }
         }
-        return failures
+        return result
     }
 
     // MARK: New folder / rename
