@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 /// Routes a tab drop to `paneVM.move`. The drop "happens" when the user
 /// hovers over a target tab (`dropEntered`) — that gives the immediate
 /// drag-to-reorder feel like Safari, instead of waiting for `performDrop`
@@ -177,13 +183,13 @@ struct BrowserPaneView: View {
     /// already exposed via the column-header menu.
     @ViewBuilder
     private var emptyAreaContextMenu: some View {
-        Button("New Folder") { viewModel.createNewFolder() }
+        Button(L("mqdir.browser.newFolder")) { viewModel.createNewFolder() }
             .keyboardShortcut("n", modifiers: [.command, .shift])
             .disabled(viewModel.folderURL == nil)
 
         Divider()
 
-        Button("Paste") { viewModel.pasteFromPasteboard(normalizeHangul: normalizeHangulOnDragOut) }
+        Button(L("mqdir.browser.paste")) { viewModel.pasteFromPasteboard(normalizeHangul: normalizeHangulOnDragOut) }
             .keyboardShortcut("v", modifiers: .command)
             .disabled(!viewModel.canPasteFiles || viewModel.folderURL == nil)
 
@@ -207,15 +213,15 @@ struct BrowserPaneView: View {
 
         Divider()
 
-        Button("Open in Terminal") { viewModel.openCurrentFolderInTerminal() }
+        Button(L("mqdir.browser.openInTerminal")) { viewModel.openCurrentFolderInTerminal() }
             .disabled(viewModel.folderURL == nil)
         if viewModel.canOpenInCmux {
-            Button("Open in cmux") { viewModel.openCurrentFolderInCmux() }
+            Button(L("mqdir.browser.openInCmux")) { viewModel.openCurrentFolderInCmux() }
                 .disabled(viewModel.folderURL == nil)
         }
-        Button("Open in Finder") { viewModel.openCurrentFolderInFinder() }
+        Button(L("mqdir.browser.openInFinder")) { viewModel.openCurrentFolderInFinder() }
             .disabled(viewModel.folderURL == nil)
-        Button("Copy Path") { viewModel.copyCurrentFolderPath() }
+        Button(L("mqdir.browser.copyPath")) { viewModel.copyCurrentFolderPath() }
             .disabled(viewModel.folderURL == nil)
     }
 
@@ -354,7 +360,7 @@ struct BrowserPaneView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Close Tab")
+            .help(L("mqdir.browser.tab.close"))
         }
         .padding(.leading, 10)
         .padding(.trailing, 4)
@@ -378,17 +384,17 @@ struct BrowserPaneView: View {
             if !isFocused { onFocus() }
         }
         .contextMenu {
-            Button("New Tab") { paneVM.newTab() }
+            Button(L("mqdir.browser.tab.new")) { paneVM.newTab() }
             Divider()
-            Button("Close Tab") { paneVM.closeTab(at: idx) }
-            Button("Close Other Tabs") { paneVM.closeOthers(keep: idx) }
+            Button(L("mqdir.browser.tab.closeTab")) { paneVM.closeTab(at: idx) }
+            Button(L("mqdir.browser.tab.closeOtherTabs")) { paneVM.closeOthers(keep: idx) }
                 .disabled(paneVM.tabs.count <= 1)
-            Button("Close Tabs to the Right") { paneVM.closeToTheRight(of: idx) }
+            Button(L("mqdir.browser.tab.closeToRight")) { paneVM.closeToTheRight(of: idx) }
                 .disabled(idx >= paneVM.tabs.count - 1)
             Divider()
-            Button("Duplicate Tab") { paneVM.duplicate(at: idx) }
+            Button(L("mqdir.browser.tab.duplicate")) { paneVM.duplicate(at: idx) }
             if let url = tab.folderURL {
-                Button("Reveal in Finder") {
+                Button(L("mqdir.menu.file.revealInFinder")) {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
             }
@@ -462,7 +468,7 @@ struct BrowserPaneView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("New Tab (⌘T)")
+        .help(L("mqdir.browser.tab.new"))
     }
 
     // MARK: Folder header strip
@@ -512,12 +518,12 @@ struct BrowserPaneView: View {
                     .foregroundStyle(Theme.Color.labelTertiary)
             }
             .buttonStyle(.plain)
-            .help("Clear tag filter")
+            .help(L("mqdir.browser.tagFilter.clear"))
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(Color.white.opacity(0.06), in: Capsule())
-        .help("Filtering by tag \u{201C}\(tag)\u{201D}")
+        .help(L("mqdir.browser.tagFilter.applied", tag))
     }
 
     /// Folder name + item count strip on the left of the pane header.
@@ -533,7 +539,7 @@ struct BrowserPaneView: View {
                 Text(url.lastPathComponent)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(Theme.Color.label)
-                Text("—")
+                Text(L("mqdir.browser.empty.placeholder"))
                     .foregroundStyle(Theme.Color.labelTertiary)
                 Text(itemCountLabel)
                     .foregroundStyle(Theme.Color.labelSecondary)
@@ -543,7 +549,7 @@ struct BrowserPaneView: View {
             .appKitFileDrag(primary: url, normalizeHangul: normalizeHangulOnDragOut)
             .inactiveDragSource(primary: url, normalizeHangul: normalizeHangulOnDragOut)
         } else {
-            Text("No folder open")
+            Text(L("mqdir.browser.empty.noFolder"))
                 .foregroundStyle(Theme.Color.labelTertiary)
         }
     }
@@ -588,7 +594,7 @@ struct BrowserPaneView: View {
                 )
         }
         .buttonStyle(.plain)
-        .help("Preview Pane (⌘⇧P)")
+        .help(L("mqdir.browser.preview.toggle"))
     }
 
     private func viewModeButton(_ mode: PaneViewMode, symbol: String, help: String) -> some View {
@@ -804,10 +810,10 @@ struct BrowserPaneView: View {
             Image(systemName: "folder.badge.plus")
                 .font(.system(size: 26))
                 .foregroundStyle(Theme.Color.labelTertiary)
-            Text("Open a folder")
+            Text(L("mqdir.browser.empty.openFolder"))
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.Color.labelSecondary)
-            Button("Open Folder…") { viewModel.chooseFolder() }
+            Button(L("mqdir.browser.empty.openFolderButton")) { viewModel.chooseFolder() }
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -818,14 +824,14 @@ struct BrowserPaneView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 22))
                 .foregroundStyle(.yellow)
-            Text("Could not open folder")
+            Text(L("mqdir.browser.empty.openError"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.Color.label)
             Text(message)
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.Color.labelSecondary)
                 .multilineTextAlignment(.center)
-            Button("Try Again") { viewModel.reload() }
+            Button(L("mqdir.browser.empty.retry")) { viewModel.reload() }
                 .controlSize(.small)
         }
         .padding()

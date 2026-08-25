@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 /// VS Code Explorer-style tree view of the focused tab's folder.
 ///
 /// Renders the root folder at depth 0 and lazily descends only into the
@@ -114,7 +120,7 @@ struct TreeFileListView: View {
                 if viewModel.isLoading {
                     ProgressView().controlSize(.small)
                 } else if viewModel.entries.isEmpty {
-                    Text("No items")
+                    Text(L("mqdir.browser.empty.noItems"))
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.Color.labelTertiary)
                 }

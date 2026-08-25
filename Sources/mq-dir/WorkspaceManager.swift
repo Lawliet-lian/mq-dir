@@ -1,5 +1,11 @@
 import Foundation
 
+fileprivate func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 /// App-level owner of the persisted workspace: the project list, which
 /// project is active, and the global Favorites surface. `MainWindowView`
 /// reads from here, mutates through here, and gets re-instantiated by
@@ -142,6 +148,23 @@ final class WorkspaceManager: ObservableObject {
         mutate { $0.settings.normalizeHangulOnDragOut = enabled }
     }
 
+    /// Update the workspace-level language preference. Overrides the
+    /// `AppleLanguages` UserDefaults key so the change takes effect
+    /// immediately (paired with a MainWindowView re-instantiation via
+    /// `.id`), with the standard 500 ms debounced save persisting
+    /// across launches.
+    func setLanguage(_ option: LanguageOption) {
+        guard workspace.settings.language != option else { return }
+        mutate { $0.settings.language = option }
+        // 同步写入 UserDefaults 使 NSLocalizedString 立即生效
+        if let locale = option.localeIdentifier {
+            UserDefaults.standard.set([locale], forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        }
+        UserDefaults.standard.synchronize()
+    }
+
     /// Persist a user override for the given action. Passing `nil`
     /// for `binding` removes the override so the action falls back
     /// to its default. Settings → Shortcuts uses this for both Edit
@@ -231,7 +254,7 @@ final class WorkspaceManager: ObservableObject {
     private func nextProjectName() -> String {
         let existing = Set(workspace.projects.map(\.name))
         var n = workspace.projects.count + 1
-        while existing.contains("Project \(n)") { n += 1 }
-        return "Project \(n)"
+        while existing.contains(L("mqdir.project.nextName", n)) { n += 1 }
+        return L("mqdir.project.nextName", n)
     }
 }

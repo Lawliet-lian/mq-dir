@@ -292,12 +292,33 @@ enum ColorSchemeOption: String, Codable, Sendable, CaseIterable {
     case dark
 }
 
+/// User-facing language preference. Persisted as a stable raw string
+/// so the JSON survives a Swift enum reorder; `system` means
+/// "follow macOS system language" by leaving `AppleLanguages` unset.
+public enum LanguageOption: String, Codable, Sendable, CaseIterable {
+    case system
+    case english
+    case chinese
+
+    /// Map the preference onto a BCP-47 language code for `AppleLanguages`
+    /// override. Returns `nil` for `.system` so the system setting wins.
+    public var localeIdentifier: String? {
+        switch self {
+        case .system:  nil
+        case .english: "en"
+        case .chinese: "zh-Hans"
+        }
+    }
+}
+
 /// Workspace-level user settings. Lives next to favourites and the
 /// project list because it's cross-project; defaults are written
 /// through `WorkspaceState.init(from:)`'s `decodeIfPresent` so old
 /// `state.json` files come back without a re-seed pop.
 struct WorkspaceSettings: Codable, Equatable, Sendable {
     var colorScheme: ColorSchemeOption
+    /// User-facing UI language. `.system` follows macOS system language.
+    var language: LanguageOption
     /// Per-action user overrides for the customisable shortcut set.
     /// Missing entries inherit `ShortcutAction.defaultBinding`. The
     /// menu wiring resolves the live binding via
@@ -313,10 +334,12 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
 
     init(
         colorScheme: ColorSchemeOption = .system,
+        language: LanguageOption = .system,
         shortcutOverrides: [ShortcutAction: ShortcutBinding] = [:],
         normalizeHangulOnDragOut: Bool = false
     ) {
         self.colorScheme = colorScheme
+        self.language = language
         self.shortcutOverrides = shortcutOverrides
         self.normalizeHangulOnDragOut = normalizeHangulOnDragOut
     }
@@ -330,6 +353,7 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case colorScheme
+        case language
         case shortcutOverrides
         case normalizeHangulOnDragOut
     }
@@ -337,6 +361,8 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let colorScheme = c.decode(ColorSchemeOption.self, forKey: .colorScheme, default: .system)
+        // 向后兼容：旧版本 state.json 没有 language 字段，默认 .system
+        let language = c.decode(LanguageOption.self, forKey: .language, default: .system)
         let normalizeHangulOnDragOut = c.decode(Bool.self, forKey: .normalizeHangulOnDragOut, default: false)
 
         // Decode shortcutOverrides per-entry through an AnyCodingKey
@@ -359,6 +385,7 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
 
         self.init(
             colorScheme: colorScheme,
+            language: language,
             shortcutOverrides: overrides,
             normalizeHangulOnDragOut: normalizeHangulOnDragOut
         )

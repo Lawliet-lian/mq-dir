@@ -5,6 +5,13 @@ options:
     macOS: "14.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
+  # 本地化配置：声明支持的语言，使 XcodeGen 在生成 project 时
+  # 将 en.lproj 和 zh-Hans.lproj 视作语言专属资源组。
+  # developmentRegion 为英文（和原项目发布基线一致）。
+  developmentLanguage: en
+  localization:
+    paths:
+      - Resources
 
 settings:
   base:

@@ -4,6 +4,12 @@ import PDFKit
 import QuickLookUI
 import SwiftUI
 
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 /// Right-side preview panel for the focused tab.
 ///
 /// Three render paths, picked by selection state:
@@ -39,13 +45,13 @@ struct PreviewPanel: View {
                     .foregroundStyle(Theme.Color.label)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("—")
+                Text(L("mqdir.preview.placeholder"))
                     .foregroundStyle(Theme.Color.labelTertiary)
                 Text(metadataLine(for: entry))
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.Color.labelSecondary)
             } else {
-                Text("Preview")
+                Text(L("mqdir.preview.title"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.Color.labelSecondary)
             }
@@ -121,7 +127,7 @@ struct PreviewPanel: View {
             Image(systemName: "square.stack.3d.up")
                 .font(.system(size: 22))
                 .foregroundStyle(Theme.Color.labelSecondary)
-            Text("\(entries.count) items selected")
+            Text(L("mqdir.preview.selectionCount", entries.count))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Theme.Color.label)
             Text(ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file))

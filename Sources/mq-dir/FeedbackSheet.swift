@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 /// Modal sheet for "Help → Send Feedback".
 ///
 /// POSTs the message + optional image attachments straight to a Discord
@@ -58,9 +64,9 @@ struct FeedbackSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Send Feedback")
+            Text(L("mqdir.feedback.title"))
                 .font(.system(size: 16, weight: .semibold))
-            Text("A human will read this! You can also reach us at \(recipient).")
+            Text(L("mqdir.feedback.intro", recipient))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
@@ -68,7 +74,7 @@ struct FeedbackSheet: View {
 
     private var emailField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Your Email")
+            Text(L("mqdir.feedback.email"))
                 .font(.system(size: 12, weight: .semibold))
             TextField("you@example.com", text: $email)
                 .textFieldStyle(.roundedBorder)
@@ -79,10 +85,10 @@ struct FeedbackSheet: View {
     private var messageField: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Message")
+                Text(L("mqdir.feedback.message"))
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Text("\(message.count)/\(messageLimit)")
+                Text(L("mqdir.feedback.messageCount", message.count, messageLimit))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -108,7 +114,7 @@ struct FeedbackSheet: View {
                         }
                     }
                 if message.isEmpty {
-                    Text("Share feedback, feature requests, or issues.")
+                    Text(L("mqdir.feedback.placeholder"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 9)
@@ -124,19 +130,19 @@ struct FeedbackSheet: View {
             Button(action: pickImages) {
                 HStack(spacing: 4) {
                     Image(systemName: "paperclip")
-                    Text("Attach Images")
+                    Text(L("mqdir.feedback.attachImages"))
                 }
             }
             .disabled(isSending)
             if attachments.isEmpty {
-                Text("Up to \(attachmentLimit) images.")
+                Text(L("mqdir.feedback.attachLimit", attachmentLimit))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             } else {
-                Text("\(attachments.count) attached")
+                Text(L("mqdir.feedback.attachedCount", attachments.count))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                Button("Clear") { attachments.removeAll() }
+                Button(L("mqdir.feedback.clearAttachments")) { attachments.removeAll() }
                     .buttonStyle(.plain)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -149,10 +155,10 @@ struct FeedbackSheet: View {
     private var buttonRow: some View {
         HStack {
             Spacer()
-            Button("Cancel") { dismiss() }
+            Button(L("mqdir.common.cancel")) { dismiss() }
                 .keyboardShortcut(.cancelAction)
                 .disabled(isSending)
-            Button(isSending ? "Sending…" : "Send") {
+            Button(isSending ? "Sending…" : L("mqdir.feedback.send")) {
                 Task { await send() }
             }
             .keyboardShortcut(.defaultAction)
@@ -164,12 +170,12 @@ struct FeedbackSheet: View {
 
     private var successBody: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Send Feedback")
+            Text(L("mqdir.feedback.title"))
                 .font(.system(size: 16, weight: .semibold))
             VStack(alignment: .leading, spacing: 8) {
-                Text("Thanks for the feedback.")
+                Text(L("mqdir.feedback.thanks"))
                     .font(.system(size: 13, weight: .semibold))
-                Text("You can also reach us at \(recipient).")
+                Text(L("mqdir.feedback.thanksEmail", recipient))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -180,12 +186,12 @@ struct FeedbackSheet: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "star.fill")
-                            Text("Star on GitHub")
+                            Text(L("mqdir.feedback.starGithub"))
                         }
                     }
                 }
                 Spacer()
-                Button("Done") { dismiss() }
+                Button(L("mqdir.common.done")) { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
         }

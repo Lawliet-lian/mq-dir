@@ -1,0 +1,226 @@
+/*
+ mq-dir Localizable.strings (zh-Hans / 简体中文)
+
+ Keys are dot-namespaced (与英文文件保持一致的命名空间)：
+   - mqdir.app.*         :  应用全局
+   - mqdir.menu.*        :  菜单栏项目（文件 / 编辑 / 显示 / 窗口）
+   - mqdir.settings.*    :  设置窗口（外观 / 语言 / 快捷键 / 文件名）
+   - mqdir.shortcut.*    :  ShortcutAction 人类可读标签
+   - mqdir.sidebar.*     :  侧边栏 UI（项目 / 收藏夹 / 标签 / cmux）
+   - mqdir.browser.*     :  文件浏览面板（工具栏 / 标签 / 右键菜单 / 空状态）
+   - mqdir.preview.*     :  预览面板和 ZIP 预览字符串
+   - mqdir.feedback.*    :  反馈表单
+   - mqdir.main.*        :  主窗口工具栏 / 状态栏 / 搜索框
+   - mqdir.colorScheme.* :  外观选择器标签
+   - mqdir.language.*    :  语言选择器标签
+   - mqdir.common.*      :  通用动词（取消 / 保存 / 清除 / 搜索 …）
+   - mqdir.project.*     :  项目 CRUD 辅助（项目默认命名等）
+*/
+
+// MARK: - app-level
+
+"mqdir.app.title" = "mq-dir";
+"mqdir.app.github" = "访问 mq-dir GitHub 仓库";
+
+// MARK: - 外观选择器
+
+"mqdir.colorScheme.system" = "跟随系统";
+"mqdir.colorScheme.light" = "浅色";
+"mqdir.colorScheme.dark" = "深色";
+
+// MARK: - 语言选择器
+
+"mqdir.language.system" = "跟随系统";
+"mqdir.language.english" = "English";
+"mqdir.language.chinese" = "简体中文";
+
+// MARK: - 菜单栏
+
+"mqdir.menu.file.newWindow" = "新建窗口";
+"mqdir.menu.file.newTab" = "新建标签页";
+"mqdir.menu.file.openFolder" = "打开文件夹…";
+"mqdir.menu.file.openSelected" = "打开选中项";
+"mqdir.menu.file.closeTab" = "关闭标签页";
+"mqdir.menu.file.reopenClosedTab" = "重新打开已关闭标签";
+"mqdir.menu.file.revealInFinder" = "在访达中显示";
+"mqdir.menu.file.addToFavorites" = "添加到收藏夹";
+
+"mqdir.menu.edit.cut" = "剪切";
+"mqdir.menu.edit.copy" = "拷贝";
+"mqdir.menu.edit.paste" = "粘贴";
+"mqdir.menu.edit.moveToTrash" = "移到废纸篓";
+"mqdir.menu.edit.deleteImmediately" = "立即删除…";
+"mqdir.menu.edit.selectAll" = "全选";
+"mqdir.menu.edit.openWithDefaultApp" = "使用默认应用打开";
+"mqdir.menu.edit.duplicate" = "拷贝副本";
+"mqdir.menu.edit.copyFilePath" = "拷贝文件路径";
+"mqdir.menu.edit.copyFolderPath" = "拷贝文件夹路径";
+"mqdir.menu.edit.copyName" = "拷贝名称";
+"mqdir.menu.edit.rename" = "重命名";
+
+"mqdir.menu.view.find" = "查找";
+"mqdir.menu.view.showPreview" = "显示预览";
+"mqdir.menu.view.back" = "后退";
+"mqdir.menu.view.forward" = "前进";
+"mqdir.menu.view.reload" = "重新载入";
+"mqdir.menu.view.parentFolder" = "上层文件夹";
+"mqdir.menu.view.toggleHiddenFiles" = "显示/隐藏隐藏文件";
+"mqdir.menu.view.asList" = "列表视图";
+"mqdir.menu.view.asTree" = "树形视图";
+
+"mqdir.menu.window.showNextTab" = "显示下一个标签页";
+"mqdir.menu.window.showPreviousTab" = "显示上一个标签页";
+"mqdir.menu.window.selectTab" = "选择标签页 %ld";
+"mqdir.menu.window.focusPane" = "聚焦面板 %ld";
+
+// MARK: - ShortcutAction 标签
+
+"mqdir.shortcut.moveToTrash" = "移到废纸篓";
+"mqdir.shortcut.deleteImmediately" = "立即删除";
+"mqdir.shortcut.newTab" = "新建标签页";
+"mqdir.shortcut.closeTab" = "关闭标签页";
+"mqdir.shortcut.reload" = "重新载入";
+"mqdir.shortcut.find" = "查找";
+"mqdir.shortcut.openFolder" = "打开文件夹";
+"mqdir.shortcut.parentFolder" = "上层文件夹";
+"mqdir.shortcut.togglePreview" = "显示预览";
+"mqdir.shortcut.addToFavorites" = "添加到收藏夹";
+"mqdir.shortcut.rename" = "重命名";
+"mqdir.shortcut.duplicate" = "拷贝副本";
+"mqdir.shortcut.revealInFinder" = "在访达中显示";
+"mqdir.shortcut.toggleHiddenFiles" = "显示/隐藏隐藏文件";
+"mqdir.shortcut.back" = "后退";
+"mqdir.shortcut.forward" = "前进";
+"mqdir.shortcut.openWithDefaultApp" = "使用默认应用打开";
+
+// MARK: - 设置
+
+"mqdir.settings.section.appearance" = "外观";
+"mqdir.settings.appearance.pickerLabel" = "外观";
+
+"mqdir.settings.section.language" = "语言";
+"mqdir.settings.language.pickerLabel" = "语言";
+
+"mqdir.settings.section.filenames" = "文件名";
+"mqdir.settings.filenames.normalizeHangul" = "拖出时将韩文文件名规范化为 NFC 形式";
+"mqdir.settings.filenames.normalizeHangulFooter" = "以分解形式（NFD）存储的韩文文件名在被拖入或复制到其他应用时会显示异常（如 ㅎㅏㄴㄱㅡㄹ 而非 한글）。启用此选项后，当文件离开 mq-dir 时，会在磁盘上将其重命名为组合形式（NFC）。";
+
+"mqdir.settings.section.shortcuts" = "快捷键";
+"mqdir.settings.shortcuts.footer" = "点击快捷键录制新的按键组合。与其他可自定义快捷键冲突的组合将被阻止。";
+"mqdir.settings.shortcuts.restoreDefaults" = "恢复默认";
+"mqdir.settings.shortcuts.recordHint" = "点击录制新快捷键";
+"mqdir.settings.shortcuts.resetHint" = "恢复为默认值";
+
+"mqdir.settings.capture.title" = "为「%@」设置新快捷键";
+"mqdir.settings.capture.prompt" = "按下任意按键组合";
+"mqdir.settings.capture.conflict" = "该组合已被「%@」占用";
+"mqdir.settings.capture.ok" = "没问题 —— 点击「保存」以应用。";
+"mqdir.settings.capture.modifierOnly" = "不能仅使用修饰键（如单独 ⌘）作为快捷键。";
+
+// MARK: - 侧边栏
+
+"mqdir.sidebar.starProject" = "在 GitHub 上标星";
+"mqdir.sidebar.help" = "帮助";
+"mqdir.sidebar.installUpdate" = "安装可用更新";
+"mqdir.sidebar.githubHint" = "打开 mq-dir GitHub 仓库";
+
+"mqdir.sidebar.dropHere" = "将文件夹拖到此处添加";
+
+"mqdir.sidebar.section.projects" = "项目";
+"mqdir.sidebar.project.new" = "新建项目";
+
+"mqdir.sidebar.tags.empty" = "此文件夹中没有标签";
+"mqdir.sidebar.tags.filterHint" = "按「%@」过滤当前标签页";
+
+"mqdir.sidebar.section.cmux" = "CMUX";
+"mqdir.sidebar.cmux.sync" = "同步 cmux 工作区";
+"mqdir.sidebar.cmux.hint" = "需要 cmux → Settings → Automation → Socket Control Mode = Allow All。密码模式的替代方案请查看 README。";
+
+// MARK: - 文件浏览面板
+
+"mqdir.browser.newFolder" = "新建文件夹";
+"mqdir.browser.paste" = "粘贴";
+"mqdir.browser.openInTerminal" = "在终端中打开";
+"mqdir.browser.openInCmux" = "在 cmux 中打开";
+"mqdir.browser.openInFinder" = "在访达中打开";
+"mqdir.browser.copyPath" = "拷贝路径";
+
+"mqdir.browser.tab.close" = "关闭标签页";
+"mqdir.browser.tab.new" = "新建标签页 (⌘T)";
+"mqdir.browser.tab.closeTab" = "关闭标签页";
+"mqdir.browser.tab.closeOtherTabs" = "关闭其他标签页";
+"mqdir.browser.tab.closeToRight" = "关闭右侧标签页";
+"mqdir.browser.tab.duplicate" = "复制标签页";
+
+"mqdir.browser.tagFilter.clear" = "清除标签过滤";
+"mqdir.browser.tagFilter.applied" = "正在按标签「%@」过滤";
+
+"mqdir.browser.preview.toggle" = "预览面板 (⌘⇧P)";
+
+"mqdir.browser.empty.noFolder" = "未打开文件夹";
+"mqdir.browser.empty.openFolder" = "打开文件夹";
+"mqdir.browser.empty.openFolderButton" = "打开文件夹…";
+"mqdir.browser.empty.openError" = "无法打开文件夹";
+"mqdir.browser.empty.retry" = "重试";
+"mqdir.browser.empty.noItems" = "无内容";
+"mqdir.browser.empty.placeholder" = "—";
+
+// MARK: - 预览面板
+
+"mqdir.preview.title" = "预览";
+"mqdir.preview.placeholder" = "—";
+"mqdir.preview.selectionCount" = "已选中 %lu 项";
+
+"mqdir.preview.zip.cannotRead" = "无法读取压缩包";
+"mqdir.preview.zip.empty" = "空压缩包";
+"mqdir.preview.zip.extractHint" = "请使用右键菜单中的「解压」将其打开。";
+"mqdir.preview.zip.cannotExtractEntry" = "无法解压该条目";
+"mqdir.preview.zip.truncated" = "已截断至 %lu MB";
+
+// MARK: - 反馈表单
+
+"mqdir.feedback.title" = "发送反馈";
+"mqdir.feedback.intro" = "我们会认真阅读你的反馈！你也可以直接发送邮件至 %@ 联系我们。";
+"mqdir.feedback.email" = "你的邮箱";
+"mqdir.feedback.message" = "反馈内容";
+"mqdir.feedback.messageCount" = "%lu/%lu";
+"mqdir.feedback.placeholder" = "分享你的反馈、功能建议或问题。";
+"mqdir.feedback.attachImages" = "附加图片";
+"mqdir.feedback.attachLimit" = "最多 %lu 张图片。";
+"mqdir.feedback.attachedCount" = "已附加 %lu 张";
+"mqdir.feedback.clearAttachments" = "清除";
+"mqdir.feedback.send" = "发送反馈";
+"mqdir.feedback.cancel" = "取消";
+"mqdir.feedback.thanks" = "感谢你的反馈。";
+"mqdir.feedback.thanksEmail" = "你也可以发送邮件至 %@ 联系我们。";
+"mqdir.feedback.starGithub" = "在 GitHub 上标星";
+"mqdir.feedback.done" = "完成";
+
+// MARK: - 主窗口
+
+"mqdir.main.copyPath" = "拷贝路径";
+"mqdir.main.noFolder" = "未选择文件夹";
+"mqdir.main.search" = "搜索";
+"mqdir.main.searchHint" = "在此文件夹中搜索 (⌘F)";
+"mqdir.main.searchClear" = "清除";
+"mqdir.main.searching" = "正在搜索…";
+"mqdir.main.searchMatches" = "%lu 个匹配%@";
+"mqdir.main.statusSelected" = "已选中 %lu 项";
+"mqdir.main.statusTotalItems" = "共 %lu 项%@";
+"mqdir.main.statusHiddenVisible" = "已显示隐藏文件";
+"mqdir.main.sepDot" = "·";
+"mqdir.main.breadcrumbSep" = "/";
+"mqdir.main.searchMatchesPlural" = "";
+"mqdir.main.itemsPlural" = "";
+
+// MARK: - 项目默认命名
+
+"mqdir.project.nextName" = "项目 %lu";
+
+// MARK: - 通用动词
+
+"mqdir.common.cancel" = "取消";
+"mqdir.common.save" = "保存";
+"mqdir.common.clear" = "清除";
+"mqdir.common.search" = "搜索";
+"mqdir.common.done" = "完成";

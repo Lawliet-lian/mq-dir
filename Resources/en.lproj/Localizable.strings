@@ -1,9 +1,226 @@
 /*
  mq-dir Localizable.strings (en)
 
- v1 ships English-only. Scaffolding lives here so future contributors can add
- ko.lproj / ja.lproj / etc. without a refactor. Keys are dot-namespaced.
+ Keys are dot-namespaced:
+   - mqdir.app.*         :  app-level globals
+   - mqdir.menu.*        :  macOS menu bar items (File / Edit / View / Window)
+   - mqdir.settings.*    :  Settings window (Appearance / Language / Shortcuts / Filenames)
+   - mqdir.shortcut.*    :  ShortcutAction human-readable labels
+   - mqdir.sidebar.*     :  Sidebar UI (Projects / Favorites / Tags / cmux)
+   - mqdir.browser.*     :  Browser pane (toolbar / tabs / context menu / empty state)
+   - mqdir.preview.*     :  Preview panel & zip-preview strings
+   - mqdir.feedback.*    :  Feedback sheet
+   - mqdir.main.*        :  Main window toolbar / status bar / search box
+   - mqdir.colorScheme.* :  Appearance picker labels
+   - mqdir.language.*    :  Language picker labels
+   - mqdir.common.*      :  Shared verbs (Cancel / Save / Clear / Search …)
+   - mqdir.project.*     :  Project CRUD helpers (nextProjectName, etc.)
 */
 
+// MARK: - app-level
+
 "mqdir.app.title" = "mq-dir";
+"mqdir.app.github" = "mq-dir on GitHub";
+
+// MARK: - Color scheme picker
+
+"mqdir.colorScheme.system" = "Match System";
+"mqdir.colorScheme.light" = "Light";
+"mqdir.colorScheme.dark" = "Dark";
+
+// MARK: - Language picker
+
+"mqdir.language.system" = "Match System";
+"mqdir.language.english" = "English";
+"mqdir.language.chinese" = "简体中文";
+
+// MARK: - Menu bar
+
+"mqdir.menu.file.newWindow" = "New Window";
+"mqdir.menu.file.newTab" = "New Tab";
 "mqdir.menu.file.openFolder" = "Open Folder…";
+"mqdir.menu.file.openSelected" = "Open Selected";
+"mqdir.menu.file.closeTab" = "Close Tab";
+"mqdir.menu.file.reopenClosedTab" = "Reopen Closed Tab";
+"mqdir.menu.file.revealInFinder" = "Reveal in Finder";
+"mqdir.menu.file.addToFavorites" = "Add to Favorites";
+
+"mqdir.menu.edit.cut" = "Cut";
+"mqdir.menu.edit.copy" = "Copy";
+"mqdir.menu.edit.paste" = "Paste";
+"mqdir.menu.edit.moveToTrash" = "Move to Trash";
+"mqdir.menu.edit.deleteImmediately" = "Delete Immediately…";
+"mqdir.menu.edit.selectAll" = "Select All";
+"mqdir.menu.edit.openWithDefaultApp" = "Open with Default App";
+"mqdir.menu.edit.duplicate" = "Duplicate";
+"mqdir.menu.edit.copyFilePath" = "Copy File Path";
+"mqdir.menu.edit.copyFolderPath" = "Copy Folder Path";
+"mqdir.menu.edit.copyName" = "Copy Name";
+"mqdir.menu.edit.rename" = "Rename";
+
+"mqdir.menu.view.find" = "Find";
+"mqdir.menu.view.showPreview" = "Show Preview";
+"mqdir.menu.view.back" = "Back";
+"mqdir.menu.view.forward" = "Forward";
+"mqdir.menu.view.reload" = "Reload";
+"mqdir.menu.view.parentFolder" = "Parent Folder";
+"mqdir.menu.view.toggleHiddenFiles" = "Toggle Hidden Files";
+"mqdir.menu.view.asList" = "As List";
+"mqdir.menu.view.asTree" = "As Tree";
+
+"mqdir.menu.window.showNextTab" = "Show Next Tab";
+"mqdir.menu.window.showPreviousTab" = "Show Previous Tab";
+"mqdir.menu.window.selectTab" = "Select Tab %ld";
+"mqdir.menu.window.focusPane" = "Focus Pane %ld";
+
+// MARK: - ShortcutAction labels
+
+"mqdir.shortcut.moveToTrash" = "Move to Trash";
+"mqdir.shortcut.deleteImmediately" = "Delete Immediately";
+"mqdir.shortcut.newTab" = "New Tab";
+"mqdir.shortcut.closeTab" = "Close Tab";
+"mqdir.shortcut.reload" = "Reload";
+"mqdir.shortcut.find" = "Find";
+"mqdir.shortcut.openFolder" = "Open Folder";
+"mqdir.shortcut.parentFolder" = "Parent Folder";
+"mqdir.shortcut.togglePreview" = "Show Preview";
+"mqdir.shortcut.addToFavorites" = "Add to Favorites";
+"mqdir.shortcut.rename" = "Rename";
+"mqdir.shortcut.duplicate" = "Duplicate";
+"mqdir.shortcut.revealInFinder" = "Reveal in Finder";
+"mqdir.shortcut.toggleHiddenFiles" = "Toggle Hidden Files";
+"mqdir.shortcut.back" = "Back";
+"mqdir.shortcut.forward" = "Forward";
+"mqdir.shortcut.openWithDefaultApp" = "Open with Default App";
+
+// MARK: - Settings
+
+"mqdir.settings.section.appearance" = "Appearance";
+"mqdir.settings.appearance.pickerLabel" = "Appearance";
+
+"mqdir.settings.section.language" = "Language";
+"mqdir.settings.language.pickerLabel" = "Language";
+
+"mqdir.settings.section.filenames" = "Filenames";
+"mqdir.settings.filenames.normalizeHangul" = "Normalize Hangul filenames to NFC on drag out";
+"mqdir.settings.filenames.normalizeHangulFooter" = "Korean filenames stored in decomposed (NFD) form look broken — like ㅎㅏㄴㄱㅡㄹ instead of 한글 — when dragged or copied into other apps. Turn this on to rename them to composed (NFC) form on disk as they leave mq-dir.";
+
+"mqdir.settings.section.shortcuts" = "Shortcuts";
+"mqdir.settings.shortcuts.footer" = "Click a shortcut to record a new key combination. Conflicts with another customisable shortcut are blocked.";
+"mqdir.settings.shortcuts.restoreDefaults" = "Restore Defaults";
+"mqdir.settings.shortcuts.recordHint" = "Click to record a new shortcut";
+"mqdir.settings.shortcuts.resetHint" = "Reset to default";
+
+"mqdir.settings.capture.title" = "New shortcut for “%@”";
+"mqdir.settings.capture.prompt" = "Press any key combination";
+"mqdir.settings.capture.conflict" = "Already used by “%@”";
+"mqdir.settings.capture.ok" = "Looks good — click Save to apply.";
+"mqdir.settings.capture.modifierOnly" = "Modifier-only combinations (e.g. ⌘ alone) cannot be assigned.";
+
+// MARK: - Sidebar
+
+"mqdir.sidebar.starProject" = "Star mq-dir";
+"mqdir.sidebar.help" = "Help";
+"mqdir.sidebar.installUpdate" = "Install the available update";
+"mqdir.sidebar.githubHint" = "Open the mq-dir GitHub repo";
+
+"mqdir.sidebar.dropHere" = "Drag folders here to add";
+
+"mqdir.sidebar.section.projects" = "PROJECTS";
+"mqdir.sidebar.project.new" = "New Project";
+
+"mqdir.sidebar.tags.empty" = "No tags in this folder";
+"mqdir.sidebar.tags.filterHint" = "Filter the focused tab by “%@”";
+
+"mqdir.sidebar.section.cmux" = "CMUX";
+"mqdir.sidebar.cmux.sync" = "Sync cmux workspaces";
+"mqdir.sidebar.cmux.hint" = "Requires cmux → Settings → Automation → Socket Control Mode = Allow All. See README for the password-mode alternative.";
+
+// MARK: - Browser pane
+
+"mqdir.browser.newFolder" = "New Folder";
+"mqdir.browser.paste" = "Paste";
+"mqdir.browser.openInTerminal" = "Open in Terminal";
+"mqdir.browser.openInCmux" = "Open in cmux";
+"mqdir.browser.openInFinder" = "Open in Finder";
+"mqdir.browser.copyPath" = "Copy Path";
+
+"mqdir.browser.tab.close" = "Close Tab";
+"mqdir.browser.tab.new" = "New Tab (⌘T)";
+"mqdir.browser.tab.closeTab" = "Close Tab";
+"mqdir.browser.tab.closeOtherTabs" = "Close Other Tabs";
+"mqdir.browser.tab.closeToRight" = "Close Tabs to the Right";
+"mqdir.browser.tab.duplicate" = "Duplicate Tab";
+
+"mqdir.browser.tagFilter.clear" = "Clear tag filter";
+"mqdir.browser.tagFilter.applied" = "Filtering by tag “%@”";
+
+"mqdir.browser.preview.toggle" = "Preview Pane (⌘⇧P)";
+
+"mqdir.browser.empty.noFolder" = "No folder open";
+"mqdir.browser.empty.openFolder" = "Open a folder";
+"mqdir.browser.empty.openFolderButton" = "Open Folder…";
+"mqdir.browser.empty.openError" = "Could not open folder";
+"mqdir.browser.empty.retry" = "Try Again";
+"mqdir.browser.empty.noItems" = "No items";
+"mqdir.browser.empty.placeholder" = "—";
+
+// MARK: - Preview panel
+
+"mqdir.preview.title" = "Preview";
+"mqdir.preview.placeholder" = "—";
+"mqdir.preview.selectionCount" = "%lu items selected";
+
+"mqdir.preview.zip.cannotRead" = "Couldn't read archive";
+"mqdir.preview.zip.empty" = "Empty archive";
+"mqdir.preview.zip.extractHint" = "Use Extract from the right-click menu to open it.";
+"mqdir.preview.zip.cannotExtractEntry" = "Couldn't extract entry";
+"mqdir.preview.zip.truncated" = "Truncated at %lu MB";
+
+// MARK: - Feedback sheet
+
+"mqdir.feedback.title" = "Send Feedback";
+"mqdir.feedback.intro" = "A human will read this! You can also reach us at %@.";
+"mqdir.feedback.email" = "Your Email";
+"mqdir.feedback.message" = "Message";
+"mqdir.feedback.messageCount" = "%lu/%lu";
+"mqdir.feedback.placeholder" = "Share feedback, feature requests, or issues.";
+"mqdir.feedback.attachImages" = "Attach Images";
+"mqdir.feedback.attachLimit" = "Up to %lu images.";
+"mqdir.feedback.attachedCount" = "%lu attached";
+"mqdir.feedback.clearAttachments" = "Clear";
+"mqdir.feedback.send" = "Send Feedback";
+"mqdir.feedback.cancel" = "Cancel";
+"mqdir.feedback.thanks" = "Thanks for the feedback.";
+"mqdir.feedback.thanksEmail" = "You can also reach us at %@.";
+"mqdir.feedback.starGithub" = "Star on GitHub";
+"mqdir.feedback.done" = "Done";
+
+// MARK: - Main window
+
+"mqdir.main.copyPath" = "Copy Path";
+"mqdir.main.noFolder" = "No Folder";
+"mqdir.main.search" = "Search";
+"mqdir.main.searchHint" = "Search this folder (⌘F)";
+"mqdir.main.searchClear" = "Clear";
+"mqdir.main.searching" = "Searching…";
+"mqdir.main.searchMatches" = "%lu match%@";
+"mqdir.main.statusSelected" = "%lu selected";
+"mqdir.main.statusTotalItems" = "%lu item%@";
+"mqdir.main.statusHiddenVisible" = "Hidden visible";
+"mqdir.main.sepDot" = "·";
+"mqdir.main.breadcrumbSep" = "/";
+"mqdir.main.searchMatchesPlural" = "es";
+"mqdir.main.itemsPlural" = "s";
+
+// MARK: - Next project name
+
+"mqdir.project.nextName" = "Project %lu";
+
+// MARK: - Shared verbs
+
+"mqdir.common.cancel" = "Cancel";
+"mqdir.common.save" = "Save";
+"mqdir.common.clear" = "Clear";
+"mqdir.common.search" = "Search";
+"mqdir.common.done" = "Done";

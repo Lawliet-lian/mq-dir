@@ -25,25 +25,47 @@ public enum ShortcutAction: String, Codable, Sendable, CaseIterable, Hashable, C
     case openWithDefaultApp
 
     /// Human-readable label rendered in the Settings list.
+    /// 使用 NSLocalizedString 从主 bundle 读取本地化字符串。
     public var label: String {
+        // 注意：此处必须显式指定 bundle（使用 Bundle(for:) 或 .main），
+        // 因为 mqdirCore 作为应用内部源码编译（SPM 方式中 resources 不单独打包），
+        // 所有 lproj 文件最终都位于应用主 bundle。
+        let tableName = "Localizable"
         switch self {
-        case .moveToTrash:        return "Move to Trash"
-        case .deleteImmediately:  return "Delete Immediately"
-        case .newTab:             return "New Tab"
-        case .closeTab:           return "Close Tab"
-        case .reload:             return "Reload"
-        case .find:               return "Find"
-        case .openFolder:         return "Open Folder"
-        case .parentFolder:       return "Parent Folder"
-        case .togglePreview:      return "Show Preview"
-        case .addToFavorites:     return "Add to Favorites"
-        case .rename:             return "Rename"
-        case .duplicate:          return "Duplicate"
-        case .revealInFinder:     return "Reveal in Finder"
-        case .toggleHiddenFiles:  return "Toggle Hidden Files"
-        case .back:               return "Back"
-        case .forward:            return "Forward"
-        case .openWithDefaultApp: return "Open with Default App"
+        case .moveToTrash:
+            return NSLocalizedString("mqdir.shortcut.moveToTrash", tableName: tableName, bundle: .main, value: "Move to Trash", comment: "")
+        case .deleteImmediately:
+            return NSLocalizedString("mqdir.shortcut.deleteImmediately", tableName: tableName, bundle: .main, value: "Delete Immediately", comment: "")
+        case .newTab:
+            return NSLocalizedString("mqdir.shortcut.newTab", tableName: tableName, bundle: .main, value: "New Tab", comment: "")
+        case .closeTab:
+            return NSLocalizedString("mqdir.shortcut.closeTab", tableName: tableName, bundle: .main, value: "Close Tab", comment: "")
+        case .reload:
+            return NSLocalizedString("mqdir.shortcut.reload", tableName: tableName, bundle: .main, value: "Reload", comment: "")
+        case .find:
+            return NSLocalizedString("mqdir.shortcut.find", tableName: tableName, bundle: .main, value: "Find", comment: "")
+        case .openFolder:
+            return NSLocalizedString("mqdir.shortcut.openFolder", tableName: tableName, bundle: .main, value: "Open Folder", comment: "")
+        case .parentFolder:
+            return NSLocalizedString("mqdir.shortcut.parentFolder", tableName: tableName, bundle: .main, value: "Parent Folder", comment: "")
+        case .togglePreview:
+            return NSLocalizedString("mqdir.shortcut.togglePreview", tableName: tableName, bundle: .main, value: "Show Preview", comment: "")
+        case .addToFavorites:
+            return NSLocalizedString("mqdir.shortcut.addToFavorites", tableName: tableName, bundle: .main, value: "Add to Favorites", comment: "")
+        case .rename:
+            return NSLocalizedString("mqdir.shortcut.rename", tableName: tableName, bundle: .main, value: "Rename", comment: "")
+        case .duplicate:
+            return NSLocalizedString("mqdir.shortcut.duplicate", tableName: tableName, bundle: .main, value: "Duplicate", comment: "")
+        case .revealInFinder:
+            return NSLocalizedString("mqdir.shortcut.revealInFinder", tableName: tableName, bundle: .main, value: "Reveal in Finder", comment: "")
+        case .toggleHiddenFiles:
+            return NSLocalizedString("mqdir.shortcut.toggleHiddenFiles", tableName: tableName, bundle: .main, value: "Toggle Hidden Files", comment: "")
+        case .back:
+            return NSLocalizedString("mqdir.shortcut.back", tableName: tableName, bundle: .main, value: "Back", comment: "")
+        case .forward:
+            return NSLocalizedString("mqdir.shortcut.forward", tableName: tableName, bundle: .main, value: "Forward", comment: "")
+        case .openWithDefaultApp:
+            return NSLocalizedString("mqdir.shortcut.openWithDefaultApp", tableName: tableName, bundle: .main, value: "Open with Default App", comment: "")
         }
     }
 

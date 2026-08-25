@@ -1,6 +1,16 @@
 import AppKit
 import SwiftUI
 
+/// 便捷宏：从主 bundle 读取本地化字符串
+/// （与 NSLocalizedString 默认行为一致，但允许在表达式中使用）
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
+// MARK: - Color scheme picker helpers
+
 extension ColorSchemeOption {
     /// Map the persisted preference onto SwiftUI's `.preferredColorScheme`.
     /// `.system` becomes `nil` so the modifier becomes a no-op and macOS's
@@ -13,18 +23,31 @@ extension ColorSchemeOption {
         }
     }
 
-    /// Display label for the Settings picker.
+    /// 本地化显示标签（从 Localizable.strings 读取）
     var label: String {
         switch self {
-        case .system: "Match System"
-        case .light:  "Light"
-        case .dark:   "Dark"
+        case .system: L("mqdir.colorScheme.system")
+        case .light:  L("mqdir.colorScheme.light")
+        case .dark:   L("mqdir.colorScheme.dark")
         }
     }
 }
 
-/// macOS Settings scene contents. Two sections: Appearance picker
-/// + Shortcuts customiser for the 10 actions exposed in
+// MARK: - Language picker helpers
+
+extension LanguageOption {
+    /// 本地化显示标签（从 Localizable.strings 读取）
+    var label: String {
+        switch self {
+        case .system:  L("mqdir.language.system")
+        case .english: L("mqdir.language.english")
+        case .chinese: L("mqdir.language.chinese")
+        }
+    }
+}
+
+/// macOS Settings scene contents. Three sections: Appearance picker
+/// + Language picker + Shortcuts customiser for the 10 actions exposed in
 /// `ShortcutAction`. Both write through `WorkspaceManager` so the
 /// debounced save path is shared with everything else workspace-
 /// scoped (favourites, project list, …).
@@ -34,8 +57,8 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Appearance") {
-                Picker("Appearance", selection: appearanceBinding) {
+            Section(L("mqdir.settings.section.appearance")) {
+                Picker(L("mqdir.settings.appearance.pickerLabel"), selection: appearanceBinding) {
                     ForEach(ColorSchemeOption.allCases, id: \.self) { option in
                         Text(option.label).tag(option)
                     }
@@ -44,12 +67,22 @@ struct SettingsView: View {
                 .labelsHidden()
             }
 
+            Section(L("mqdir.settings.section.language")) {
+                Picker(L("mqdir.settings.language.pickerLabel"), selection: languageBinding) {
+                    ForEach(LanguageOption.allCases, id: \.self) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
+
             Section {
-                Toggle("Normalize Hangul filenames to NFC on drag out", isOn: normalizeHangulBinding)
+                Toggle(L("mqdir.settings.filenames.normalizeHangul"), isOn: normalizeHangulBinding)
             } header: {
-                Text("Filenames")
+                Text(L("mqdir.settings.section.filenames"))
             } footer: {
-                Text("Korean filenames stored in decomposed (NFD) form look broken — like \u{315E}\u{3157}\u{3134}\u{3131}\u{3161}\u{3139} instead of 한글 — when dragged or copied into other apps. Turn this on to rename them to composed (NFC) form on disk as they leave mq-dir.")
+                Text(L("mqdir.settings.filenames.normalizeHangulFooter"))
                     .foregroundStyle(.secondary)
             }
 
@@ -59,15 +92,15 @@ struct SettingsView: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Restore Defaults") {
+                    Button(L("mqdir.settings.shortcuts.restoreDefaults")) {
                         workspace.resetAllShortcutOverrides()
                     }
                     .disabled(workspace.workspace.settings.shortcutOverrides.isEmpty)
                 }
             } header: {
-                Text("Shortcuts")
+                Text(L("mqdir.settings.section.shortcuts"))
             } footer: {
-                Text("Click a shortcut to record a new key combination. Conflicts with another customisable shortcut are blocked.")
+                Text(L("mqdir.settings.shortcuts.footer"))
                     .foregroundStyle(.secondary)
             }
         }
@@ -86,10 +119,19 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Bindings
+
     private var appearanceBinding: Binding<ColorSchemeOption> {
         Binding(
             get: { workspace.workspace.settings.colorScheme },
             set: { workspace.setColorScheme($0) }
+        )
+    }
+
+    private var languageBinding: Binding<LanguageOption> {
+        Binding(
+            get: { workspace.workspace.settings.language },
+            set: { workspace.setLanguage($0) }
         )
     }
 
@@ -99,6 +141,8 @@ struct SettingsView: View {
             set: { workspace.setNormalizeHangulOnDragOut($0) }
         )
     }
+
+    // MARK: - Shortcut rows
 
     private func shortcutRow(_ action: ShortcutAction) -> some View {
         let active = workspace.workspace.settings.binding(for: action)
@@ -124,7 +168,7 @@ struct SettingsView: View {
                     )
             }
             .buttonStyle(.plain)
-            .help("Click to record a new shortcut")
+            .help(L("mqdir.settings.shortcuts.recordHint"))
             if isOverridden {
                 Button {
                     workspace.setShortcutBinding(nil, for: action)
@@ -133,7 +177,7 @@ struct SettingsView: View {
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
-                .help("Reset to default")
+                .help(L("mqdir.settings.shortcuts.resetHint"))
             }
         }
     }
@@ -178,13 +222,13 @@ struct KeyCaptureSheet: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Text("New shortcut for \u{201C}\(action.label)\u{201D}")
+            Text(L("mqdir.settings.capture.title", action.label))
                 .font(.headline)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.gray.opacity(0.10))
-                Text(captured?.displayString ?? "Press any key combination")
+                Text(captured?.displayString ?? L("mqdir.settings.capture.prompt"))
                     .font(.system(size: 22, design: .monospaced))
                     .foregroundStyle(captured == nil ? .secondary : .primary)
             }
@@ -194,25 +238,25 @@ struct KeyCaptureSheet: View {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                    Text("Already used by \u{201C}\(conflictWith.label)\u{201D}")
+                    Text(L("mqdir.settings.capture.conflict", conflictWith.label))
                         .foregroundStyle(.primary)
                 }
                 .font(.system(size: 11))
             } else if captured != nil {
-                Text("Looks good — click Save to apply.")
+                Text(L("mqdir.settings.capture.ok"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             } else {
-                Text("Modifier-only combinations (e.g. ⌘ alone) cannot be assigned.")
+                Text(L("mqdir.settings.capture.modifierOnly"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
 
             HStack {
-                Button("Cancel") { dismiss() }
+                Button(L("mqdir.common.cancel")) { dismiss() }
                 Spacer()
-                Button("Save") {
+                Button(L("mqdir.common.save")) {
                     if let captured, conflictWith == nil {
                         onCommit(captured)
                         dismiss()

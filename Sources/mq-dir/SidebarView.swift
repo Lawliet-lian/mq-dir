@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 struct SidebarView: View {
     @ObservedObject var viewModel: SidebarViewModel
     @ObservedObject var workspace: WorkspaceManager
@@ -119,7 +125,7 @@ struct SidebarView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Help")
+        .help(L("mqdir.sidebar.help"))
     }
 
     private var updatePill: some View {
@@ -142,7 +148,7 @@ struct SidebarView: View {
             )
         }
         .buttonStyle(.plain)
-        .help("Install the available update")
+        .help(L("mqdir.sidebar.installUpdate"))
     }
 
     private var pillLabel: String {
@@ -163,7 +169,7 @@ struct SidebarView: View {
             HStack(spacing: 6) {
                 Image(systemName: "star.fill")
                     .font(.system(size: 11, weight: .semibold))
-                Text("Star mq-dir")
+                Text(L("mqdir.sidebar.starProject"))
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
             }
@@ -175,7 +181,7 @@ struct SidebarView: View {
             )
         }
         .buttonStyle(.plain)
-        .help("Open the mq-dir GitHub repo")
+        .help(L("mqdir.sidebar.githubHint"))
         .contextMenu {
             Button("Don't show this again") {
                 repoCallout.dismissPermanently()
@@ -219,7 +225,7 @@ struct SidebarView: View {
     }
 
     private var emptyFavoritesHint: some View {
-        Text("Drag folders here to add")
+        Text(L("mqdir.sidebar.dropHere"))
             .font(.system(size: 10))
             .foregroundStyle(Theme.Color.labelTertiary)
             .padding(.horizontal, 14)
@@ -233,7 +239,7 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader("Tags")
             if tagsSummary.isEmpty {
-                Text("No tags in this folder")
+                Text(L("mqdir.sidebar.tags.empty"))
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.Color.labelTertiary)
                     .padding(.horizontal, 14)
@@ -273,7 +279,7 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Filter the focused tab by \u{201C}\(summary.name)\u{201D}")
+        .help(L("mqdir.sidebar.tags.filterHint", summary.name))
     }
 
     @ViewBuilder
@@ -388,7 +394,7 @@ struct SidebarView: View {
     private var projectsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
-                Text("PROJECTS")
+                Text(L("mqdir.sidebar.section.projects"))
                     .font(Theme.Font.sidebarHeader)
                     .tracking(0.5)
                     .foregroundStyle(Theme.Color.labelTertiary)
@@ -403,7 +409,7 @@ struct SidebarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("New Project")
+                .help(L("mqdir.sidebar.project.new"))
             }
             .padding(.horizontal, 12)
             .padding(.top, 6)
@@ -514,7 +520,7 @@ struct SidebarView: View {
     private var cmuxSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
-                Text("CMUX")
+                Text(L("mqdir.sidebar.section.cmux"))
                     .font(Theme.Font.sidebarHeader)
                     .tracking(0.5)
                     .foregroundStyle(Theme.Color.labelTertiary)
@@ -534,7 +540,7 @@ struct SidebarView: View {
                         // Sidebar real estate is tight — give the one
                         // recipe most users will pick and link to the
                         // README for the password-mode alternative.
-                        Text("Requires cmux → Settings → Automation → Socket Control Mode = Allow All. See README for the password-mode alternative.")
+                        Text(L("mqdir.sidebar.cmux.hint"))
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.Color.labelTertiary)
                             .opacity(0.75)
@@ -582,7 +588,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .disabled(cmux.isSyncing)
-        .help("Sync cmux workspaces")
+        .help(L("mqdir.sidebar.cmux.sync"))
     }
 
     /// Picks the right one-liner for an empty workspaces list. Three

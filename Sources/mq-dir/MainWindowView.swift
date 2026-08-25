@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 struct MainWindowView: View {
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject var updateManager: UpdateManager
@@ -260,7 +266,7 @@ struct MainWindowView: View {
             if let url = focusedPane.folderURL {
                 let components = url.pathComponents.filter { $0 != "/" }
                 if components.isEmpty {
-                    Text("/").font(Theme.Font.breadcrumb).foregroundStyle(Theme.Color.label)
+                    Text(L("mqdir.main.breadcrumbSep")).font(Theme.Font.breadcrumb).foregroundStyle(Theme.Color.label)
                 } else {
                     ForEach(Array(components.enumerated()), id: \.offset) { idx, name in
                         if idx > 0 {
@@ -277,7 +283,7 @@ struct MainWindowView: View {
                     }
                 }
             } else {
-                Text("No Folder")
+                Text(L("mqdir.main.noFolder"))
                     .font(Theme.Font.breadcrumb)
                     .foregroundStyle(Theme.Color.labelTertiary)
             }
@@ -314,13 +320,13 @@ struct MainWindowView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Copy Path")
+        .help(L("mqdir.main.copyPath"))
         .disabled(focusedPane.folderURL == nil)
     }
 
     @ViewBuilder
     private var breadcrumbContextMenu: some View {
-        Button("Copy Path") { focusedPane.copyCurrentFolderPath() }
+        Button(L("mqdir.main.copyPath")) { focusedPane.copyCurrentFolderPath() }
             .disabled(focusedPane.folderURL == nil)
         Divider()
         Button("Open in Terminal") { focusedPane.openCurrentFolderInTerminal() }
@@ -352,7 +358,7 @@ struct MainWindowView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.Color.labelTertiary)
-                    TextField("Search", text: queryBinding)
+                    TextField(L("mqdir.main.search"), text: queryBinding)
                         .textFieldStyle(.plain)
                         .font(Theme.Font.breadcrumb)
                         .foregroundStyle(Theme.Color.label)
@@ -376,7 +382,7 @@ struct MainWindowView: View {
                                 .foregroundStyle(Theme.Color.labelTertiary)
                         }
                         .buttonStyle(.plain)
-                        .help("Clear")
+                        .help(L("mqdir.main.searchClear"))
                     }
                 }
             } else {
@@ -388,7 +394,7 @@ struct MainWindowView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.Color.labelTertiary)
-                        Text("Search")
+                        Text(L("mqdir.main.search"))
                             .font(Theme.Font.breadcrumb)
                             .foregroundStyle(Theme.Color.labelTertiary)
                         Spacer(minLength: 0)
@@ -413,7 +419,7 @@ struct MainWindowView: View {
                 searchActive = false
             }
         }
-        .help("Search this folder (⌘F)")
+        .help(L("mqdir.main.searchHint"))
     }
 
     private var layoutSegmentedControl: some View {
@@ -530,29 +536,29 @@ struct MainWindowView: View {
 
         return HStack(spacing: 8) {
             if selectedCount > 0 {
-                Text("\(selectedCount) selected")
+                Text(L("mqdir.main.statusSelected", selectedCount))
                     .foregroundStyle(Theme.Color.label)
-                Text("·").foregroundStyle(Theme.Color.labelTertiary)
+                Text(L("mqdir.main.sepDot")).foregroundStyle(Theme.Color.labelTertiary)
                 Text(ByteCountFormatter.string(fromByteCount: selectedSize, countStyle: .file))
                     .foregroundStyle(Theme.Color.labelSecondary)
             } else if focusedPane.isFiltering {
                 if focusedPane.isSearching {
-                    Text("Searching\u{2026}")
+                    Text(L("mqdir.main.searching"))
                         .foregroundStyle(Theme.Color.labelSecondary)
                 } else {
-                    Text("\(visibleCount) match\(visibleCount == 1 ? "" : "es")")
+                    Text(L("mqdir.main.searchMatches", visibleCount, visibleCount == 1 ? "" : L("mqdir.main.searchMatchesPlural")))
                         .foregroundStyle(Theme.Color.labelSecondary)
                 }
             } else if totalCount > 0 {
-                Text("\(totalCount) item\(totalCount == 1 ? "" : "s")")
+                Text(L("mqdir.main.statusTotalItems", totalCount, totalCount == 1 ? "" : L("mqdir.main.itemsPlural")))
                     .foregroundStyle(Theme.Color.labelSecondary)
             }
 
             Spacer()
 
             if focusedPane.includeHidden {
-                Text("Hidden visible").foregroundStyle(Theme.Color.labelSecondary)
-                Text("·").foregroundStyle(Theme.Color.labelTertiary)
+                Text(L("mqdir.main.statusHiddenVisible")).foregroundStyle(Theme.Color.labelSecondary)
+                Text(L("mqdir.main.sepDot")).foregroundStyle(Theme.Color.labelTertiary)
             }
 
             if let free = freeSpaceCache {

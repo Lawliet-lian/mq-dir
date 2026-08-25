@@ -3,6 +3,12 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private func L(_ key: String, _ args: CVarArg...) -> String {
+    let format = NSLocalizedString(key, bundle: .main, comment: "")
+    if args.isEmpty { return format }
+    return String(format: format, arguments: args)
+}
+
 // MARK: - Listing & extraction
 
 /// One row in a `.zip` archive's table of contents — what `unzip -Z -1`
@@ -265,7 +271,7 @@ struct ZipPreviewView: View {
                     Image(systemName: "exclamationmark.triangle")
                         .font(.system(size: 18))
                         .foregroundStyle(.orange)
-                    Text("Couldn't read archive")
+                    Text(L("mqdir.preview.zip.cannotRead"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.Color.label)
                     Text(listError)
@@ -276,7 +282,7 @@ struct ZipPreviewView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if entries.isEmpty {
-                Text("Empty archive")
+                Text(L("mqdir.preview.zip.empty"))
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.Color.labelTertiary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -380,7 +386,7 @@ struct ZipPreviewView: View {
                     .foregroundStyle(Theme.Color.labelSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 12)
-                Text("Use Extract from the right-click menu to open it.")
+                Text(L("mqdir.preview.zip.extractHint"))
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.Color.labelTertiary)
                     .multilineTextAlignment(.center)
@@ -392,7 +398,7 @@ struct ZipPreviewView: View {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 18))
                     .foregroundStyle(.orange)
-                Text("Couldn't extract entry")
+                Text(L("mqdir.preview.zip.cannotExtractEntry"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.Color.label)
                 Text(message)
@@ -406,7 +412,7 @@ struct ZipPreviewView: View {
     }
 
     private var truncationBadge: some View {
-        Text("Truncated at \(ZipPreviewService.extractCap / (1024 * 1024)) MB")
+        Text(L("mqdir.preview.zip.truncated", ZipPreviewService.extractCap / (1024 * 1024)))
             .font(.system(size: 9, weight: .medium))
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
