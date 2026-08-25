@@ -63,3 +63,6 @@ hyperframes/
 # as marketing/ (copy decks). Holds API tokens and post drafts.
 Scripts/x-publish/
 
+.dbg/
+
+debug*

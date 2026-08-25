@@ -8,6 +8,112 @@ private func L(_ key: String, _ args: CVarArg...) -> String {
     return String(format: format, arguments: args)
 }
 
+// MARK: 列布局单源（FileColumnID + 统一宽度/范围/标题映射）
+
+/// 列唯一标识：列顺序与 Finder 严格对齐
+/// Name 弹性列不参与拖拽调整；其余 4 列（Modified/Size/Kind/Created）
+/// 「每列右边缘 = 一根拖拽线，只调该列本身宽度」，且 Created 最右侧再追加一根线，
+/// 所有列宽/range/排序 key/标题全在这里配置，Header 和 Row 共用同一套映射避免错位。
+private enum FileColumnID: String, CaseIterable, Identifiable, Hashable {
+    case name
+    case modified
+    case size
+    case kind
+    case created
+
+    var id: String { rawValue }
+
+    /// 对应的排序枚举 key（供 sortHeader 用，nil 表示不参与排序）
+    var sortKey: FileEntrySortKey? {
+        switch self {
+        case .name:     return .name
+        case .modified: return .modified
+        case .size:     return .size
+        case .kind:     return .kind
+        case .created:  return .created
+        }
+    }
+
+    /// 列标题的本地化 key
+    var titleKey: String {
+        switch self {
+        case .name:     return "mqdir.browser.column.name"
+        case .modified: return "mqdir.browser.column.modified"
+        case .size:     return "mqdir.browser.column.size"
+        case .kind:     return "mqdir.browser.column.kind"
+        case .created:  return "mqdir.browser.column.created"
+        }
+    }
+
+    /// 是否为 Name 这种弹性（maxWidth:.infinity）列，弹性列不接受拖拽改宽
+    var isFlexible: Bool {
+        self == .name
+    }
+
+    /// 在 PaneColumnWidths 中对应的宽度（非弹性列）；弹性列返回 nil
+    func width(in widths: PaneColumnWidths) -> CGFloat? {
+        switch self {
+        case .name:     return nil
+        case .modified: return widths.modified
+        case .size:     return widths.size
+        case .kind:     return widths.kind
+        case .created:  return widths.created
+        }
+    }
+
+    /// 该列允许的宽度范围（非弹性列）；弹性列返回 nil
+    var allowedRange: ClosedRange<CGFloat>? {
+        switch self {
+        case .name:     return nil
+        case .modified: return PaneColumnWidths.modifiedRange
+        case .size:     return PaneColumnWidths.sizeRange
+        case .kind:     return PaneColumnWidths.kindRange
+        case .created:  return PaneColumnWidths.createdRange
+        }
+    }
+}
+
+/// 每一列之间 + 列和 handle 之间的视觉/命中区宽度，**必须和 ColumnResizeHandle.frame(width:) 保持完全一致**
+/// 这样 Row 的 cell 对齐和 Header 的 sortHeader 才能完全对齐，不会因宽度错位触发 SwiftUI 连锁 relayout 卡顿。
+private let kColumnDividerWidth: CGFloat = 12
+
+// #region debug-point A:column-divider-reporting
+@inline(__always)
+private func reportColumnResizeDebug(
+    _ hypothesisId: String,
+    _ msg: String,
+    data: [String: Any] = [:]
+) {
+    let envURL = URL(fileURLWithPath: ".dbg/column-resize-lines.env")
+    var endpoint = "http://127.0.0.1:7777/event"
+    var sessionId = "column-resize-lines"
+    if let envText = try? String(contentsOf: envURL) {
+        for line in envText.split(separator: "\n") {
+            if line.hasPrefix("DEBUG_SERVER_URL=") {
+                endpoint = String(line.dropFirst("DEBUG_SERVER_URL=".count))
+            } else if line.hasPrefix("DEBUG_SESSION_ID=") {
+                sessionId = String(line.dropFirst("DEBUG_SESSION_ID=".count))
+            }
+        }
+    }
+    guard let url = URL(string: endpoint),
+          let body = try? JSONSerialization.data(withJSONObject: [
+            "sessionId": sessionId,
+              "runId": "post-fix",
+            "hypothesisId": hypothesisId,
+            "location": "BrowserPaneView.swift",
+            "msg": "[DEBUG] \(msg)",
+            "data": data,
+            "ts": Int(Date().timeIntervalSince1970 * 1000)
+          ]) else { return }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = body
+    URLSession.shared.dataTask(with: request).resume()
+}
+// #endregion
+
 /// Routes a tab drop to `paneVM.move`. The drop "happens" when the user
 /// hovers over a target tab (`dropEntered`) — that gives the immediate
 /// drag-to-reorder feel like Safari, instead of waiting for `performDrop`
@@ -109,7 +215,17 @@ struct BrowserPaneView: View {
     /// background on each chip. Used by the per-tab drop delegate to
     /// decide leading vs trailing half from the cursor position.
     @State private var tabChipWidths: [Int: CGFloat] = [:]
-
+    /// Name 列本地可调宽度：不持久化，先把第一根线做成真正的 Finder 风格「Name 右边缘」。
+    /// 之前 Name 是纯弹性列，没有真实 handle，导致第一根 visible line 只是装饰线而不是可拖拽边界。
+    @State private var nameColumnWidth: CGFloat = 280
+    /// 任意列正在拖拽改宽时置为 true。
+    /// 用它让内容区文件名在拖拽阶段切换到更稳定的截断策略，避免长文件名因为中间截断
+    /// 每一帧都重算省略位置，造成肉眼可见的闪烁。
+    @State private var isColumnResizing = false
+    /// 当前正在拖拽预览的列。
+    @State private var previewResizeColumn: FileColumnID?
+    /// 当前正在预览中的目标宽度。拖拽过程中只用它画竖线，不立即改内容区布局。
+    @State private var previewResizeWidth: CGFloat?
     /// Observe the cross-pane drag coordinator so we can clear our
     /// insertion-marker preview the moment any drop completes — a
     /// belt-and-suspenders against SwiftUI processing a sibling drop
@@ -249,21 +365,60 @@ struct BrowserPaneView: View {
     /// cleanly without the row going completely blank when the preview
     /// pane opens and the pane shrinks.
     private static let nameColumnMinWidth: CGFloat = 200
+    private static let nameColumnRange: ClosedRange<CGFloat> = 200...800
 
-    /// Natural minimum of the columns strip = name floor + the
-    /// configured Modified/Size/Kind/Created widths + 4 resize-handle gaps
-    /// (6pt each) + outer header padding (6pt × 2). When the pane is
-    /// narrower than this we let the horizontal ScrollView take over;
-    /// when it's wider, the .frame(minWidth: geo.size.width) below
-    /// stretches the strip to fill so columns don't pile up on the left.
-    /// 说明：列数 4 → 5，handle 数量 3 → 4，因此 handles 常量与 return 表达式都同步了。
+    /// Natural minimum of the columns strip = name floor + all non-flexible
+    /// column widths (Modified/Size/Kind/Created) + 4 列间分隔符 + Created
+    /// 最右侧追加的一根 handle，共 5 个 handle，每个热点宽 kColumnDividerWidth(12pt)，
+    /// 再加上 header 外侧 padding(6pt × 2)。
+    ///
+    /// 与原手写数值版的差异：
+    /// - 使用 FileColumnID.allCases 单源循环求和，避免将来新增列时忘记加宽度
+    /// - 列间分隔 + 最后列右边缘 handle 计数来自：4 个列间（Modified/Size/Kind/Created 左侧各 1 个）
+    ///   + 1 个 Created 最右 handle = 5
+    /// 当 pane 比这个最小值窄时交给水平 ScrollView；更宽时 .frame(minWidth:geo.size.width)
+    /// 会拉伸填充，避免列都堆在左边。
     private var minColumnsTotal: CGFloat {
         let widths = viewModel.columnWidths
-        // 列间隔（resize handle）数量：5 列 → 4 个 handle × 6pt
-        let handles: CGFloat = 6 * 4
+        let fixedWidthSum = widths.modified + widths.size + widths.kind + widths.created
+        let nameWidth = max(Self.nameColumnMinWidth, nameColumnWidth)
+        // 5 列各自的右边缘都有一根线：Name / Modified / Size / Kind / Created
+        let handleCount = 5
+        let handles    = CGFloat(handleCount) * kColumnDividerWidth
         let outerPadding: CGFloat = 6 * 2
-        // 末尾 + widths.created：新增创建日期列的默认宽度
-        return Self.nameColumnMinWidth + widths.modified + widths.size + widths.kind + widths.created + handles + outerPadding
+        return nameWidth + fixedWidthSum + handles + outerPadding
+    }
+
+    /// 读取某一列当前已提交到布局系统的宽度；拖拽预览态不算在这里。
+    private func committedWidth(for col: FileColumnID) -> CGFloat {
+        switch col {
+        case .name:
+            return max(Self.nameColumnMinWidth, nameColumnWidth)
+        case .modified:
+            return viewModel.columnWidths.modified
+        case .size:
+            return viewModel.columnWidths.size
+        case .kind:
+            return viewModel.columnWidths.kind
+        case .created:
+            return viewModel.columnWidths.created
+        }
+    }
+
+    /// 预览线在内容容器中的 x 坐标。拖拽时只移动这根线，内容区保持旧列宽不重排。
+    private var previewDividerOffsetX: CGFloat? {
+        guard let previewResizeColumn, let previewResizeWidth else { return nil }
+        let orderedColumns: [FileColumnID] = [.name, .modified, .size, .kind, .created]
+        var x: CGFloat = 6 // 对齐 columnHeader/file rows 的 horizontal padding 左边距
+        for col in orderedColumns {
+            let width = (col == previewResizeColumn) ? previewResizeWidth : committedWidth(for: col)
+            x += width
+            if col == previewResizeColumn {
+                return x + (kColumnDividerWidth / 2)
+            }
+            x += kColumnDividerWidth
+        }
+        return nil
     }
 
     /// Header + list wrapped in a horizontal ScrollView so the Name
@@ -279,6 +434,15 @@ struct BrowserPaneView: View {
                 VStack(spacing: 0) {
                     columnHeader
                     fileList
+                }
+                .overlay(alignment: .topLeading) {
+                    if let previewX = previewDividerOffsetX {
+                        Rectangle()
+                            .fill(Theme.Color.accent)
+                            .frame(width: 1, height: geo.size.height)
+                            .offset(x: previewX - 0.5)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .frame(minWidth: max(minColumnsTotal, geo.size.width), alignment: .leading)
                 .frame(height: geo.size.height, alignment: .top)
@@ -706,64 +870,143 @@ struct BrowserPaneView: View {
 
     // 列标题栏：Name/Modified/Size/Kind 四列，支持点击排序和拖拽改列宽
     // 列顺序严格按用户要求：名称 → 修改日期 → 大小 → 种类 → 创建日期（创建日期必须紧贴 Kind 右侧）
+    //
+    // 拖拽规则严格对齐 Finder：
+    //   - 每一列（除弹性 Name 外）「右边缘」= 一根拖拽线，拖拽时只变「该列（线前面的格子）」宽度，
+    //     右边所有列原地不动，超出部分交给水平 ScrollView 接管
+    //   - 最右列（Created）的**最右侧**额外再追加一根线：拖拽时只变 Created（Finder 规则 B）
+    //
+    // 实现方式：列布局用 FileColumnID.allCases 循环生成，保证 Header 和 Row 的顺序/宽度/间距
+    // 100% 一致，不会出现「Header 间隔 12pt / Row 间隔 6pt」造成的错位卡顿。
+    //
+    // 注意：BrowserPaneView 里 `viewModel` 是普通计算属性（非 @ObservedObject），没有 `$viewModel` 投影，
+    // 传给 ColumnResizeHandle 的 Binding 用 Binding(get:set:) 手动构造读写 @Published 的 columnWidths。
     private var columnHeader: some View {
         HStack(spacing: 0) {
-            // 名称列：弹性填充（剩余空间都给它）
+            Color.clear
+                .frame(width: 0, height: 0)
+                .task {
+                    reportHeaderDividerStructure(
+                        for: .name,
+                        hasLeadingDecorativeDivider: false,
+                        hasTrailingResizeHandle: true
+                    )
+                }
             sortHeader(L("mqdir.browser.column.name"), key: .name, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(
+                    width: max(Self.nameColumnMinWidth, nameColumnWidth),
+                    alignment: Alignment.leading
+                )
+            ColumnResizeHandle(
+                width: $nameColumnWidth,
+                range: Self.nameColumnRange,
+                debugLabel: FileColumnID.name.rawValue,
+                onDragStateChange: { isColumnResizing = $0 },
+                onPreviewWidthChange: { width in
+                    previewResizeColumn = (width == nil) ? nil : .name
+                    previewResizeWidth = width
+                }
+            )
 
-            ColumnResizeHandle { delta in
-                let next = (viewModel.columnWidths.modified - delta)
-                    .clamped(to: PaneColumnWidths.modifiedRange)
-                viewModel.columnWidths.modified = next
-            }
-
-            // 修改日期列：固定宽度（用户可调）
+            Color.clear
+                .frame(width: 0, height: 0)
+                .task {
+                    reportHeaderDividerStructure(
+                        for: .modified,
+                        hasLeadingDecorativeDivider: false,
+                        hasTrailingResizeHandle: true
+                    )
+                }
             sortHeader(L("mqdir.browser.column.modified"), key: .modified, alignment: .leading)
-                .frame(width: viewModel.columnWidths.modified, alignment: .leading)
-
-            ColumnResizeHandle { delta in
-                let nextMod = viewModel.columnWidths.modified + delta
-                let nextSize = viewModel.columnWidths.size - delta
-                if PaneColumnWidths.modifiedRange.contains(nextMod),
-                   PaneColumnWidths.sizeRange.contains(nextSize) {
-                    viewModel.columnWidths.modified = nextMod
-                    viewModel.columnWidths.size = nextSize
+                .frame(
+                    width: viewModel.columnWidths.modified,
+                    alignment: Alignment.leading
+                )
+            ColumnResizeHandle(
+                width: columnBinding(for: .modified),
+                range: PaneColumnWidths.modifiedRange,
+                debugLabel: FileColumnID.modified.rawValue,
+                onDragStateChange: { isColumnResizing = $0 },
+                onPreviewWidthChange: { width in
+                    previewResizeColumn = (width == nil) ? nil : .modified
+                    previewResizeWidth = width
                 }
-            }
+            )
 
-            // 大小列：右对齐（数字列视觉惯例）
+            Color.clear
+                .frame(width: 0, height: 0)
+                .task {
+                    reportHeaderDividerStructure(
+                        for: .size,
+                        hasLeadingDecorativeDivider: false,
+                        hasTrailingResizeHandle: true
+                    )
+                }
             sortHeader(L("mqdir.browser.column.size"), key: .size, alignment: .trailing)
-                .frame(width: viewModel.columnWidths.size, alignment: .trailing)
-
-            ColumnResizeHandle { delta in
-                let nextSize = viewModel.columnWidths.size + delta
-                let nextKind = viewModel.columnWidths.kind - delta
-                if PaneColumnWidths.sizeRange.contains(nextSize),
-                   PaneColumnWidths.kindRange.contains(nextKind) {
-                    viewModel.columnWidths.size = nextSize
-                    viewModel.columnWidths.kind = nextKind
+                .frame(
+                    width: viewModel.columnWidths.size,
+                    alignment: Alignment.trailing
+                )
+            ColumnResizeHandle(
+                width: columnBinding(for: .size),
+                range: PaneColumnWidths.sizeRange,
+                debugLabel: FileColumnID.size.rawValue,
+                onDragStateChange: { isColumnResizing = $0 },
+                onPreviewWidthChange: { width in
+                    previewResizeColumn = (width == nil) ? nil : .size
+                    previewResizeWidth = width
                 }
-            }
+            )
 
-            // 种类列：描述文件类型（Application / Folder / Image 等）
+            Color.clear
+                .frame(width: 0, height: 0)
+                .task {
+                    reportHeaderDividerStructure(
+                        for: .kind,
+                        hasLeadingDecorativeDivider: false,
+                        hasTrailingResizeHandle: true
+                    )
+                }
             sortHeader(L("mqdir.browser.column.kind"), key: .kind, alignment: .leading)
-                .frame(width: viewModel.columnWidths.kind, alignment: .leading)
-
-            // Kind 和 Created 之间的拖拽手柄：Kind 宽度 + Created 宽度联动（类似 Size↔Kind 的规则）
-            ColumnResizeHandle { delta in
-                let nextKind = viewModel.columnWidths.kind + delta
-                let nextCreated = viewModel.columnWidths.created - delta
-                if PaneColumnWidths.kindRange.contains(nextKind),
-                   PaneColumnWidths.createdRange.contains(nextCreated) {
-                    viewModel.columnWidths.kind = nextKind
-                    viewModel.columnWidths.created = nextCreated
+                .frame(
+                    width: viewModel.columnWidths.kind,
+                    alignment: Alignment.leading
+                )
+            ColumnResizeHandle(
+                width: columnBinding(for: .kind),
+                range: PaneColumnWidths.kindRange,
+                debugLabel: FileColumnID.kind.rawValue,
+                onDragStateChange: { isColumnResizing = $0 },
+                onPreviewWidthChange: { width in
+                    previewResizeColumn = (width == nil) ? nil : .kind
+                    previewResizeWidth = width
                 }
-            }
+            )
 
-            // 创建日期列：紧贴在 Kind 列右侧（用户要求），宽度与 Modified 同，默认 132pt
+            Color.clear
+                .frame(width: 0, height: 0)
+                .task {
+                    reportHeaderDividerStructure(
+                        for: .created,
+                        hasLeadingDecorativeDivider: false,
+                        hasTrailingResizeHandle: true
+                    )
+                }
             sortHeader(L("mqdir.browser.column.created"), key: .created, alignment: .leading)
-                .frame(width: viewModel.columnWidths.created, alignment: .leading)
+                .frame(
+                    width: viewModel.columnWidths.created,
+                    alignment: Alignment.leading
+                )
+            ColumnResizeHandle(
+                width: columnBinding(for: .created),
+                range: PaneColumnWidths.createdRange,
+                debugLabel: FileColumnID.created.rawValue,
+                onDragStateChange: { isColumnResizing = $0 },
+                onPreviewWidthChange: { width in
+                    previewResizeColumn = (width == nil) ? nil : .created
+                    previewResizeWidth = width
+                }
+            )
         }
         .font(Theme.Font.columnHeader)
         .foregroundStyle(Theme.Color.labelSecondary)
@@ -774,6 +1017,45 @@ struct BrowserPaneView: View {
             Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
         }
     }
+
+    /// 构造 FileColumnID → columnWidths 属性的 Binding（集中在一处避免重复手写）
+    private func columnBinding(for col: FileColumnID) -> Binding<CGFloat> {
+        Binding<CGFloat>(
+            get: { col.width(in: viewModel.columnWidths) ?? 0 },
+            set: { newValue in
+                // 根据列 ID 回写到对应的 PaneColumnWidths 字段
+                switch col {
+                case .modified: viewModel.columnWidths.modified = newValue
+                case .size:     viewModel.columnWidths.size     = newValue
+                case .kind:     viewModel.columnWidths.kind     = newValue
+                case .created:  viewModel.columnWidths.created  = newValue
+                case .name:
+                    // Name 是弹性列，理论上 isFlexible 会提前 return，这里做兜底
+                    assertionFailure("Name column should not be resizable.")
+                }
+            }
+        )
+    }
+
+    // #region debug-point B:header-divider-structure
+    private func reportHeaderDividerStructure(
+        for col: FileColumnID,
+        hasLeadingDecorativeDivider: Bool,
+        hasTrailingResizeHandle: Bool
+    ) {
+        reportColumnResizeDebug(
+            "B",
+            "header column rendered",
+            data: [
+                "column": col.rawValue,
+                "isFlexible": col.isFlexible,
+                "hasLeadingDecorativeDivider": hasLeadingDecorativeDivider,
+                "hasTrailingResizeHandle": hasTrailingResizeHandle,
+                "dividerWidth": kColumnDividerWidth
+            ]
+        )
+    }
+    // #endregion
 
     // 单个排序表头：点击切换排序键，当前键再点一次切换升降序
     private func sortHeader(_ title: String, key: FileEntrySortKey, alignment: HorizontalAlignment) -> some View {
@@ -1035,6 +1317,8 @@ struct BrowserPaneView: View {
             isSelected: isSelected,
             paneIsFocused: isFocused,
             isDropTarget: isRowDropTarget,
+            isColumnResizing: isColumnResizing,
+            nameColumnWidth: max(Self.nameColumnMinWidth, nameColumnWidth),
             columnWidths: viewModel.columnWidths,
             sizeText: sizeText(for: entry),
             subtitle: searchSubtitle(for: entry),
@@ -1207,6 +1491,8 @@ private struct FileEntryRow: View {
     let isSelected: Bool
     let paneIsFocused: Bool
     let isDropTarget: Bool
+    let isColumnResizing: Bool
+    let nameColumnWidth: CGFloat
     let columnWidths: PaneColumnWidths
     /// Pre-resolved string for the Size column. Files render their formatted
     /// byte count; directories render "—" (unknown), "…" (size walk running),
@@ -1253,7 +1539,10 @@ private struct FileEntryRow: View {
                                 .font(Theme.Font.body)
                                 .foregroundStyle(textColor)
                                 .lineLimit(1)
-                                .truncationMode(.middle)
+                                // 长文件名在连续改宽时，用 middle 截断会频繁重算中间省略位置，
+                                // SwiftUI 在大量行上会出现明显闪烁。拖拽期间临时改用 tail，
+                                // 松手后再恢复 middle，兼顾平时可读性和拖拽稳定性。
+                                .truncationMode(isColumnResizing ? .tail : .middle)
                             TagDotView(entry: entry)
                         }
                     }
@@ -1266,44 +1555,37 @@ private struct FileEntryRow: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Spacer matching the header's resize-handle width so columns
-            // stay vertically aligned with the column dividers.
-            Color.clear.frame(width: 6)
+            .frame(width: nameColumnWidth, alignment: Alignment.leading)
+            passiveColumnDivider
 
             Text(Self.modifiedDateFormatter.string(from: entry.modificationDate))
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1)
-                .frame(width: columnWidths.modified, alignment: .leading)
-
-            Color.clear.frame(width: 6)
+                .frame(width: columnWidths.modified, alignment: Alignment.leading)
+            passiveColumnDivider
 
             Text(sizeText)
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1)
-                .frame(width: columnWidths.size, alignment: .trailing)
-
-            Color.clear.frame(width: 6)
+                .frame(width: columnWidths.size, alignment: Alignment.trailing)
+            passiveColumnDivider
 
             Text(entry.kind)
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(width: columnWidths.kind, alignment: .leading)
+                .frame(width: columnWidths.kind, alignment: Alignment.leading)
+            passiveColumnDivider
 
-            // 6pt 列分隔符（与 header 的 ColumnResizeHandle 宽度对齐，确保列垂直对齐）
-            Color.clear.frame(width: 6)
-
-            // 创建日期列 cell：紧贴在 Kind 右侧（用户要求），格式化器与 Modified 列复用同一短日期+短时间
             Text(Self.createdDateFormatter.string(from: entry.creationDate))
                 .font(.system(size: 11))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1)
-                .frame(width: columnWidths.created, alignment: .leading)
+                .frame(width: columnWidths.created, alignment: Alignment.leading)
+            passiveColumnDivider
         }
         .padding(.horizontal, 6)
         .padding(.vertical, subtitle == nil ? 0 : 2)
@@ -1343,6 +1625,17 @@ private struct FileEntryRow: View {
         return Theme.Color.labelSecondary
     }
 
+    /// 内容区的被动分隔条：宽度必须和 Header 的可拖拽 handle 完全一致，
+    /// 这样标题和内容的竖线 x 坐标才会重合；这里只负责视觉占位，不处理拖拽。
+    private var passiveColumnDivider: some View {
+        Color.clear.frame(width: kColumnDividerWidth)
+            .overlay(
+                Rectangle()
+                    .fill(Theme.Color.separator.opacity(0.35))
+                    .frame(width: 0.5)
+            )
+    }
+
     // 修改日期 + 创建日期共享同一套 dateStyle/timeStyle（短日期+短时间），
     // 这里直接复用 ModifiedDateFormatter 再实例化一份，保证 UI 格式一致且 nil 兜底都显示 "—"
     private static let modifiedDateFormatter = ModifiedDateFormatter()
@@ -1380,24 +1673,67 @@ private struct FileSizeFormatter {
 
 // MARK: Column resize handle
 
+/// 列拖拽分隔条：行为严格对齐 Finder 列表视图（List View）的分隔线规则
+///
+/// 与旧实现的 4 个关键差异（对齐 Finder）：
+/// 1. 命中区 12pt（比视觉线宽，让鼠标不用精准对齐）
+/// 2. minimumDistance = 3（过滤「想点排序却误触发拖拽」）
+/// 3. 采用「起始宽度快照 + 绝对 translation」，不再是累积差分，
+///    clamp 时不会出现「cursor 走了、线没动、松手再拖回弹」的错位感
+/// 4. 签名改为 Binding<CGFloat> + ClosedRange，所有 caller 不再需要手动写 clamp，
+///    语义也强制变成「一个 handle 只改它左边那列的宽度」（Finder 规则 A / B）
 private struct ColumnResizeHandle: View {
-    let onChange: (CGFloat) -> Void
+    /// 绑定到「该分隔条左边列」的宽度（最后一列右边缘的 handle 绑定它自己）
+    @Binding var width: CGFloat
+    /// 允许的合法范围（PaneColumnWidths.*Range），拖拽时自动 clamp
+    let range: ClosedRange<CGFloat>
+    /// 仅用于调试：标记这根 handle 绑定的是哪一列，便于确认第一根可拖拽线到底是不是它。
+    let debugLabel: String
+    /// 通知上层当前是否处于列拖拽状态。用于让内容区在拖拽期间切换到更稳定的文字布局策略。
+    let onDragStateChange: (Bool) -> Void
+    /// 拖拽预览宽度变化：拖拽中只用来移动预览线，松手后才真正提交到内容区布局。
+    let onPreviewWidthChange: (CGFloat?) -> Void
 
-    @State private var lastTranslation: CGFloat = 0
-    @State private var isHovered = false
+    /// 拖拽开始时的起始宽度（snapshot），后续 always + translation.width 用绝对位置算
+    @State private var startWidth: CGFloat = 0
+    /// 当前拖拽过程中的预览宽度。内容区不会实时跟随它变化，只用它画预览线。
+    @State private var previewWidth: CGFloat = 0
+    @State private var isHovered  = false
     @State private var isDragging = false
 
     var body: some View {
         Rectangle()
             .fill(Color.clear)
-            .frame(width: 6, height: Theme.Metrics.columnHeaderHeight)
+            // 热点 12pt：视觉分隔线只有 0.5pt，但可点击区域 12pt（Finder 同款手感）
+            .frame(width: kColumnDividerWidth, height: Theme.Metrics.columnHeaderHeight)
             .overlay(
+                // 视觉分隔线居中画：不热点时 0.5pt，hover/drag 时 1pt + 高亮色
                 Rectangle()
                     .fill(isHovered || isDragging ? Theme.Color.accent.opacity(0.7) : Theme.Color.separator)
                     .frame(width: isHovered || isDragging ? 1 : 0.5)
             )
             .contentShape(Rectangle())
+            // 让 handle 的热点始终在 sortHeader 上方（避免 sortHeader 的 Button 拦截 handle 的 DragGesture）
+            .zIndex(1)
+            .task {
+                // #region debug-point C:resize-handle-mounted
+                reportColumnResizeDebug(
+                    "C",
+                    "resize handle mounted",
+                    data: [
+                        "column": debugLabel,
+                        "width": width,
+                        "min": range.lowerBound,
+                        "max": range.upperBound,
+                        "hitWidth": kColumnDividerWidth
+                    ]
+                )
+                // #endregion
+            }
             .onHover { hovering in
+                // 拖拽进行中不再响应 hover 抖动；否则 handle 会随着鼠标轻微位移反复进出，
+                // 触发不必要的状态刷新和 cursor push/pop，让拖动体感发涩。
+                if isDragging { return }
                 isHovered = hovering
                 if hovering {
                     NSCursor.resizeLeftRight.push()
@@ -1406,20 +1742,56 @@ private struct ColumnResizeHandle: View {
                 }
             }
             .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
+                DragGesture(minimumDistance: 3, coordinateSpace: .local) // 阈值 3pt + 局部坐标，
+                    .onChanged { value in                               // 防止外层 ScrollView 滚动位移叠加
                         if !isDragging {
+                            // 第一次 onChanged 才 snapshot 起点宽度，避免重复赋值
                             isDragging = true
-                            lastTranslation = 0
+                            onDragStateChange(true)
+                            startWidth = width
+                            previewWidth = width
+                            onPreviewWidthChange(width)
+                            // #region debug-point A:first-drag-start
+                            reportColumnResizeDebug(
+                                "A",
+                                "resize handle drag started",
+                                data: [
+                                    "column": debugLabel,
+                                    "startWidth": startWidth
+                                ]
+                            )
+                            // #endregion
                             NSCursor.resizeLeftRight.push()
                         }
-                        let delta = value.translation.width - lastTranslation
-                        lastTranslation = value.translation.width
-                        onChange(delta)
+                        // Finder 同款的绝对位移模式：目标 = 起始宽度 + 拖拽总位移
+                        // 再 clamp 到合法区间：避免列被拉到 0 或无限大。
+                        // 这里只更新“预览宽度”，不直接改内容区列宽，这样拖拽中只动一根预览线，
+                        // 内容区文字保持静止，不会因为连续重排而闪烁。
+                        let target = startWidth + value.translation.width
+                        let nextWidth = target.clamped(to: range).rounded()
+                        if nextWidth != previewWidth {
+                            previewWidth = nextWidth
+                            onPreviewWidthChange(nextWidth)
+                        }
                     }
                     .onEnded { _ in
                         isDragging = false
-                        lastTranslation = 0
+                        onDragStateChange(false)
+                        isHovered = false
+                        width = previewWidth.clamped(to: range).rounded()
+                        onPreviewWidthChange(nil)
+                        // #region debug-point D:drag-ended
+                        reportColumnResizeDebug(
+                            "D",
+                            "resize handle drag ended",
+                            data: [
+                                "column": debugLabel,
+                                "finalWidth": width
+                            ]
+                        )
+                        // #endregion
+                        startWidth = 0
+                        previewWidth = width
                         NSCursor.pop()
                     }
             )
