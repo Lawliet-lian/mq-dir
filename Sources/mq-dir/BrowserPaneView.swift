@@ -199,6 +199,7 @@ struct BrowserPaneView: View {
         Menu(L("mqdir.browser.sortBy")) {
             sortMenuItem(L("mqdir.browser.column.name"), key: .name)
             sortMenuItem(L("mqdir.browser.sort.dateModified"), key: .modified)
+            sortMenuItem(L("mqdir.browser.sort.dateCreated"), key: .created)
             sortMenuItem(L("mqdir.browser.column.size"), key: .size)
             sortMenuItem(L("mqdir.browser.column.kind"), key: .kind)
             Divider()
@@ -250,16 +251,19 @@ struct BrowserPaneView: View {
     private static let nameColumnMinWidth: CGFloat = 200
 
     /// Natural minimum of the columns strip = name floor + the
-    /// configured Modified/Size/Kind widths + 3 resize-handle gaps
+    /// configured Modified/Size/Kind/Created widths + 4 resize-handle gaps
     /// (6pt each) + outer header padding (6pt × 2). When the pane is
     /// narrower than this we let the horizontal ScrollView take over;
     /// when it's wider, the .frame(minWidth: geo.size.width) below
     /// stretches the strip to fill so columns don't pile up on the left.
+    /// 说明：列数 4 → 5，handle 数量 3 → 4，因此 handles 常量与 return 表达式都同步了。
     private var minColumnsTotal: CGFloat {
         let widths = viewModel.columnWidths
-        let handles: CGFloat = 6 * 3
+        // 列间隔（resize handle）数量：5 列 → 4 个 handle × 6pt
+        let handles: CGFloat = 6 * 4
         let outerPadding: CGFloat = 6 * 2
-        return Self.nameColumnMinWidth + widths.modified + widths.size + widths.kind + handles + outerPadding
+        // 末尾 + widths.created：新增创建日期列的默认宽度
+        return Self.nameColumnMinWidth + widths.modified + widths.size + widths.kind + widths.created + handles + outerPadding
     }
 
     /// Header + list wrapped in a horizontal ScrollView so the Name
@@ -701,6 +705,7 @@ struct BrowserPaneView: View {
     private static let sizeFormatter = FileSizeFormatter()
 
     // 列标题栏：Name/Modified/Size/Kind 四列，支持点击排序和拖拽改列宽
+    // 列顺序严格按用户要求：名称 → 修改日期 → 大小 → 种类 → 创建日期（创建日期必须紧贴 Kind 右侧）
     private var columnHeader: some View {
         HStack(spacing: 0) {
             // 名称列：弹性填充（剩余空间都给它）
@@ -744,6 +749,21 @@ struct BrowserPaneView: View {
             // 种类列：描述文件类型（Application / Folder / Image 等）
             sortHeader(L("mqdir.browser.column.kind"), key: .kind, alignment: .leading)
                 .frame(width: viewModel.columnWidths.kind, alignment: .leading)
+
+            // Kind 和 Created 之间的拖拽手柄：Kind 宽度 + Created 宽度联动（类似 Size↔Kind 的规则）
+            ColumnResizeHandle { delta in
+                let nextKind = viewModel.columnWidths.kind + delta
+                let nextCreated = viewModel.columnWidths.created - delta
+                if PaneColumnWidths.kindRange.contains(nextKind),
+                   PaneColumnWidths.createdRange.contains(nextCreated) {
+                    viewModel.columnWidths.kind = nextKind
+                    viewModel.columnWidths.created = nextCreated
+                }
+            }
+
+            // 创建日期列：紧贴在 Kind 列右侧（用户要求），宽度与 Modified 同，默认 132pt
+            sortHeader(L("mqdir.browser.column.created"), key: .created, alignment: .leading)
+                .frame(width: viewModel.columnWidths.created, alignment: .leading)
         }
         .font(Theme.Font.columnHeader)
         .foregroundStyle(Theme.Color.labelSecondary)
@@ -1274,6 +1294,16 @@ private struct FileEntryRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(width: columnWidths.kind, alignment: .leading)
+
+            // 6pt 列分隔符（与 header 的 ColumnResizeHandle 宽度对齐，确保列垂直对齐）
+            Color.clear.frame(width: 6)
+
+            // 创建日期列 cell：紧贴在 Kind 右侧（用户要求），格式化器与 Modified 列复用同一短日期+短时间
+            Text(Self.createdDateFormatter.string(from: entry.creationDate))
+                .font(.system(size: 11))
+                .foregroundStyle(secondaryColor)
+                .lineLimit(1)
+                .frame(width: columnWidths.created, alignment: .leading)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, subtitle == nil ? 0 : 2)
@@ -1313,7 +1343,10 @@ private struct FileEntryRow: View {
         return Theme.Color.labelSecondary
     }
 
+    // 修改日期 + 创建日期共享同一套 dateStyle/timeStyle（短日期+短时间），
+    // 这里直接复用 ModifiedDateFormatter 再实例化一份，保证 UI 格式一致且 nil 兜底都显示 "—"
     private static let modifiedDateFormatter = ModifiedDateFormatter()
+    private static let createdDateFormatter  = ModifiedDateFormatter()
 }
 
 private struct ModifiedDateFormatter {

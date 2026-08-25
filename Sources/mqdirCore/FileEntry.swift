@@ -5,7 +5,10 @@ struct FileEntry: Identifiable, Hashable, Sendable {
     let name: String
     let isDirectory: Bool
     let size: Int64?
+    // 修改日期（Finder 「修改日期」列）
     let modificationDate: Date?
+    // 创建日期（Finder 「创建日期」列，本需求新增）
+    let creationDate: Date?
     let kind: String
     let isHidden: Bool
     /// Finder tags attached to this URL (`URLResourceKey.tagNamesKey`).
@@ -44,6 +47,8 @@ struct FileEntry: Identifiable, Hashable, Sendable {
         isDirectory: Bool,
         size: Int64?,
         modificationDate: Date?,
+        // 创建日期默认 nil，保持老数据/单测构造时的兼容
+        creationDate: Date? = nil,
         kind: String,
         isHidden: Bool,
         tagNames: [String] = [],
@@ -56,6 +61,7 @@ struct FileEntry: Identifiable, Hashable, Sendable {
         self.isDirectory = isDirectory
         self.size = size
         self.modificationDate = modificationDate
+        self.creationDate = creationDate
         self.kind = kind
         self.isHidden = isHidden
         self.tagNames = tagNames
@@ -87,6 +93,8 @@ enum FileEntrySortKey: String, CaseIterable, Codable, Sendable {
     case modified
     case size
     case kind
+    // 新增：按创建日期排序，配合「创建日期」列点击排序和 Sort By 右键菜单
+    case created
 }
 
 enum FileEntrySorter {
@@ -110,6 +118,9 @@ enum FileEntrySorter {
                 compareOptional(lhs.size, rhs.size)
             case .kind:
                 lhs.kind.localizedStandardCompare(rhs.kind)
+            // 创建日期排序分支：nil 值兜底顺序与 modified 保持一致（compareOptional）
+            case .created:
+                compareOptional(lhs.creationDate, rhs.creationDate)
             }
 
             if comparison == .orderedSame {

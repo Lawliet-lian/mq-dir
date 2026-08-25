@@ -8,8 +8,11 @@ struct FileSystemService {
     }
 
     func enumerateDirectory(at url: URL, includingHidden: Bool = false) throws -> [FileEntry] {
+        // 枚举目录时预抓取的 URLResourceKey：
+        // 新增 creationDateKey 以驱动「创建日期」列（需求：种类右侧紧挨着创建日期）
         let keys: Set<URLResourceKey> = [
             .contentModificationDateKey,
+            .creationDateKey,
             .fileSizeKey,
             .isDirectoryKey,
             .isHiddenKey,
@@ -43,6 +46,8 @@ struct FileSystemService {
                 isDirectory: isDirectory,
                 size: isDirectory ? nil : values.fileSize.map(Int64.init),
                 modificationDate: values.contentModificationDate,
+                // 把 URLResourceValues.creationDate 透传进 FileEntry，显示到「创建日期」列
+                creationDate: values.creationDate,
                 kind: kind(for: childURL, isDirectory: isDirectory),
                 isHidden: values.isHidden ?? name.hasPrefix("."),
                 tagNames: tagNames,
@@ -69,6 +74,8 @@ struct FileSystemService {
 
         let keys: Set<URLResourceKey> = [
             .contentModificationDateKey,
+            // 深度搜索场景也抓 creationDate，保证搜索结果列表的「创建日期」列也有值
+            .creationDateKey,
             .fileSizeKey,
             .isDirectoryKey,
             .isHiddenKey,
@@ -128,6 +135,8 @@ struct FileSystemService {
                 isDirectory: isDirectory,
                 size: isDirectory ? nil : (values?.fileSize).map(Int64.init),
                 modificationDate: values?.contentModificationDate,
+                // 搜索分支也要把 creationDate 透传进去，避免搜索结果的「创建日期」列全是 —
+                creationDate: values?.creationDate,
                 kind: kind(for: childURL, isDirectory: isDirectory),
                 isHidden: values?.isHidden ?? name.hasPrefix("."),
                 tagNames: tagNames,

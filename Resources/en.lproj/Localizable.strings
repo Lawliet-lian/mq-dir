@@ -196,10 +196,14 @@
 "mqdir.browser.column.modified" = "Modified";
 "mqdir.browser.column.size" = "Size";
 "mqdir.browser.column.kind" = "Kind";
+// 新增：创建日期列（本需求新增字段 creationDate），列顺序严格在 Kind 右侧
+"mqdir.browser.column.created" = "Created";
 
 // 新增：排序菜单
 "mqdir.browser.sortBy" = "Sort By";
 "mqdir.browser.sort.dateModified" = "Date Modified";
+// 新增：Sort By 子菜单里按创建日期排序的菜单项
+"mqdir.browser.sort.dateCreated" = "Date Created";
 "mqdir.browser.sort.foldersOnTop" = "Folders on Top";
 "mqdir.browser.sort.showHiddenFiles" = "Show Hidden Files";
 

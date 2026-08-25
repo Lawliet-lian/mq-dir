@@ -196,10 +196,14 @@
 "mqdir.browser.column.modified" = "修改日期";
 "mqdir.browser.column.size" = "大小";
 "mqdir.browser.column.kind" = "种类";
+// 新增：创建日期列，紧贴 Kind 列右侧，中文与 Finder「创建日期」列标题保持一致
+"mqdir.browser.column.created" = "创建日期";
 
 // 新增：排序菜单
 "mqdir.browser.sortBy" = "排序方式";
 "mqdir.browser.sort.dateModified" = "修改日期";
+// 新增：Sort By 子菜单「按创建日期」选项，与 Finder 中文用语一致
+"mqdir.browser.sort.dateCreated" = "创建日期";
 "mqdir.browser.sort.foldersOnTop" = "文件夹置顶";
 "mqdir.browser.sort.showHiddenFiles" = "显示隐藏文件";
 
