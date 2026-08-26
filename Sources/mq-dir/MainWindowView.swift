@@ -520,15 +520,16 @@ struct MainWindowView: View {
                         lineWidth: fourPaneIndependentSplit ? 1.0 : 0.7
                     )
 
-                // 图标：尺寸收窄到和左边分段单粒一致的 10pt，
-                // 并且激活态直接用白色，避免在 accent 描边前变成“浅灰色看不见”。
+                // 图标：默认态保持原语义符号；激活（独立）态改回最早的
+                // 双向箭头方块符号，图形更“实”，不会像细线符号那样在小尺寸下
+                // 看起来像没显示。其余尺寸、颜色、边框保持不变。
                 Image(systemName: fourPaneIndependentSplit
-                      ? "rectangle.split.2x1x2"
+                      ? "arrow.left.and.right.square.fill"
                       : "rectangle.split.2x2")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(
                         fourPaneIndependentSplit
-                            ? Color.white
+                            ? Color.white.opacity(0.88)
                             : Theme.Color.labelSecondary
                     )
             }
