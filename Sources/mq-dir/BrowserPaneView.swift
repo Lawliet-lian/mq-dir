@@ -389,11 +389,36 @@ struct BrowserPaneView: View {
         return nameWidth + fixedWidthSum + handles + outerPadding
     }
 
+    /// 非 Name 列一共会占掉多少水平空间。把这部分单独抽出来后，我们就
+    /// 能在 pane 变宽时把剩余空间优先交给 Name 列，而不是留下大块空白。
+    private var nonNameColumnsTotal: CGFloat {
+        let widths = viewModel.columnWidths
+        let fixedWidthSum = widths.modified + widths.size + widths.kind + widths.created
+        let handleCount = 5
+        let handles = CGFloat(handleCount) * kColumnDividerWidth
+        let outerPadding: CGFloat = 6 * 2
+        return fixedWidthSum + handles + outerPadding
+    }
+
+    /// 计算当前 pane 可见宽度下，Name 列最终应展示的宽度。
+    ///
+    /// 这里不直接改写 `nameColumnWidth` 状态，而是在布局阶段做“只扩不缩”
+    /// 的显示扩展：
+    /// - pane 变窄时，继续遵守用户拖出来的 Name 列宽度；
+    /// - pane 变宽时，让新增空间优先被 Name 列吸收，避免列表内容左右留白。
+    private func effectiveNameColumnWidth(for availablePaneWidth: CGFloat) -> CGFloat {
+        let committedNameWidth = max(Self.nameColumnMinWidth, nameColumnWidth)
+        let expandedNameWidth = availablePaneWidth - nonNameColumnsTotal
+        return max(committedNameWidth, expandedNameWidth)
+    }
+
     /// 读取某一列当前已提交到布局系统的宽度；拖拽预览态不算在这里。
-    private func committedWidth(for col: FileColumnID) -> CGFloat {
+    /// Name 列使用当前“实际显示宽度”，这样 pane 变宽后再拖其他列时，
+    /// 预览线仍然能和屏幕上真正的列边界保持对齐。
+    private func committedWidth(for col: FileColumnID, displayedNameWidth: CGFloat) -> CGFloat {
         switch col {
         case .name:
-            return max(Self.nameColumnMinWidth, nameColumnWidth)
+            return max(Self.nameColumnMinWidth, displayedNameWidth)
         case .modified:
             return viewModel.columnWidths.modified
         case .size:
@@ -406,12 +431,14 @@ struct BrowserPaneView: View {
     }
 
     /// 预览线在内容容器中的 x 坐标。拖拽时只移动这根线，内容区保持旧列宽不重排。
-    private var previewDividerOffsetX: CGFloat? {
+    private func previewDividerOffsetX(displayedNameWidth: CGFloat) -> CGFloat? {
         guard let previewResizeColumn, let previewResizeWidth else { return nil }
         let orderedColumns: [FileColumnID] = [.name, .modified, .size, .kind, .created]
         var x: CGFloat = 6 // 对齐 columnHeader/file rows 的 horizontal padding 左边距
         for col in orderedColumns {
-            let width = (col == previewResizeColumn) ? previewResizeWidth : committedWidth(for: col)
+            let width = (col == previewResizeColumn)
+                ? previewResizeWidth
+                : committedWidth(for: col, displayedNameWidth: displayedNameWidth)
             x += width
             if col == previewResizeColumn {
                 return x + (kColumnDividerWidth / 2)
@@ -430,13 +457,14 @@ struct BrowserPaneView: View {
     /// height so the inner vertical scroll keeps working.
     private var listWithHorizontalScroll: some View {
         GeometryReader { geo in
+            let effectiveNameWidth = effectiveNameColumnWidth(for: geo.size.width)
             ScrollView(.horizontal, showsIndicators: true) {
-                VStack(spacing: 0) {
-                    columnHeader
-                    fileList
+                VStack(alignment: .leading, spacing: 0) {
+                    columnHeader(nameColumnWidth: effectiveNameWidth)
+                    fileList(nameColumnWidth: effectiveNameWidth)
                 }
                 .overlay(alignment: .topLeading) {
-                    if let previewX = previewDividerOffsetX {
+                    if let previewX = previewDividerOffsetX(displayedNameWidth: effectiveNameWidth) {
                         Rectangle()
                             .fill(Theme.Color.accent)
                             .frame(width: 1, height: geo.size.height)
@@ -881,7 +909,7 @@ struct BrowserPaneView: View {
     //
     // 注意：BrowserPaneView 里 `viewModel` 是普通计算属性（非 @ObservedObject），没有 `$viewModel` 投影，
     // 传给 ColumnResizeHandle 的 Binding 用 Binding(get:set:) 手动构造读写 @Published 的 columnWidths。
-    private var columnHeader: some View {
+    private func columnHeader(nameColumnWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             Color.clear
                 .frame(width: 0, height: 0)
@@ -1162,17 +1190,17 @@ struct BrowserPaneView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var fileList: some View {
+    private func fileList(nameColumnWidth: CGFloat) -> some View {
         // ScrollViewReader gives us a proxy so arrow-key navigation can keep
         // the selected row visible — Finder-style. `.id(entry.id)` on each
         // row makes the proxy able to find rows by FileEntry.ID.
         ScrollViewReader { proxy in
             GeometryReader { geo in
                 ScrollView {
-                    VStack(spacing: 0) {
-                        LazyVStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(viewModel.visibleEntries) { entry in
-                                rowView(for: entry)
+                                rowView(for: entry, nameColumnWidth: nameColumnWidth)
                                     .id(entry.id)
                             }
                         }
@@ -1193,7 +1221,7 @@ struct BrowserPaneView: View {
                             }
                             .contextMenu { emptyAreaContextMenu }
                     }
-                    .frame(minHeight: geo.size.height, alignment: .top)
+                    .frame(width: max(minColumnsTotal, geo.size.width), minHeight: geo.size.height, alignment: .topLeading)
                 }
             .focusable()
             .focused($listFocused)
@@ -1308,7 +1336,7 @@ struct BrowserPaneView: View {
     }
 
     @ViewBuilder
-    private func rowView(for entry: FileEntry) -> some View {
+    private func rowView(for entry: FileEntry, nameColumnWidth: CGFloat) -> some View {
         let isSelected = viewModel.selection.contains(entry.id)
         let isRowDropTarget = entry.isDirectory && rowDropTargeted == entry.id
 
@@ -1555,7 +1583,7 @@ private struct FileEntryRow: View {
                     }
                 }
             }
-            .frame(width: nameColumnWidth, alignment: Alignment.leading)
+            .frame(minWidth: nameColumnWidth, maxWidth: .infinity, alignment: .leading)
             passiveColumnDivider
 
             Text(Self.modifiedDateFormatter.string(from: entry.modificationDate))

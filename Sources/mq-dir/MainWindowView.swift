@@ -509,16 +509,23 @@ struct MainWindowView: View {
 
     // MARK: Pane grid
 
+    /// 左右可拖拽布局里每一列允许压缩到的最小宽度。这里不追求把
+    /// BrowserPaneView 的所有内部控件都“完全无压缩”展示，而是提供
+    /// 一个足够稳定的地板值：继续允许用户把列拖窄，同时避免过早塌到
+    /// 几乎不可用的状态。若后续实测还想更宽/更窄，只改这一个常量即可。
+    private static let resizablePaneMinWidth: CGFloat = 260
+
     @ViewBuilder
     private var paneGrid: some View {
         switch layout {
         case .one:
             paneView(0)
         case .twoH:
-            HStack(spacing: 0) {
-                paneView(0)
-                Divider().background(Theme.Color.separator)
-                paneView(1)
+            // 双栏改为原生 HSplitView：这样中线由系统提供，用户可以在
+            // 当前运行时直接左右拖拽宽度，不需要我们手写 DragGesture。
+            HSplitView {
+                resizablePaneItem(0)
+                resizablePaneItem(1)
             }
         case .twoV:
             VStack(spacing: 0) {
@@ -527,20 +534,43 @@ struct MainWindowView: View {
                 paneView(1)
             }
         case .four:
-            VStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    paneView(0)
-                    Divider().background(Theme.Color.separator)
-                    paneView(1)
-                }
-                Divider().background(Theme.Color.separator)
-                HStack(spacing: 0) {
-                    paneView(2)
-                    Divider().background(Theme.Color.separator)
-                    paneView(3)
-                }
+            // 四栏的关键不是“做两行 HStack”，而是先做一个外层左右
+            // HSplitView。这样上下两排天然共享同一根中线，拖动一次即可
+            // 同步改变上面两栏和下面两栏的左右列宽，避免出现上下中线错位。
+            HSplitView {
+                paneColumn(top: 0, bottom: 2)
+                paneColumn(top: 1, bottom: 3)
             }
         }
+    }
+
+    /// 统一包装左右可拖拽布局中的单个 pane。把最小宽度约束集中在这里，
+    /// twoH 与 four 共用一套规则，后续调参时不会漏改。
+    private func resizablePaneItem(_ index: Int) -> some View {
+        paneView(index)
+            .frame(
+                minWidth: Self.resizablePaneMinWidth,
+                idealWidth: Self.resizablePaneMinWidth,
+                maxWidth: .infinity,
+                maxHeight: .infinity
+            )
+    }
+
+    /// 四栏模式中的一整列。列内部仍然保持上下静态均分，因为本次需求只
+    /// 解决中间竖线左右拖拽；外层列容器使用同样的最小宽度保护，避免把
+    /// 某一整列拖得过窄后两个 pane 一起进入极端压缩状态。
+    private func paneColumn(top: Int, bottom: Int) -> some View {
+        VStack(spacing: 0) {
+            paneView(top)
+            Divider().background(Theme.Color.separator)
+            paneView(bottom)
+        }
+        .frame(
+            minWidth: Self.resizablePaneMinWidth,
+            idealWidth: Self.resizablePaneMinWidth,
+            maxWidth: .infinity,
+            maxHeight: .infinity
+        )
     }
 
     private func paneView(_ index: Int) -> some View {
