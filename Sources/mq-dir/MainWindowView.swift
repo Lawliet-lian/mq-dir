@@ -257,7 +257,7 @@ struct MainWindowView: View {
     private var toolbar: some View {
         HStack(spacing: 6) {
             // Spacer for traffic-light area on the left edge of the window.
-            Spacer().frame(width: 8)
+            Spacer().frame(width: 0)
 
             ToolbarIconButton(
                 symbol: sidebarSplitController.isCollapsed ? "sidebar.squares.left" : "sidebar.left",
@@ -281,7 +281,8 @@ struct MainWindowView: View {
 
             layoutSegmentedControl
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 0)
+        .padding(.trailing, 12)
         .frame(height: Theme.Metrics.toolbarHeight)
         .background(Theme.Color.toolbarBg)
     }
