@@ -1221,7 +1221,8 @@ struct BrowserPaneView: View {
                             }
                             .contextMenu { emptyAreaContextMenu }
                     }
-                    .frame(width: max(minColumnsTotal, geo.size.width), minHeight: geo.size.height, alignment: .topLeading)
+                    .frame(width: max(minColumnsTotal, geo.size.width), alignment: .topLeading)
+                    .frame(minHeight: geo.size.height, alignment: .topLeading)
                 }
             .focusable()
             .focused($listFocused)

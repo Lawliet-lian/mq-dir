@@ -534,12 +534,19 @@ struct MainWindowView: View {
                 paneView(1)
             }
         case .four:
-            // 四栏的关键不是“做两行 HStack”，而是先做一个外层左右
-            // HSplitView。这样上下两排天然共享同一根中线，拖动一次即可
-            // 同步改变上面两栏和下面两栏的左右列宽，避免出现上下中线错位。
-            HSplitView {
-                paneColumn(top: 0, bottom: 2)
-                paneColumn(top: 1, bottom: 3)
+            // 四栏改为上下两排各自拥有一个 HSplitView。这样上排和下排
+            // 的中线完全独立，用户可以分别调整各自的左右宽度；代价是
+            // 两排的中线不再强制对齐，这是当前“完全独立拖拽”的目标。
+            VStack(spacing: 0) {
+                HSplitView {
+                    resizablePaneItem(0)
+                    resizablePaneItem(1)
+                }
+                Divider().background(Theme.Color.separator)
+                HSplitView {
+                    resizablePaneItem(2)
+                    resizablePaneItem(3)
+                }
             }
         }
     }
@@ -554,23 +561,6 @@ struct MainWindowView: View {
                 maxWidth: .infinity,
                 maxHeight: .infinity
             )
-    }
-
-    /// 四栏模式中的一整列。列内部仍然保持上下静态均分，因为本次需求只
-    /// 解决中间竖线左右拖拽；外层列容器使用同样的最小宽度保护，避免把
-    /// 某一整列拖得过窄后两个 pane 一起进入极端压缩状态。
-    private func paneColumn(top: Int, bottom: Int) -> some View {
-        VStack(spacing: 0) {
-            paneView(top)
-            Divider().background(Theme.Color.separator)
-            paneView(bottom)
-        }
-        .frame(
-            minWidth: Self.resizablePaneMinWidth,
-            idealWidth: Self.resizablePaneMinWidth,
-            maxWidth: .infinity,
-            maxHeight: .infinity
-        )
     }
 
     private func paneView(_ index: Int) -> some View {
