@@ -768,20 +768,7 @@ private final class SidebarInitialWidthNSView: NSView {
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.hasApplied?.wrappedValue == false else { return }
-            guard let splitView = self.enclosingSplitView(), splitView.subviews.count >= 2 else {
-                // #region debug-point A:no-splitview
-                Self.reportDebugEvent(
-                    hypothesisId: "A",
-                    msg: "[DEBUG] applyIfNeeded skipped: no enclosing NSSplitView",
-                    data: [
-                        "desiredWidth": self.width,
-                        "inWindow": self.window != nil,
-                        "superviewFrame": self.superview?.frame.debugDescription ?? "nil",
-                    ]
-                )
-                // #endregion
-                return
-            }
+            guard let splitView = self.enclosingSplitView(), splitView.subviews.count >= 2 else { return }
 
             self.controller?.attach(splitView)
 
@@ -789,77 +776,11 @@ private final class SidebarInitialWidthNSView: NSView {
             // 调到 0，桥接这里也必须用同样的范围做夹取，否则会出现
             // “设置里已经是 0，但真正启动时还是被抬到 40” 的不一致。
             let clampedWidth = min(max(self.width, 0), 280)
-            let leftView = splitView.subviews[0]
-            let dividerIndex = 0
-            let hasTwoSubviews = splitView.subviews.indices.contains(dividerIndex + 1)
-            let rightView = hasTwoSubviews ? splitView.subviews[dividerIndex + 1] : nil
-            // NSSplitView 没有直接暴露 position(ofDividerAt:)；
-            // 这里用第二子视图的 minX 作为分割条位置的近似观测值。
-            let positionBefore = rightView?.frame.minX ?? -1
-            let leftFrameBefore = leftView.frame
-            let splitViewFrame = splitView.frame
-
-            // #region debug-point B:before-setPosition
-            Self.reportDebugEvent(
-                hypothesisId: "B",
-                msg: "[DEBUG] setPosition call",
-                data: [
-                    "desiredWidth": self.width,
-                    "clampedWidth": clampedWidth,
-                    "positionBefore": positionBefore,
-                    "leftWidthBefore": leftFrameBefore.width,
-                    "splitViewWidth": splitViewFrame.width,
-                    "subviewCount": splitView.subviews.count,
-                    "leftViewClass": String(describing: type(of: leftView)),
-                    "isVertical": splitView.isVertical,
-                    "dividerStyle": splitView.dividerStyle.rawValue,
-                ]
-            )
-            // #endregion
 
             self.controller?.apply(width: clampedWidth)
 
-            let positionAfter = rightView?.frame.minX ?? -1
-            let leftFrameAfter = leftView.frame
-
-            // #region debug-point C:after-setPosition
-            Self.reportDebugEvent(
-                hypothesisId: "C",
-                msg: "[DEBUG] setPosition immediate after",
-                data: [
-                    "positionAfter": positionAfter,
-                    "leftWidthAfter": leftFrameAfter.width,
-                    "clampedWidth": clampedWidth,
-                    "splitViewWidth": splitView.frame.width,
-                    "isVertical": splitView.isVertical,
-                ]
-            )
-            // #endregion
-
             self.hasApplied?.wrappedValue = true
             self.controller?.refreshState()
-
-            DispatchQueue.main.async { [weak splitView] in
-                guard let splitView else { return }
-                let finalRight = splitView.subviews.indices.contains(dividerIndex + 1)
-                    ? splitView.subviews[dividerIndex + 1].frame.minX
-                    : -1
-                let leftFinalWidth = splitView.subviews[0].frame.width
-
-                // #region debug-point D:post-layout
-                Self.reportDebugEvent(
-                    hypothesisId: "D",
-                    msg: "[DEBUG] post-layout re-read",
-                    data: [
-                        "positionFinal": finalRight,
-                        "leftFinalWidth": leftFinalWidth,
-                        "clampedWidth": clampedWidth,
-                        "splitViewWidthFinal": splitView.frame.width,
-                        "isVertical": splitView.isVertical,
-                    ]
-                )
-                // #endregion
-            }
         }
     }
 
@@ -874,55 +795,6 @@ private final class SidebarInitialWidthNSView: NSView {
         return nil
     }
 }
-
-// #region debug-point E:logger
-private extension SidebarInitialWidthNSView {
-    /// 轻量插桩上报：优先读 `.dbg/sidebar-width-default.env`，
-    /// 读不到就回落到默认端口；发送失败静默忽略，不影响运行。
-    static func reportDebugEvent(
-        hypothesisId: String,
-        msg: String,
-        data: [String: Any]
-    ) {
-        let fm = FileManager.default
-        let envPath = fm.currentDirectoryPath
-            .appending("/.dbg/sidebar-width-default.env")
-            ?? Bundle.main.bundlePath.appending("/.dbg/sidebar-width-default.env")
-        var serverURL = "http://127.0.0.1:7777/event"
-        var sessionId = "sidebar-width-default"
-        if let env = try? String(contentsOfFile: envPath, encoding: .utf8) {
-            for line in env.split(whereSeparator: { $0.isNewline }) {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("DEBUG_SERVER_URL=") {
-                    serverURL = String(trimmed.dropFirst("DEBUG_SERVER_URL=".count))
-                } else if trimmed.hasPrefix("DEBUG_SESSION_ID=") {
-                    sessionId = String(trimmed.dropFirst("DEBUG_SESSION_ID=".count))
-                }
-            }
-        }
-        let jsonObject: [String: Any] = [
-            "sessionId": sessionId,
-            "runId": "pre-fix",
-            "hypothesisId": hypothesisId,
-            "location": "MainWindowView.SidebarInitialWidthNSView",
-            "msg": msg,
-            "data": data,
-            "ts": Int(Date().timeIntervalSince1970 * 1000),
-        ]
-        guard let url = URL(string: serverURL),
-              JSONSerialization.isValidJSONObject(jsonObject),
-              let body = try? JSONSerialization.data(withJSONObject: jsonObject, options: []) else {
-            return
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = body
-        let task = URLSession.shared.dataTask(with: req) { _, _, _ in }
-        task.resume()
-    }
-}
-// #endregion
 
 // MARK: - Body modifier chunks
 //
