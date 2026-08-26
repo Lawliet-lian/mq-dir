@@ -104,6 +104,11 @@
 "mqdir.settings.section.language" = "语言";
 "mqdir.settings.language.pickerLabel" = "语言";
 
+"mqdir.settings.section.sidebar" = "侧边栏";
+"mqdir.settings.sidebar.defaultWidth" = "侧边栏默认宽度";
+"mqdir.settings.sidebar.defaultWidthValue" = "%d pt";
+"mqdir.settings.sidebar.defaultWidthFooter" = "仅影响主窗口首次出现时左侧栏的初始宽度；启动后你仍然可以通过拖拽原生分隔条自由调整。";
+
 "mqdir.settings.section.filenames" = "文件名";
 "mqdir.settings.filenames.normalizeHangul" = "拖出时将韩文文件名规范化为 NFC 形式";
 "mqdir.settings.filenames.normalizeHangulFooter" = "以分解形式（NFD）存储的韩文文件名在被拖入或复制到其他应用时会显示异常（如 ㅎㅏㄴㄱㅡㄹ 而非 한글）。启用此选项后，当文件离开 mq-dir 时，会在磁盘上将其重命名为组合形式（NFC）。";

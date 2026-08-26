@@ -140,6 +140,13 @@ struct MainWindowView: View {
             }
     }
 
+    /// 启动默认宽度优先读取用户在设置页中配置的值；如果用户还没配，
+    /// 则回退到 Theme.swift 里的内建默认值。这样既保留了代码默认值，
+    /// 也让设置页可以覆盖它，而不会影响运行中用户手动拖拽后的宽度。
+    private var configuredSidebarDefaultWidth: CGFloat {
+        CGFloat(workspace.workspace.settings.sidebarDefaultWidth ?? Double(Theme.Metrics.sidebarWidth))
+    }
+
     private var windowChrome: some View {
         HSplitView {
             SidebarView(
@@ -165,10 +172,10 @@ struct MainWindowView: View {
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
                 focusedPane.openFolder(url)
             }
-            .frame(minWidth: 0, idealWidth: Theme.Metrics.sidebarWidth, maxWidth: 280)
+            .frame(minWidth: 0, idealWidth: configuredSidebarDefaultWidth, maxWidth: 280)
             .background(
                 SidebarInitialWidthBridge(
-                    width: Theme.Metrics.sidebarWidth,
+                    width: configuredSidebarDefaultWidth,
                     hasApplied: $didApplyInitialSidebarWidth
                 )
             )
@@ -698,7 +705,10 @@ private final class SidebarInitialWidthNSView: NSView {
                 return
             }
 
-            let clampedWidth = min(max(self.width, 40), 280)
+            // 与主视图的 `minWidth: 0` 保持一致：设置页里允许把启动默认值
+            // 调到 0，桥接这里也必须用同样的范围做夹取，否则会出现
+            // “设置里已经是 0，但真正启动时还是被抬到 40” 的不一致。
+            let clampedWidth = min(max(self.width, 0), 280)
             let leftView = splitView.subviews[0]
             let dividerIndex = 0
             let hasTwoSubviews = splitView.subviews.indices.contains(dividerIndex + 1)

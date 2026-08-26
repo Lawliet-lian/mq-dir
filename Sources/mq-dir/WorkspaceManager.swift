@@ -165,6 +165,16 @@ final class WorkspaceManager: ObservableObject {
         UserDefaults.standard.synchronize()
     }
 
+    /// Persist the user-configured startup default width for the left
+    /// sidebar. This only affects the one-time width applied when the
+    /// main window appears; the user can still drag the split view
+    /// freely after launch.
+    func setSidebarDefaultWidth(_ width: Double?) {
+        let normalized = width.map { min(max(round($0), 0), 280) }
+        guard workspace.settings.sidebarDefaultWidth != normalized else { return }
+        mutate { $0.settings.sidebarDefaultWidth = normalized }
+    }
+
     /// Persist a user override for the given action. Passing `nil`
     /// for `binding` removes the override so the action falls back
     /// to its default. Settings → Shortcuts uses this for both Edit

@@ -319,6 +319,15 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
     var colorScheme: ColorSchemeOption
     /// User-facing UI language. `.system` follows macOS system language.
     var language: LanguageOption
+    /// Optional user-configured startup default width for the left
+    /// sidebar. `nil` means "fall back to the app theme's built-in
+    /// default" so old state.json files and fresh installs continue
+    /// to inherit `Theme.Metrics.sidebarWidth` automatically.
+    ///
+    /// This is intentionally only the *startup default* width. Users
+    /// can still drag the native split view freely after launch, and
+    /// that live drag width is not persisted here.
+    var sidebarDefaultWidth: Double?
     /// Per-action user overrides for the customisable shortcut set.
     /// Missing entries inherit `ShortcutAction.defaultBinding`. The
     /// menu wiring resolves the live binding via
@@ -335,11 +344,13 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
     init(
         colorScheme: ColorSchemeOption = .system,
         language: LanguageOption = .system,
+        sidebarDefaultWidth: Double? = nil,
         shortcutOverrides: [ShortcutAction: ShortcutBinding] = [:],
         normalizeHangulOnDragOut: Bool = false
     ) {
         self.colorScheme = colorScheme
         self.language = language
+        self.sidebarDefaultWidth = sidebarDefaultWidth
         self.shortcutOverrides = shortcutOverrides
         self.normalizeHangulOnDragOut = normalizeHangulOnDragOut
     }
@@ -354,6 +365,7 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case colorScheme
         case language
+        case sidebarDefaultWidth
         case shortcutOverrides
         case normalizeHangulOnDragOut
     }
@@ -363,6 +375,9 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
         let colorScheme = c.decode(ColorSchemeOption.self, forKey: .colorScheme, default: .system)
         // 向后兼容：旧版本 state.json 没有 language 字段，默认 .system
         let language = c.decode(LanguageOption.self, forKey: .language, default: .system)
+        // 向后兼容：旧版本 state.json 没有该字段时保持 nil，
+        // 让上层 UI 自动回退到 Theme.swift 里的默认宽度。
+        let sidebarDefaultWidth = (try? c.decodeIfPresent(Double.self, forKey: .sidebarDefaultWidth)) ?? nil
         let normalizeHangulOnDragOut = c.decode(Bool.self, forKey: .normalizeHangulOnDragOut, default: false)
 
         // Decode shortcutOverrides per-entry through an AnyCodingKey
@@ -386,6 +401,7 @@ struct WorkspaceSettings: Codable, Equatable, Sendable {
         self.init(
             colorScheme: colorScheme,
             language: language,
+            sidebarDefaultWidth: sidebarDefaultWidth,
             shortcutOverrides: overrides,
             normalizeHangulOnDragOut: normalizeHangulOnDragOut
         )

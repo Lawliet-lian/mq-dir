@@ -78,6 +78,27 @@ struct SettingsView: View {
             }
 
             Section {
+                Stepper(value: sidebarDefaultWidthBinding, in: 0...280, step: 1) {
+                    HStack {
+                        Text(L("mqdir.settings.sidebar.defaultWidth"))
+                        Spacer()
+                        Text(
+                            L(
+                                "mqdir.settings.sidebar.defaultWidthValue",
+                                Int(sidebarDefaultWidthBinding.wrappedValue)
+                            )
+                        )
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text(L("mqdir.settings.section.sidebar"))
+            } footer: {
+                Text(L("mqdir.settings.sidebar.defaultWidthFooter"))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle(L("mqdir.settings.filenames.normalizeHangul"), isOn: normalizeHangulBinding)
             } header: {
                 Text(L("mqdir.settings.section.filenames"))
@@ -105,7 +126,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 560)
+        .frame(width: 460, height: 620)
         .sheet(item: $editingAction) { action in
             KeyCaptureSheet(
                 action: action,
@@ -139,6 +160,16 @@ struct SettingsView: View {
         Binding(
             get: { workspace.workspace.settings.normalizeHangulOnDragOut },
             set: { workspace.setNormalizeHangulOnDragOut($0) }
+        )
+    }
+
+    private var sidebarDefaultWidthBinding: Binding<Double> {
+        Binding(
+            get: {
+                workspace.workspace.settings.sidebarDefaultWidth
+                    ?? Double(Theme.Metrics.sidebarWidth)
+            },
+            set: { workspace.setSidebarDefaultWidth($0) }
         )
     }
 

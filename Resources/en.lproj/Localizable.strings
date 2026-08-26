@@ -104,6 +104,11 @@
 "mqdir.settings.section.language" = "Language";
 "mqdir.settings.language.pickerLabel" = "Language";
 
+"mqdir.settings.section.sidebar" = "Sidebar";
+"mqdir.settings.sidebar.defaultWidth" = "Default Sidebar Width";
+"mqdir.settings.sidebar.defaultWidthValue" = "%d pt";
+"mqdir.settings.sidebar.defaultWidthFooter" = "Only affects the left sidebar's initial width when the main window appears. After launch, you can still resize it freely by dragging the native split view divider.";
+
 "mqdir.settings.section.filenames" = "Filenames";
 "mqdir.settings.filenames.normalizeHangul" = "Normalize Hangul filenames to NFC on drag out";
 "mqdir.settings.filenames.normalizeHangulFooter" = "Korean filenames stored in decomposed (NFD) form look broken — like ㅎㅏㄴㄱㅡㄹ instead of 한글 — when dragged or copied into other apps. Turn this on to rename them to composed (NFC) form on disk as they leave mq-dir.";
