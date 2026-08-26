@@ -262,6 +262,7 @@
 // MARK: - Main window
 
 "mqdir.main.copyPath" = "Copy Path";
+"mqdir.main.toggleSidebar" = "Collapse or Expand Sidebar";
 "mqdir.main.noFolder" = "No Folder";
 "mqdir.main.search" = "Search";
 "mqdir.main.searchHint" = "Search this folder (⌘F)";

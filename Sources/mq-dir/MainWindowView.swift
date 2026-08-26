@@ -12,6 +12,7 @@ struct MainWindowView: View {
     @ObservedObject var updateManager: UpdateManager
     @ObservedObject var repoCallout: RepoCalloutController
     @StateObject private var cmux = CmuxSidebarModel()
+    @StateObject private var sidebarSplitController = SidebarSplitController()
 
     @StateObject private var pane0: PaneTabsViewModel
     @StateObject private var pane1: PaneTabsViewModel
@@ -176,7 +177,8 @@ struct MainWindowView: View {
             .background(
                 SidebarInitialWidthBridge(
                     width: configuredSidebarDefaultWidth,
-                    hasApplied: $didApplyInitialSidebarWidth
+                    hasApplied: $didApplyInitialSidebarWidth,
+                    controller: sidebarSplitController
                 )
             )
 
@@ -255,7 +257,14 @@ struct MainWindowView: View {
     private var toolbar: some View {
         HStack(spacing: 6) {
             // Spacer for traffic-light area on the left edge of the window.
-            Spacer().frame(width: 64)
+            Spacer().frame(width: 8)
+
+            ToolbarIconButton(
+                symbol: sidebarSplitController.isCollapsed ? "sidebar.squares.left" : "sidebar.left",
+                help: L("mqdir.main.toggleSidebar")
+            ) {
+                sidebarSplitController.toggleSidebar(defaultWidth: configuredSidebarDefaultWidth)
+            }
 
             ToolbarIconButton(symbol: "chevron.left", help: "Back (⌘[)") { focusedPane.goBack() }
                 .disabled(!focusedPane.canGoBack)
@@ -650,26 +659,94 @@ struct MainWindowView: View {
 private struct SidebarInitialWidthBridge: NSViewRepresentable {
     let width: CGFloat
     @Binding var hasApplied: Bool
+    @ObservedObject var controller: SidebarSplitController
 
     func makeNSView(context: Context) -> SidebarInitialWidthNSView {
         let view = SidebarInitialWidthNSView()
-        view.configure(width: width, hasApplied: $hasApplied)
+        view.configure(width: width, hasApplied: $hasApplied, controller: controller)
         return view
     }
 
     func updateNSView(_ nsView: SidebarInitialWidthNSView, context: Context) {
-        nsView.configure(width: width, hasApplied: $hasApplied)
+        nsView.configure(width: width, hasApplied: $hasApplied, controller: controller)
         nsView.applyIfNeeded()
+    }
+}
+
+@MainActor
+private final class SidebarSplitController: ObservableObject {
+    @Published private(set) var isCollapsed = false
+
+    private weak var splitView: NSSplitView?
+    private var resizeObserver: NSObjectProtocol?
+    private var lastExpandedWidth: CGFloat?
+
+    deinit {
+        if let resizeObserver {
+            NotificationCenter.default.removeObserver(resizeObserver)
+        }
+    }
+
+    func attach(_ splitView: NSSplitView) {
+        let isSameInstance = self.splitView === splitView
+        self.splitView = splitView
+        if !isSameInstance {
+            if let resizeObserver {
+                NotificationCenter.default.removeObserver(resizeObserver)
+            }
+            resizeObserver = NotificationCenter.default.addObserver(
+                forName: NSSplitView.didResizeSubviewsNotification,
+                object: splitView,
+                queue: .main
+            ) { [weak self] _ in
+                self?.refreshState()
+            }
+        }
+        refreshState()
+    }
+
+    /// 点击工具栏按钮时收起 / 展开左侧栏。展开优先恢复用户上一次
+    /// 的非零宽度；如果还没有历史值，则回退到设置页里的默认宽度。
+    func toggleSidebar(defaultWidth: CGFloat) {
+        if isCollapsed {
+            apply(width: lastExpandedWidth ?? defaultWidth)
+        } else {
+            apply(width: 0)
+        }
+    }
+
+    func apply(width: CGFloat) {
+        guard let splitView, splitView.subviews.count >= 2 else { return }
+        let clampedWidth = min(max(width, 0), 280)
+        splitView.setPosition(clampedWidth, ofDividerAt: 0)
+        splitView.needsLayout = true
+        splitView.layoutSubtreeIfNeeded()
+        refreshState()
+    }
+
+    func refreshState() {
+        guard let splitView, !splitView.subviews.isEmpty else { return }
+        let currentWidth = splitView.subviews[0].frame.width
+        if currentWidth > 1 {
+            lastExpandedWidth = currentWidth
+        }
+        isCollapsed = currentWidth <= 1
     }
 }
 
 private final class SidebarInitialWidthNSView: NSView {
     private var width: CGFloat = Theme.Metrics.sidebarWidth
     private var hasApplied: Binding<Bool>?
+    private weak var controller: SidebarSplitController?
 
-    func configure(width: CGFloat, hasApplied: Binding<Bool>) {
+    func configure(
+        width: CGFloat,
+        hasApplied: Binding<Bool>,
+        controller: SidebarSplitController
+    ) {
         self.width = width
         self.hasApplied = hasApplied
+        self.controller = controller
     }
 
     override func viewDidMoveToWindow() {
@@ -705,6 +782,8 @@ private final class SidebarInitialWidthNSView: NSView {
                 return
             }
 
+            self.controller?.attach(splitView)
+
             // 与主视图的 `minWidth: 0` 保持一致：设置页里允许把启动默认值
             // 调到 0，桥接这里也必须用同样的范围做夹取，否则会出现
             // “设置里已经是 0，但真正启动时还是被抬到 40” 的不一致。
@@ -737,9 +816,7 @@ private final class SidebarInitialWidthNSView: NSView {
             )
             // #endregion
 
-            splitView.setPosition(clampedWidth, ofDividerAt: dividerIndex)
-            splitView.needsLayout = true
-            splitView.layoutSubtreeIfNeeded()
+            self.controller?.apply(width: clampedWidth)
 
             let positionAfter = rightView?.frame.minX ?? -1
             let leftFrameAfter = leftView.frame
@@ -759,6 +836,7 @@ private final class SidebarInitialWidthNSView: NSView {
             // #endregion
 
             self.hasApplied?.wrappedValue = true
+            self.controller?.refreshState()
 
             DispatchQueue.main.async { [weak splitView] in
                 guard let splitView else { return }
