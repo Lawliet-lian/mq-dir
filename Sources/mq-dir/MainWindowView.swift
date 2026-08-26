@@ -56,6 +56,9 @@ struct MainWindowView: View {
     /// different volume) and on filesystem-change broadcasts (so a big copy
     /// finishing updates the number). `nil` until the first computation lands.
     @State private var freeSpaceCache: String?
+    /// 启动时只给原生 NSSplitView 设置一次初始分割线位置；
+    /// 后续保留系统原生拖拽行为，不在每次 SwiftUI 刷新时重置用户手动调整后的宽度。
+    @State private var didApplyInitialSidebarWidth = false
 
     init(
         workspace: WorkspaceManager,
@@ -162,7 +165,13 @@ struct MainWindowView: View {
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
                 focusedPane.openFolder(url)
             }
-            .frame(minWidth: 140, idealWidth: Theme.Metrics.sidebarWidth, maxWidth: 280)
+            .frame(minWidth: 0, idealWidth: Theme.Metrics.sidebarWidth, maxWidth: 280)
+            .background(
+                SidebarInitialWidthBridge(
+                    width: Theme.Metrics.sidebarWidth,
+                    hasApplied: $didApplyInitialSidebarWidth
+                )
+            )
 
             VStack(spacing: 0) {
                 toolbar
@@ -622,6 +631,209 @@ struct MainWindowView: View {
         }
     }
 }
+
+/// 将一个零尺寸 NSView 挂进 SwiftUI 的 HSplitView 树中，等它真正进入
+/// AppKit 视图层级后，向上找到宿主 NSSplitView，并只在窗口首次出现时
+/// 调一次 `setPosition(_:ofDividerAt:)` 来设置左侧栏的启动默认宽度。
+///
+/// 这样做的好处：
+/// 1. 仍然保留原生 HSplitView / NSSplitView 的拖拽体验；
+/// 2. 默认宽度不再依赖 SwiftUI 对 `idealWidth` 的“建议式”采纳；
+/// 3. 只执行一次，不会在后续状态刷新时把用户手动拖拽的宽度强行改回去。
+private struct SidebarInitialWidthBridge: NSViewRepresentable {
+    let width: CGFloat
+    @Binding var hasApplied: Bool
+
+    func makeNSView(context: Context) -> SidebarInitialWidthNSView {
+        let view = SidebarInitialWidthNSView()
+        view.configure(width: width, hasApplied: $hasApplied)
+        return view
+    }
+
+    func updateNSView(_ nsView: SidebarInitialWidthNSView, context: Context) {
+        nsView.configure(width: width, hasApplied: $hasApplied)
+        nsView.applyIfNeeded()
+    }
+}
+
+private final class SidebarInitialWidthNSView: NSView {
+    private var width: CGFloat = Theme.Metrics.sidebarWidth
+    private var hasApplied: Binding<Bool>?
+
+    func configure(width: CGFloat, hasApplied: Binding<Bool>) {
+        self.width = width
+        self.hasApplied = hasApplied
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyIfNeeded()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        applyIfNeeded()
+    }
+
+    /// 需要等到当前 NSView 已经接入真实的 AppKit 层级后，才能找到上层的
+    /// NSSplitView。首次没找到时不置位，下一次 `updateNSView` / 生命周期
+    /// 回调还会继续尝试；一旦成功执行过一次，就永久停止，避免覆盖用户拖拽。
+    func applyIfNeeded() {
+        guard hasApplied?.wrappedValue == false else { return }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.hasApplied?.wrappedValue == false else { return }
+            guard let splitView = self.enclosingSplitView(), splitView.subviews.count >= 2 else {
+                // #region debug-point A:no-splitview
+                Self.reportDebugEvent(
+                    hypothesisId: "A",
+                    msg: "[DEBUG] applyIfNeeded skipped: no enclosing NSSplitView",
+                    data: [
+                        "desiredWidth": self.width,
+                        "inWindow": self.window != nil,
+                        "superviewFrame": self.superview?.frame.debugDescription ?? "nil",
+                    ]
+                )
+                // #endregion
+                return
+            }
+
+            let clampedWidth = min(max(self.width, 40), 280)
+            let leftView = splitView.subviews[0]
+            let dividerIndex = 0
+            let hasTwoSubviews = splitView.subviews.indices.contains(dividerIndex + 1)
+            let rightView = hasTwoSubviews ? splitView.subviews[dividerIndex + 1] : nil
+            // NSSplitView 没有直接暴露 position(ofDividerAt:)；
+            // 这里用第二子视图的 minX 作为分割条位置的近似观测值。
+            let positionBefore = rightView?.frame.minX ?? -1
+            let leftFrameBefore = leftView.frame
+            let splitViewFrame = splitView.frame
+
+            // #region debug-point B:before-setPosition
+            Self.reportDebugEvent(
+                hypothesisId: "B",
+                msg: "[DEBUG] setPosition call",
+                data: [
+                    "desiredWidth": self.width,
+                    "clampedWidth": clampedWidth,
+                    "positionBefore": positionBefore,
+                    "leftWidthBefore": leftFrameBefore.width,
+                    "splitViewWidth": splitViewFrame.width,
+                    "subviewCount": splitView.subviews.count,
+                    "leftViewClass": String(describing: type(of: leftView)),
+                    "isVertical": splitView.isVertical,
+                    "dividerStyle": splitView.dividerStyle.rawValue,
+                ]
+            )
+            // #endregion
+
+            splitView.setPosition(clampedWidth, ofDividerAt: dividerIndex)
+            splitView.needsLayout = true
+            splitView.layoutSubtreeIfNeeded()
+
+            let positionAfter = rightView?.frame.minX ?? -1
+            let leftFrameAfter = leftView.frame
+
+            // #region debug-point C:after-setPosition
+            Self.reportDebugEvent(
+                hypothesisId: "C",
+                msg: "[DEBUG] setPosition immediate after",
+                data: [
+                    "positionAfter": positionAfter,
+                    "leftWidthAfter": leftFrameAfter.width,
+                    "clampedWidth": clampedWidth,
+                    "splitViewWidth": splitView.frame.width,
+                    "isVertical": splitView.isVertical,
+                ]
+            )
+            // #endregion
+
+            self.hasApplied?.wrappedValue = true
+
+            DispatchQueue.main.async { [weak splitView] in
+                guard let splitView else { return }
+                let finalRight = splitView.subviews.indices.contains(dividerIndex + 1)
+                    ? splitView.subviews[dividerIndex + 1].frame.minX
+                    : -1
+                let leftFinalWidth = splitView.subviews[0].frame.width
+
+                // #region debug-point D:post-layout
+                Self.reportDebugEvent(
+                    hypothesisId: "D",
+                    msg: "[DEBUG] post-layout re-read",
+                    data: [
+                        "positionFinal": finalRight,
+                        "leftFinalWidth": leftFinalWidth,
+                        "clampedWidth": clampedWidth,
+                        "splitViewWidthFinal": splitView.frame.width,
+                        "isVertical": splitView.isVertical,
+                    ]
+                )
+                // #endregion
+            }
+        }
+    }
+
+    private func enclosingSplitView() -> NSSplitView? {
+        var current = superview
+        while let view = current {
+            if let splitView = view as? NSSplitView {
+                return splitView
+            }
+            current = view.superview
+        }
+        return nil
+    }
+}
+
+// #region debug-point E:logger
+private extension SidebarInitialWidthNSView {
+    /// 轻量插桩上报：优先读 `.dbg/sidebar-width-default.env`，
+    /// 读不到就回落到默认端口；发送失败静默忽略，不影响运行。
+    static func reportDebugEvent(
+        hypothesisId: String,
+        msg: String,
+        data: [String: Any]
+    ) {
+        let fm = FileManager.default
+        let envPath = fm.currentDirectoryPath
+            .appending("/.dbg/sidebar-width-default.env")
+            ?? Bundle.main.bundlePath.appending("/.dbg/sidebar-width-default.env")
+        var serverURL = "http://127.0.0.1:7777/event"
+        var sessionId = "sidebar-width-default"
+        if let env = try? String(contentsOfFile: envPath, encoding: .utf8) {
+            for line in env.split(whereSeparator: { $0.isNewline }) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("DEBUG_SERVER_URL=") {
+                    serverURL = String(trimmed.dropFirst("DEBUG_SERVER_URL=".count))
+                } else if trimmed.hasPrefix("DEBUG_SESSION_ID=") {
+                    sessionId = String(trimmed.dropFirst("DEBUG_SESSION_ID=".count))
+                }
+            }
+        }
+        let jsonObject: [String: Any] = [
+            "sessionId": sessionId,
+            "runId": "pre-fix",
+            "hypothesisId": hypothesisId,
+            "location": "MainWindowView.SidebarInitialWidthNSView",
+            "msg": msg,
+            "data": data,
+            "ts": Int(Date().timeIntervalSince1970 * 1000),
+        ]
+        guard let url = URL(string: serverURL),
+              JSONSerialization.isValidJSONObject(jsonObject),
+              let body = try? JSONSerialization.data(withJSONObject: jsonObject, options: []) else {
+            return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        let task = URLSession.shared.dataTask(with: req) { _, _, _ in }
+        task.resume()
+    }
+}
+// #endregion
 
 // MARK: - Body modifier chunks
 //
