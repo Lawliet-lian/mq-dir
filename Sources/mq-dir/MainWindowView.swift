@@ -60,6 +60,13 @@ struct MainWindowView: View {
     /// 启动时只给原生 NSSplitView 设置一次初始分割线位置；
     /// 后续保留系统原生拖拽行为，不在每次 SwiftUI 刷新时重置用户手动调整后的宽度。
     @State private var didApplyInitialSidebarWidth = false
+    /// 四栏布局下左右分栏的交互模式：
+    /// - false = 默认对齐：上下两排共享同一根中线，网格更整齐；
+    /// - true  = 独立拖拽：上排和下排各自拥有一根中线，调整更自由。
+    ///
+    /// 本轮先只做运行时状态，不写入持久化，避免把一次 UI 交互改动扩大到
+    /// `WindowState` / `PersistenceService` 的兼容面。
+    @State private var fourPaneIndependentSplit = false
 
     init(
         workspace: WorkspaceManager,
@@ -279,7 +286,17 @@ struct MainWindowView: View {
 
             searchField
 
+            // 布局分段控件单独渲染，保持原有风格不变。
             layoutSegmentedControl
+                .padding(1.5)
+                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+
+            // 四栏专用的模式切换按钮：做成独立按钮，和左边分段控件分开，
+            // 避免视觉上混在一起。按钮始终保留可见边框，激活时边框高亮，
+            // 不会出现“整块填色后图标看不见”的问题。
+            if layout == .four {
+                fourPaneSplitModeButton
+            }
         }
         .padding(.leading, 0)
         .padding(.trailing, 12)
@@ -471,8 +488,57 @@ struct MainWindowView: View {
                 .help(paneLayout.help)
             }
         }
-        .padding(1.5)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+    }
+
+    /// 四栏专用的分栏模式切换按钮。
+    /// 采用独立按钮形态（和左边 layout 分段控件分开），并满足这几个要求：
+    /// - 外框尺寸和圆角收窄，和左边分段控件里的单粒按钮保持同一观感（26 × 19）
+    /// - 始终有边框描边，点击后是“边框高亮”而不是整块 accent 填色
+    /// - 激活态图标直接用白色，保证在蓝色边框前不会灰掉看不见
+    private var fourPaneSplitModeButton: some View {
+        Button {
+            fourPaneIndependentSplit.toggle()
+        } label: {
+            ZStack {
+                // 背景：激活时给一个更明显但仍然很轻的“内部小高亮”，
+                // 这样白色图标在深蓝工具栏上对比度更足；
+                // 未激活时用几乎透明的底，让按钮依然有存在感但不抢戏。
+                RoundedRectangle(cornerRadius: 3.5)
+                    .fill(
+                        fourPaneIndependentSplit
+                            ? Theme.Color.accent.opacity(0.18)
+                            : Color.white.opacity(0.04)
+                    )
+                // 边框永远可见：
+                // - 未激活：和其他次级控件一致的浅描边
+                // - 激活：更亮更粗的 accent 描边，让“点击后边框高亮”足够明确
+                RoundedRectangle(cornerRadius: 3.5)
+                    .strokeBorder(
+                        fourPaneIndependentSplit
+                            ? Theme.Color.accent
+                            : Theme.Color.separator.opacity(0.75),
+                        lineWidth: fourPaneIndependentSplit ? 1.0 : 0.7
+                    )
+
+                // 图标：尺寸收窄到和左边分段单粒一致的 10pt，
+                // 并且激活态直接用白色，避免在 accent 描边前变成“浅灰色看不见”。
+                Image(systemName: fourPaneIndependentSplit
+                      ? "rectangle.split.2x1x2"
+                      : "rectangle.split.2x2")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(
+                        fourPaneIndependentSplit
+                            ? Color.white
+                            : Theme.Color.labelSecondary
+                    )
+            }
+            .frame(width: 26, height: 19)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L(fourPaneIndependentSplit
+                ? "mqdir.main.fourPaneMode.independent"
+                : "mqdir.main.fourPaneMode.aligned"))
     }
 
     // Toolbar nav buttons: a comfortable 30×28 hit target with a subtle
@@ -534,18 +600,26 @@ struct MainWindowView: View {
                 paneView(1)
             }
         case .four:
-            // 四栏改为上下两排各自拥有一个 HSplitView。这样上排和下排
-            // 的中线完全独立，用户可以分别调整各自的左右宽度；代价是
-            // 两排的中线不再强制对齐，这是当前“完全独立拖拽”的目标。
-            VStack(spacing: 0) {
-                HSplitView {
-                    resizablePaneItem(0)
-                    resizablePaneItem(1)
+            if fourPaneIndependentSplit {
+                // 独立模式：上下两排各自拥有一个 HSplitView。优点是灵活，
+                // 上下互不干扰；代价是两排中线不再保证垂直对齐。
+                VStack(spacing: 0) {
+                    HSplitView {
+                        resizablePaneItem(0)
+                        resizablePaneItem(1)
+                    }
+                    Divider().background(Theme.Color.separator)
+                    HSplitView {
+                        resizablePaneItem(2)
+                        resizablePaneItem(3)
+                    }
                 }
-                Divider().background(Theme.Color.separator)
+            } else {
+                // 默认对齐模式：外层一个 HSplitView，把上下两排绑到同一根
+                // 中线上，维持规整的 2x2 网格观感。
                 HSplitView {
-                    resizablePaneItem(2)
-                    resizablePaneItem(3)
+                    paneColumn(top: 0, bottom: 2)
+                    paneColumn(top: 1, bottom: 3)
                 }
             }
         }
@@ -561,6 +635,22 @@ struct MainWindowView: View {
                 maxWidth: .infinity,
                 maxHeight: .infinity
             )
+    }
+
+    /// 对齐模式下四栏中的一整列。列内部继续上下均分，但左右由外层共享
+    /// split 控制，因此上下两排会共同跟随同一根中线移动。
+    private func paneColumn(top: Int, bottom: Int) -> some View {
+        VStack(spacing: 0) {
+            paneView(top)
+            Divider().background(Theme.Color.separator)
+            paneView(bottom)
+        }
+        .frame(
+            minWidth: Self.resizablePaneMinWidth,
+            idealWidth: Self.resizablePaneMinWidth,
+            maxWidth: .infinity,
+            maxHeight: .infinity
+        )
     }
 
     private func paneView(_ index: Int) -> some View {

@@ -263,6 +263,8 @@
 
 "mqdir.main.copyPath" = "拷贝路径";
 "mqdir.main.toggleSidebar" = "收起或展开侧边栏";
+"mqdir.main.fourPaneMode.aligned" = "四栏当前为对齐模式：上下两排共用中线，点击切换为独立拖拽";
+"mqdir.main.fourPaneMode.independent" = "四栏当前为独立模式：上下两排各自拖拽，点击切换为对齐模式";
 "mqdir.main.noFolder" = "未选择文件夹";
 "mqdir.main.search" = "搜索";
 "mqdir.main.searchHint" = "在此文件夹中搜索 (⌘F)";

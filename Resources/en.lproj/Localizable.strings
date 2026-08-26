@@ -263,6 +263,8 @@
 
 "mqdir.main.copyPath" = "Copy Path";
 "mqdir.main.toggleSidebar" = "Collapse or Expand Sidebar";
+"mqdir.main.fourPaneMode.aligned" = "Four-pane is aligned: both rows share one center split. Click to switch to independent dragging.";
+"mqdir.main.fourPaneMode.independent" = "Four-pane is independent: top and bottom rows drag separately. Click to switch to aligned mode.";
 "mqdir.main.noFolder" = "No Folder";
 "mqdir.main.search" = "Search";
 "mqdir.main.searchHint" = "Search this folder (⌘F)";
