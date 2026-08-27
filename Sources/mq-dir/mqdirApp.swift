@@ -3,33 +3,21 @@ import SwiftUI
 
 @main
 struct mqdirApp: App {
+    // 通过 adaptor 拿到 AppDelegate，MainWindowController / workspace / updateManager
+    // 等依赖现在都由 AppDelegate 持有，避免 SwiftUI App struct 同时承担 Scene 构造 + DI。
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var workspace = WorkspaceManager()
-    @StateObject private var updateManager = UpdateManager()
-    @StateObject private var repoCallout = RepoCalloutController()
 
     init() {
         // 启动阶段先同步一次语言设置到 UserDefaults，
         // 让 NSLocalizedString / Bundle 在 SwiftUI 初始化前就锁定正确的 locale。
-        // 由于 WorkspaceManager 还未初始化（它是 @StateObject，在 body 之前构建），
-        // 这里先用 PersistenceService 直接读磁盘，保持幂等且零副作用。
+        // 由于 AppDelegate 的 workspace 还没完全准备好（AppDelegate 初始化时序），
+        // 这里仍然直接用 PersistenceService 读磁盘，保持幂等且零副作用。
         if let service = try? PersistenceService(),
            let state = service.loadState() {
             Self.applyLanguagePreference(state.settings.language)
         }
-
-        // Forward NSApplication's willTerminate to our internal notification
-        // so MainWindowView can flush a synchronous save before exit.
-        // Doing this in App.init keeps the wiring close to the lifecycle
-        // that depends on it, and avoids touching AppDelegate's existing
-        // M0-era responsibilities.
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            NotificationCenter.default.post(name: .mqdirAppWillTerminate, object: nil)
-        }
+        // 注意：原 init() 中的 willTerminateNotification 转发逻辑
+        // 已移入 AppDelegate.applicationWillTerminate(_:)，更符合 AppKit 设计惯例。
     }
 
     /// 将用户选择的语言偏好写入 `AppleLanguages`，
@@ -45,39 +33,26 @@ struct mqdirApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("mq-dir") {
-            // 两个维度组合作为视图的 id：
-            //   1. activeProjectID → 项目切换时重建（原有逻辑）
-            //   2. language rawValue → 语言切换时重建，让所有 NSLocalizedString
-            //      在新的 Bundle locale 下重新求值。
-            MainWindowView(
-                workspace: workspace,
-                updateManager: updateManager,
-                repoCallout: repoCallout
-            )
-                // Drop the workspace into the environment so deep
-                // descendants (e.g. `FileEntryContextMenu`) can pick
-                // up customised shortcut bindings without an
-                // ObservedObject parameter threaded through every
-                // intermediate view.
-                .environmentObject(workspace)
-                .id("\(workspace.workspace.activeProjectID.uuidString)-\(workspace.workspace.settings.language.rawValue)")
-                .frame(minWidth: 900, minHeight: 600)
-                .preferredColorScheme(workspace.workspace.settings.colorScheme.preferred)
-        }
-        .windowResizability(.contentMinSize)
-        .commands {
-            MenuCommands(workspace: workspace)
-        }
+        // ⚠️ 不再使用 SwiftUI WindowGroup。
+        // 产品设计上整个 App 只存在一个 MainWindow，其生命周期完全由
+        // AppDelegate + MainWindowController（AppKit）管控。
+        // SwiftUI 这里只保留原生 Settings Scene（系统设置 ⌘,）。
 
         // Standard macOS Preferences window (⌘,). 包含外观、语言、
         // 韩文文件名规范化和快捷键自定义四个 Section。
+        // workspace 从 AppDelegate 取，保证与 MainWindowController 使用的是同一实例。
         Settings {
-            SettingsView(workspace: workspace)
-                .preferredColorScheme(workspace.workspace.settings.colorScheme.preferred)
+            SettingsView(workspace: appDelegate.workspace)
+                .preferredColorScheme(appDelegate.workspace.workspace.settings.colorScheme.preferred)
                 // 语言切换时同时重建 SettingsView 本身，保证 Section header、
                 // Picker 标签等也跟随新 locale 立即刷新。
-                .id(workspace.workspace.settings.language.rawValue)
+                .id(appDelegate.workspace.workspace.settings.language.rawValue)
+        }
+        // MenuCommands（File / Edit / View / Window 菜单）之前是挂在 WindowGroup 上，
+        // 现在 WindowGroup 已移除，仍需要挂在某个 Scene 上才能生效，所以放在 Settings 后面。
+        // workspace 同样从 AppDelegate 取。
+        .commands {
+            MenuCommands(workspace: appDelegate.workspace)
         }
     }
 }

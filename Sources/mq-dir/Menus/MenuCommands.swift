@@ -22,8 +22,6 @@ struct MenuCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button(L("mqdir.menu.file.newWindow")) { stub("File → New Window") }
-                .keyboardShortcut("n", modifiers: .command)
             Button(L("mqdir.menu.file.newTab")) { post(.newTab) }
                 .keyboardShortcut(binding(.newTab))
             Divider()
@@ -31,8 +29,17 @@ struct MenuCommands: Commands {
                 .keyboardShortcut(binding(.openFolder))
             Button(L("mqdir.menu.file.openSelected")) { post(.openSelected) }
                 .keyboardShortcut(.return, modifiers: [])
+            Divider()
+            // ⌘W → 隐藏主窗口（统一走 windowShouldClose → hide()）。
+            // 产品设计上 🔴 X 和 ⌘W 行为一致：隐藏窗口，App 继续在后台运行，
+            // 点击 Dock 图标即可重新显示，所有 Pane / Tab 状态保留在内存中。
+            Button(L("mqdir.menu.file.closeWindow")) {
+                NSApp.keyWindow?.performClose(nil)
+            }
+            .keyboardShortcut("w", modifiers: .command)
+            // 「关闭当前标签」保留菜单项，但不再绑定 ⌘W（⌘W 现在属于「隐藏整个窗口」），
+            // Tab 关闭继续使用 Tab 条上的 × 按钮，后续阶段如需再为其分配其他快捷键。
             Button(L("mqdir.menu.file.closeTab")) { post(.closeTab) }
-                .keyboardShortcut(binding(.closeTab))
             Button(L("mqdir.menu.file.reopenClosedTab")) { post(.reopenClosedTab) }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             Divider()
@@ -197,10 +204,6 @@ struct MenuCommands: Commands {
             post(.focusPane(index: index))
         }
         .keyboardShortcut(key, modifiers: [.command, .option])
-    }
-
-    private func stub(_ label: String) {
-        FileHandle.standardError.write(Data("[mq-dir M0 stub] \(label)\n".utf8))
     }
 
     private func post(_ command: AppCommand) {

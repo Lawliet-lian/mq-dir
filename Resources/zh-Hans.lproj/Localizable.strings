@@ -40,6 +40,7 @@
 "mqdir.menu.file.newTab" = "新建标签页";
 "mqdir.menu.file.openFolder" = "打开文件夹…";
 "mqdir.menu.file.openSelected" = "打开选中项";
+"mqdir.menu.file.closeWindow" = "关闭窗口";
 "mqdir.menu.file.closeTab" = "关闭标签页";
 "mqdir.menu.file.reopenClosedTab" = "重新打开已关闭标签";
 "mqdir.menu.file.revealInFinder" = "在访达中显示";

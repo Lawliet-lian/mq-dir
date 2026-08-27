@@ -40,6 +40,7 @@
 "mqdir.menu.file.newTab" = "New Tab";
 "mqdir.menu.file.openFolder" = "Open Folder…";
 "mqdir.menu.file.openSelected" = "Open Selected";
+"mqdir.menu.file.closeWindow" = "Close Window";
 "mqdir.menu.file.closeTab" = "Close Tab";
 "mqdir.menu.file.reopenClosedTab" = "Reopen Closed Tab";
 "mqdir.menu.file.revealInFinder" = "Reveal in Finder";
