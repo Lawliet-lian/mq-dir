@@ -164,7 +164,7 @@
 "mqdir.sidebar.cmux.noWorkingDir" = "no working directory";
 "mqdir.sidebar.folderUnavailable" = "Folder unavailable";
 
-"mqdir.sidebar.tags.empty" = "No tags in this folder";
+"mqdir.sidebar.tags.empty" = "No tags";
 "mqdir.sidebar.tags.filterHint" = "Filter the focused tab by “%@”";
 
 "mqdir.sidebar.section.cmux" = "CMUX";

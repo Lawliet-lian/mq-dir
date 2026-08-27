@@ -77,24 +77,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
 
         // MARK: - SwiftUI 内容包装
-        // 1:1 还原原 WindowGroup 闭包中的 MainWindowView 配置。
-        let contentView = MainWindowView(
+        // 最外层挂载 ProjectSwitchingRootView，由它负责观察 workspace.activeProjectID
+        // 并在项目切换时重建 MainWindowView。具体机制见 ProjectSwitchingRootView.swift。
+        // 原先直接写在 MWC 里的 .id / environment / frame / preferredColorScheme
+        // 已移到 ProjectSwitchingRootView 中统一管理，MWC 不再介入 SwiftUI 内部状态。
+        let rootView = ProjectSwitchingRootView(
             workspace: workspace,
             updateManager: updateManager,
             repoCallout: repoCallout
         )
-        // 与原 WindowGroup 一致：让深层子视图（如 FileEntryContextMenu）能取到 workspace。
-        .environmentObject(workspace)
-        // 项目切换 / 语言切换时整个 MainWindowView 重建，保证 NSLocalizedString 与 Pane 状态一致。
-        .id(
-            "\(workspace.workspace.activeProjectID.uuidString)-\(workspace.workspace.settings.language.rawValue)"
-        )
-        // 最小尺寸约束（SwiftUI 层），与 NSWindow.minSize 双重保护。
-        .frame(minWidth: 900, minHeight: 600)
-        // 跟随用户在设置中选择的浅色 / 深色 / 跟随系统。
-        .preferredColorScheme(workspace.workspace.settings.colorScheme.preferred)
 
-        window.contentView = NSHostingView(rootView: contentView)
+        window.contentView = NSHostingView(rootView: rootView)
         self.window = window
     }
 

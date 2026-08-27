@@ -164,7 +164,7 @@
 "mqdir.sidebar.cmux.noWorkingDir" = "无工作目录";
 "mqdir.sidebar.folderUnavailable" = "文件夹不可用";
 
-"mqdir.sidebar.tags.empty" = "此文件夹中没有标签";
+"mqdir.sidebar.tags.empty" = "无标签";
 "mqdir.sidebar.tags.filterHint" = "按「%@」过滤当前标签页";
 
 "mqdir.sidebar.section.cmux" = "CMUX";
