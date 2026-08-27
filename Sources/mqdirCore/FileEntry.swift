@@ -102,7 +102,7 @@ enum FileEntrySorter {
         _ entries: [FileEntry],
         by key: FileEntrySortKey,
         ascending: Bool,
-        foldersOnTop: Bool = true
+        foldersOnTop: Bool = false
     ) -> [FileEntry] {
         entries.sorted { lhs, rhs in
             if foldersOnTop, lhs.isDirectory != rhs.isDirectory {

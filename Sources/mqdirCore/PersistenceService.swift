@@ -75,15 +75,15 @@ struct TabState: Codable, Equatable, Sendable {
 
     init(
         folderBookmark: Data? = nil,
-        sortKey: FileEntrySortKey = .name,
-        sortAscending: Bool = true,
+        sortKey: FileEntrySortKey = .modified,
+        sortAscending: Bool = false,
         includeHidden: Bool = false,
         columnWidths: PaneColumnWidths = PaneColumnWidths(),
         selectedURLPaths: [String] = [],
         viewMode: PaneViewMode = .list,
         expandedPaths: [String] = [],
         previewVisible: Bool = false,
-        foldersOnTop: Bool = true
+        foldersOnTop: Bool = false
     ) {
         self.folderBookmark = folderBookmark
         self.sortKey = sortKey
@@ -110,15 +110,15 @@ struct TabState: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             folderBookmark: c.decode(Data?.self, forKey: .folderBookmark, default: nil),
-            sortKey: c.decode(FileEntrySortKey.self, forKey: .sortKey, default: .name),
-            sortAscending: c.decode(Bool.self, forKey: .sortAscending, default: true),
+            sortKey: c.decode(FileEntrySortKey.self, forKey: .sortKey, default: .modified),
+            sortAscending: c.decode(Bool.self, forKey: .sortAscending, default: false),
             includeHidden: c.decode(Bool.self, forKey: .includeHidden, default: false),
             columnWidths: c.decode(PaneColumnWidths.self, forKey: .columnWidths, default: PaneColumnWidths()),
             selectedURLPaths: c.decode([String].self, forKey: .selectedURLPaths, default: []),
             viewMode: c.decode(PaneViewMode.self, forKey: .viewMode, default: .list),
             expandedPaths: c.decode([String].self, forKey: .expandedPaths, default: []),
             previewVisible: c.decode(Bool.self, forKey: .previewVisible, default: false),
-            foldersOnTop: c.decode(Bool.self, forKey: .foldersOnTop, default: true)
+            foldersOnTop: c.decode(Bool.self, forKey: .foldersOnTop, default: false)
         )
     }
 }

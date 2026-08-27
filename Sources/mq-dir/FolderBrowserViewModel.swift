@@ -133,12 +133,12 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// it), but dropping it keeps `computedDirectorySizes` from accreting
     /// dead URLs across a long browsing session.
     private var sizeWalkGeneration = 0
-    @Published private(set) var sortKey: FileEntrySortKey = .name
-    @Published private(set) var sortAscending = true
+    @Published private(set) var sortKey: FileEntrySortKey = .modified
+    @Published private(set) var sortAscending = false
     /// When true, directories sort ahead of files within the same key.
     /// Per-tab so a user can keep folders pinned in one pane while
     /// reading a flat date-sorted list in another.
-    @Published private(set) var foldersOnTop = true
+    @Published private(set) var foldersOnTop = false
     @Published var columnWidths = PaneColumnWidths()
     /// FileEntry.id of the row currently in inline-rename mode (its
     /// label is showing a TextField instead of static text). nil means
