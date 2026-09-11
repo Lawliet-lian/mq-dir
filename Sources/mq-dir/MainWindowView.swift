@@ -301,25 +301,45 @@ struct MainWindowView: View {
             // 焦点栏的文件夹作为 Left，用户选的栏作为 Right，
             // 给 folderComparison 赋值触发 sheet 弹出。
             // 只有布局≥2栏 且 焦点栏有打开的目录时才可用。
+            //
+            // 样式：和 ToolbarIconButton 完全一致（30×28 方形按钮、
+            // hover 浅背景），去掉之前的 borderedButton，避免被拉伸成
+            // 长条框，保证工具栏视觉紧凑、与其它图标按钮风格统一。
             Menu {
                 ForEach(0..<layout.paneCount, id: \.self) { index in
                     if index != focusedPaneIndex,
                        let otherURL = paneVM(at: index).activeTab.folderURL,
                        let currentURL = focusedPane.folderURL {
-                        // 菜单项示例：「与第 2 栏对比 — Desktop」
-                        Button("与第 \(index + 1) 栏对比 — \(otherURL.lastPathComponent)") {
+                        // 菜单项分两行，减少水平宽度：
+                        // 主文字「与第 N 栏对比」，副文字显示文件夹名（灰字号）。
+                        Button {
                             folderComparison = FolderComparisonRequest(
                                 left: currentURL,
                                 right: otherURL
                             )
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text("与第 \(index + 1) 栏对比")
+                                    Text(otherURL.lastPathComponent)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } icon: {
+                                Image(systemName: PaneLayout.allCases[index % PaneLayout.allCases.count].symbol)
+                            }
                         }
                     }
                 }
             } label: {
-                Image(systemName: "square.split.2x1")
+                // 自定义 label，走 ToolbarIconButton 的同一套尺寸/hover。
+                ToolbarCompareMenuLabel()
             }
-            .menuStyle(.borderedButton)
-            .frame(height: 22)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            // ToolbarIconButton 的 hit target: 30×28
+            .frame(width: 30, height: 28)
             .help("对比已打开的文件夹")
             .disabled(layout.paneCount < 2 || focusedPane.folderURL == nil)
 
@@ -608,6 +628,31 @@ struct MainWindowView: View {
             .buttonStyle(.plain)
             .onHover { isHovering = $0 }
             .help(help)
+        }
+    }
+
+    /// 「文件夹对比」菜单按钮的 label。
+    /// 刻意做成一个独立 View，以便共享 ToolbarIconButton 同款的
+    /// hover 背景、禁用透明度、30×28 点击热区；同时不把它包进
+    /// Menu 外层的 borderedButton 里，防止被拉伸成「长条框」。
+    private struct ToolbarCompareMenuLabel: View {
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovering = false
+
+        var body: some View {
+            Image(systemName: "square.split.2x1")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.Color.labelSecondary)
+                .opacity(isEnabled ? 1 : 0.35)
+                .frame(width: 30, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(isEnabled && isHovering
+                              ? Color.white.opacity(0.08)
+                              : Color.clear)
+                )
+                .contentShape(Rectangle())
+                .onHover { isHovering = $0 }
         }
     }
 
