@@ -51,20 +51,28 @@ struct FolderComparisonView: View {
             }
             else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(rows) { row in
+                            // 每一行：内容 24pt 垂直内边距 + 整行宽度顶/底横线。
+                            // 注意：这里用 Rectangle + 固定 height 明确表示横线，
+                            // 不使用 SwiftUI 的 Divider()，因为它在 HStack 上下文中
+                            // 会被自动适配成竖线，不符合我们要的行间横线效果。
                             HStack {
-                                Text(row.name).lineLimit(1).frame(width: 230, alignment: .leading)
+                                Text(row.name).lineLimit(1)
+                                    .frame(width: 230, alignment: .leading)
                                 // 不同状态用不同颜色提示用户：
                                 // 「元数据不同」用橙色突出，其余用次级文字颜色。
                                 Text(row.status.rawValue)
-                                    .foregroundStyle(row.status == .different ? .orange : .secondary)
+                                    .foregroundStyle(
+                                        row.status == .different ? .orange : .secondary
+                                    )
                                 Spacer()
                                 // --- 左右两个按钮 + 占位，宽度固定对齐 ---
                                 Group {
                                     if let leftURL = row.left {
                                         Button("打开左边") {
-                                            NSWorkspace.shared.activateFileViewerSelecting([leftURL])
+                                            NSWorkspace.shared
+                                                .activateFileViewerSelecting([leftURL])
                                         }
                                         .frame(width: Self.actionButtonWidth,
                                                height: Self.actionButtonHeight)
@@ -77,7 +85,8 @@ struct FolderComparisonView: View {
 
                                     if let rightURL = row.right {
                                         Button("打开右边") {
-                                            NSWorkspace.shared.activateFileViewerSelecting([rightURL])
+                                            NSWorkspace.shared
+                                                .activateFileViewerSelecting([rightURL])
                                         }
                                         .frame(width: Self.actionButtonWidth,
                                                height: Self.actionButtonHeight)
@@ -88,6 +97,22 @@ struct FolderComparisonView: View {
                                                    height: Self.actionButtonHeight)
                                     }
                                 }
+                            }
+                            .padding(.vertical, 12)
+                            // 让行内容撑满整行宽度（左对齐），
+                            // 这样接下来的 overlay 横线才能贯穿到整个 ScrollView 左右边距。
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            // 顶横线：用 Rectangle + 0.5pt 固定高度 + 15% 透明主色 = 横线
+                            .overlay(alignment: .top) {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.15))
+                                    .frame(height: 0.5)
+                            }
+                            // 底横线：同上
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.15))
+                                    .frame(height: 0.5)
                             }
                         }
                     }

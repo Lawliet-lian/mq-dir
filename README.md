@@ -81,6 +81,20 @@ open mq-dir.xcodeproj
 
 `bootstrap.sh` generates `mq-dir.xcodeproj` from `project.yml` (XcodeGen is the source of truth — the `.xcodeproj` is not checked in).
 
+#### Regenerating the Xcode project
+
+Whenever you add / remove / move Swift source files, or after any change to `project.yml`, regenerate the `.xcodeproj` with:
+
+```bash
+xcodegen generate
+```
+
+Alternatively, use the wrapper script (it runs `xcodegen generate` internally and pairs with other project helpers):
+
+```bash
+Scripts/generate-project.sh
+```
+
 **Tests-only** (no Xcode required, just the Swift toolchain):
 
 ```bash
