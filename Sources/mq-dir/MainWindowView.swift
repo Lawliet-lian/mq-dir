@@ -68,6 +68,11 @@ struct MainWindowView: View {
     /// `WindowState` / `PersistenceService` 的兼容面。
     @State private var fourPaneIndependentSplit = false
 
+    /// 文件夹对比弹窗的请求对象。
+    /// 当用户在工具栏的 Compare 菜单里选中了某个对比目标后，
+    /// 这个值会被赋值，触发 sheet 弹出；sheet 关闭后会被置回 nil。
+    @State private var folderComparison: FolderComparisonRequest?
+
     init(
         workspace: WorkspaceManager,
         updateManager: UpdateManager,
@@ -106,6 +111,11 @@ struct MainWindowView: View {
     var body: some View {
         windowChrome
             .background(Theme.Color.windowBg)
+            // 文件夹对比弹窗：只有 folderComparison 不为 nil 时才弹出。
+            // 把它放在 .background 之前，确保层级正确。
+            .sheet(item: $folderComparison) { request in
+                FolderComparisonView(request: request)
+            }
             .modifier(SaveTriggers(
                 pane0: pane0, pane1: pane1, pane2: pane2, pane3: pane3,
                 sidebar: sidebar,
@@ -285,6 +295,33 @@ struct MainWindowView: View {
             breadcrumb
 
             searchField
+
+            // 文件夹对比入口（从 v0.3.0 upstream 合入）：
+            // 菜单里列出除了当前焦点栏之外的所有其它栏，点击后用当前
+            // 焦点栏的文件夹作为 Left，用户选的栏作为 Right，
+            // 给 folderComparison 赋值触发 sheet 弹出。
+            // 只有布局≥2栏 且 焦点栏有打开的目录时才可用。
+            Menu {
+                ForEach(0..<layout.paneCount, id: \.self) { index in
+                    if index != focusedPaneIndex,
+                       let otherURL = paneVM(at: index).activeTab.folderURL,
+                       let currentURL = focusedPane.folderURL {
+                        // 菜单项示例：「与第 2 栏对比 — Desktop」
+                        Button("与第 \(index + 1) 栏对比 — \(otherURL.lastPathComponent)") {
+                            folderComparison = FolderComparisonRequest(
+                                left: currentURL,
+                                right: otherURL
+                            )
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "square.split.2x1")
+            }
+            .menuStyle(.borderedButton)
+            .frame(height: 22)
+            .help("对比已打开的文件夹")
+            .disabled(layout.paneCount < 2 || focusedPane.folderURL == nil)
 
             // 布局分段控件单独渲染，保持原有风格不变。
             layoutSegmentedControl

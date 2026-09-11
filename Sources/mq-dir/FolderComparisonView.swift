@@ -1,45 +1,93 @@
 import AppKit
 import SwiftUI
 
+/// 文件夹对比的请求载体：承载要对比的左右两个目录。
+/// 遵循 Identifiable 以便 SwiftUI 的 `.sheet(item:)` 直接绑定。
 struct FolderComparisonRequest: Identifiable {
     let id = UUID()
     let left: URL
     let right: URL
 }
 
+/// 文件夹对比的 Sheet 视图。
+/// UI 全部采用中文（遵循项目汉化策略），行级按钮布局：
+/// - 仅左侧存在 → 「打开左边」按钮在左，右侧保留同等宽度的占位，让列始终对齐
+/// - 仅右侧存在 → 左侧留占位，「打开右边」按钮在右
+/// - 两侧都存在 → 左右两个按钮都正常显示
 struct FolderComparisonView: View {
     let request: FolderComparisonRequest
     @Environment(\.dismiss) private var dismiss
     @State private var rows: [FolderComparisonRow] = []
     @State private var error: String?
     @State private var loading = true
+    /// 用来强制刷新 task：用户点「重新对比」就换一个新的 UUID，
+    /// `.task(id:)` 会取消旧任务并重新执行 load()。
     @State private var revision = UUID()
+
+    /// 行级「打开」按钮的统一尺寸，保证有/无按钮时视觉上两列对齐。
+    private static let actionButtonWidth: CGFloat = 84
+    private static let actionButtonHeight: CGFloat = 24
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Compare folders").font(.headline)
+                Text("文件夹对比").font(.headline)
                 Spacer()
-                Button("Refresh") { revision = UUID() }
-                Button("Close") { dismiss() }
+                Button("重新对比") { revision = UUID() }
+                Button("关闭") { dismiss() }
             }
-            Text("Left: " + request.left.path).textSelection(.enabled)
-            Text("Right: " + request.right.path).textSelection(.enabled)
-            Text("Snapshot of names, sizes and dates. File contents and nested folders are not compared.")
+            // 左右两个路径文本，允许选中复制（方便用户排查）。
+            Text("左侧：" + request.left.path).textSelection(.enabled)
+            Text("右侧：" + request.right.path).textSelection(.enabled)
+            Text("仅对比第一层的名称、大小和修改时间，不比对文件内容与子目录。")
                 .font(.caption).foregroundStyle(.secondary)
             if loading { ProgressView() }
-            else if let error { Text(error).foregroundStyle(.red) }
-            else if rows.isEmpty { Text("Both folders are empty.") }
+            else if let error {
+                // 对比执行出错时展示错误信息（红色）。
+                Text(error).foregroundStyle(.red)
+            }
+            else if rows.isEmpty {
+                Text("两个文件夹当前均为空。")
+            }
             else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(rows) { row in
                             HStack {
                                 Text(row.name).lineLimit(1).frame(width: 230, alignment: .leading)
-                                Text(row.status.rawValue).foregroundStyle(row.status == .different ? .orange : .secondary)
+                                // 不同状态用不同颜色提示用户：
+                                // 「元数据不同」用橙色突出，其余用次级文字颜色。
+                                Text(row.status.rawValue)
+                                    .foregroundStyle(row.status == .different ? .orange : .secondary)
                                 Spacer()
-                                if let left = row.left { Button("Left") { NSWorkspace.shared.activateFileViewerSelecting([left]) } }
-                                if let right = row.right { Button("Right") { NSWorkspace.shared.activateFileViewerSelecting([right]) } }
+                                // --- 左右两个按钮 + 占位，宽度固定对齐 ---
+                                Group {
+                                    if let leftURL = row.left {
+                                        Button("打开左边") {
+                                            NSWorkspace.shared.activateFileViewerSelecting([leftURL])
+                                        }
+                                        .frame(width: Self.actionButtonWidth,
+                                               height: Self.actionButtonHeight)
+                                    } else {
+                                        // 左边没条目时用同等尺寸的占位保持列对齐。
+                                        Color.clear
+                                            .frame(width: Self.actionButtonWidth,
+                                                   height: Self.actionButtonHeight)
+                                    }
+
+                                    if let rightURL = row.right {
+                                        Button("打开右边") {
+                                            NSWorkspace.shared.activateFileViewerSelecting([rightURL])
+                                        }
+                                        .frame(width: Self.actionButtonWidth,
+                                               height: Self.actionButtonHeight)
+                                    } else {
+                                        // 右边没条目时用同等尺寸的占位保持列对齐。
+                                        Color.clear
+                                            .frame(width: Self.actionButtonWidth,
+                                                   height: Self.actionButtonHeight)
+                                    }
+                                }
                             }
                         }
                     }
@@ -48,10 +96,14 @@ struct FolderComparisonView: View {
             Spacer(minLength: 0)
         }
         .padding(16)
-        .frame(minWidth: 680, idealWidth: 800, minHeight: 400, idealHeight: 520)
+        .frame(minWidth: 680, idealWidth: 820, minHeight: 400, idealHeight: 520)
+        // 用户点「重新对比」时通过 revision 触发异步加载。
         .task(id: revision) { await load() }
     }
 
+    /// 后台执行对比：把计算搬到 detached Task（非主线程），
+    /// 同时使用 ProcessRunner.Cancellation 让取消信号能下传到
+    /// FolderComparison.compare → FileSystemService.enumerateDirectory。
     @MainActor private func load() async {
         loading = true
         error = nil
@@ -70,6 +122,8 @@ struct FolderComparisonView: View {
                 self.error = error.localizedDescription
                 loading = false
             }
-        } onCancel: { token.cancel() }
+        } onCancel: {
+            token.cancel()
+        }
     }
 }

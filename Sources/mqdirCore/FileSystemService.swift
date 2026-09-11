@@ -7,7 +7,18 @@ struct FileSystemService {
         self.fileManager = fileManager
     }
 
-    func enumerateDirectory(at url: URL, includingHidden: Bool = false) throws -> [FileEntry] {
+    /// 枚举目录内容。
+    /// - Parameters:
+    ///   - url: 要枚举的目录 URL
+    ///   - includingHidden: 是否包含隐藏文件（. 开头的文件）
+    ///   - isCancelled: 取消回调，传 nil 或默认值时不取消。
+    ///                  该参数主要服务于 FolderComparison 等可以中途取消的场景，
+    ///                  普通调用方保持默认即可，完全不影响原有行为。
+    func enumerateDirectory(
+        at url: URL,
+        includingHidden: Bool = false,
+        isCancelled: @Sendable () -> Bool = { false }
+    ) throws -> [FileEntry] {
         // 枚举目录时预抓取的 URLResourceKey：
         // 新增 creationDateKey 以驱动「创建日期」列（需求：种类右侧紧挨着创建日期）
         let keys: Set<URLResourceKey> = [
@@ -31,7 +42,21 @@ struct FileSystemService {
             options: options
         )
 
-        return try urls.map { childURL in
+        // 允许调用方在中途取消，这里每隔一批条目检查一次。
+        // 因为本方法本身是同步的，取消只是尽早抛出错误，不会中断已经完成的 IO。
+        // 注意：这里用系统自带的 CancellationError()，避免对 ProcessRunner（同
+        // target 下的另一个工具类）产生反向依赖——FileSystemService 作为 Core
+        // 层基础服务，应该保持尽可能轻的耦合。FolderComparison 端捕获错误时，
+        // 只要是被取消（不管是 CancellationError 还是 ProcessRunner.Failure.cancelled）
+        // 都按「用户取消」处理即可。
+        struct EnumerationCancelledError: Error, Sendable {}
+        var result: [FileEntry] = []
+        result.reserveCapacity(urls.count)
+        for (index, childURL) in urls.enumerated() {
+            // 每处理 16 个文件检查一次取消，避免锁开销过大
+            if index.isMultiple(of: 16), isCancelled() {
+                throw EnumerationCancelledError()
+            }
             let values = try childURL.resourceValues(forKeys: keys)
             let isDirectory = values.isDirectory ?? false
             let name = childURL.lastPathComponent
@@ -40,7 +65,7 @@ struct FileSystemService {
             let tagColors = Self.tagColors(for: childURL, names: tagNames, primaryLabelNumber: labelNumber)
             let hasCustomIcon = isDirectory && Self.folderHasCustomIcon(at: childURL)
 
-            return FileEntry(
+            result.append(FileEntry(
                 url: childURL,
                 name: name,
                 isDirectory: isDirectory,
@@ -54,8 +79,9 @@ struct FileSystemService {
                 labelNumber: labelNumber,
                 tagColors: tagColors,
                 hasCustomIcon: hasCustomIcon
-            )
+            ))
         }
+        return result
     }
 
     /// Recursive name search rooted at `url`. Visits every descendant via

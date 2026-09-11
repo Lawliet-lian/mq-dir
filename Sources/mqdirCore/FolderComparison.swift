@@ -1,9 +1,18 @@
 import Foundation
 
 struct FolderComparisonRow: Identifiable, Sendable {
+    /// 单行对比结果的状态枚举，rawValue 即为 UI 上显示的中文文案。
     enum Status: String, Sendable {
-        case leftOnly = "Only on left", rightOnly = "Only on right", different = "Different metadata"
-        case same = "Same metadata", folder = "Folder — contents not compared"
+        /// 只在左侧文件夹存在
+        case leftOnly = "仅左侧存在"
+        /// 只在右侧文件夹存在
+        case rightOnly = "仅右侧存在"
+        /// 两侧都有同名文件，但元数据（大小/修改时间/是否文件夹）不一致
+        case different = "元数据不同"
+        /// 两侧都有，且大小和修改时间都一致
+        case same = "元数据相同"
+        /// 两侧都是同名文件夹 —— 本工具目前不递归进入子目录对比
+        case folder = "同为文件夹（未对比内容）"
     }
     let id: String
     let name: String
