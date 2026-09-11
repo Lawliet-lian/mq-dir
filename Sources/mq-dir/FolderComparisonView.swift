@@ -39,7 +39,10 @@ struct FolderComparisonView: View {
             // 左右两个路径文本，允许选中复制（方便用户排查）。
             Text("左侧：" + request.left.path).textSelection(.enabled)
             Text("右侧：" + request.right.path).textSelection(.enabled)
-            Text("仅对比第一层的名称、大小和修改时间，不比对文件内容与子目录。")
+            // 方案 C 新增说明：第一层按名称/大小/修改时间比对；
+            // 当两边是同名子文件夹时，会递归比对子树所有条目的元数据
+            // （仍然不读文件内容、不做 MD5）。
+            Text("第一层按名称、大小和修改时间比对；同为子文件夹时递归比对子条目元数据，不对比文件内容。")
                 .font(.caption).foregroundStyle(.secondary)
             if loading { ProgressView() }
             else if let error {
@@ -60,12 +63,12 @@ struct FolderComparisonView: View {
                             HStack {
                                 Text(row.name).lineLimit(1)
                                     .frame(width: 230, alignment: .leading)
-                                // 不同状态用不同颜色提示用户：
-                                // 「元数据不同」用橙色突出，其余用次级文字颜色。
+                                // 按 Status 映射成不同颜色，引导用户视觉区分：
+                                //   ① 真正需要关注的差异（元数据不同 / 子文件夹有差异）→ 橙色（醒目）
+                                //   ② 子文件夹确认完全一致 → 绿色（安心）
+                                //   ③ 其余（左右独有 / 普通相同 / 过大跳过）→ 次级灰色
                                 Text(row.status.rawValue)
-                                    .foregroundStyle(
-                                        row.status == .different ? .orange : .secondary
-                                    )
+                                    .foregroundStyle(Self.statusColor(for: row.status))
                                 Spacer()
                                 // --- 左右两个按钮 + 占位，宽度固定对齐 ---
                                 Group {
@@ -149,6 +152,25 @@ struct FolderComparisonView: View {
             }
         } onCancel: {
             token.cancel()
+        }
+    }
+
+    // MARK: - 状态颜色映射（方案 C 新增 3 种子文件夹状态）
+
+    /// 根据行状态决定 UI 上文字的颜色：
+    /// - 有差异（文件级 / 子文件夹级）→ 橙色，提醒用户关注
+    /// - 子文件夹确认内容一致 → 绿色，给用户一个安心的确认信号
+    /// - 其余（左右独有、普通文件一致、过大跳过）→ 次级灰色
+    private static func statusColor(for status: FolderComparisonRow.Status) -> Color {
+        switch status {
+        case .different, .folderDifferent:
+            return .orange
+        case .folderSame:
+            // 用绿色偏暗一点（.green 太亮了在深色模式下刺眼），改 80% 不透明度或选 secondaryGreen
+            // 这里用系统提供的 .green，然后 70% 不透明度，兼顾深/浅色模式。
+            return .green.opacity(0.85)
+        case .same, .leftOnly, .rightOnly, .folderTooLarge:
+            return .secondary
         }
     }
 }
