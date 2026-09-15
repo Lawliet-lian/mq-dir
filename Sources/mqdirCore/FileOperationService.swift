@@ -13,6 +13,46 @@ import Foundation
 /// batch. Callers decide how to present (alert, stderr log, …).
 public enum FileOperationService {
 
+    // MARK: - Collision Types
+
+    /// 用户对单个冲突文件的决策结果。
+    /// - keepBoth: 保留两者（复用现有 `conflictRenamedDestination` 逻辑生成 " 2"/" 3" 后缀）
+    /// - stop:     停止本次整个 transfer 任务，不再处理后续文件
+    /// - replace:  替换目标位置的现有文件（走 `safeReplaceItem` 安全流程）
+    public enum CollisionDecision: Sendable {
+        case keepBoth
+        case stop
+        case replace
+    }
+
+    /// 本次 transfer 任务内的冲突处理策略。
+    /// 初始为 `.ask`（每遇到冲突都调用回调询问）；
+    /// 当用户勾选「应用到全部」后切换为 `.applyKeepBoth` / `.applyReplace`，
+    /// 后续冲突不再弹窗，直接使用缓存决策。
+    public enum CollisionPolicy: Sendable {
+        case ask
+        case applyKeepBoth
+        case applyReplace
+    }
+
+    /// 单次「替换」操作的详细记录，供 Undo 管理器恢复被替换的原文件。
+    /// `replacedOriginalBackup` 指向备份目录中的旧文件路径；
+    /// 当 Undo 栈溢出被移除时，调用方应负责清理该临时备份目录。
+    public struct ReplaceRecord: Sendable {
+        /// 本次复制/移动的源文件路径
+        public let source: URL
+        /// 最终写入位置（通常就是目标文件夹/原名）
+        public let destination: URL
+        /// 被替换掉的原目标文件的备份路径；undo 时将其移回 destination
+        public let replacedOriginalBackup: URL
+
+        public init(source: URL, destination: URL, replacedOriginalBackup: URL) {
+            self.source = source
+            self.destination = destination
+            self.replacedOriginalBackup = replacedOriginalBackup
+        }
+    }
+
     // MARK: - Operation Result
 
     /// 文件操作的统一返回结果：包含成功项和失败项。
@@ -21,6 +61,10 @@ public enum FileOperationService {
     public struct TransferResult: Sendable {
         public var successes: [(source: URL, destination: URL)] = []
         public var failures: [(URL, String)] = []
+        /// 发生了 replace 操作的条目；Undo 时需要恢复 `replacedOriginalBackup`
+        public var replaceRecords: [ReplaceRecord] = []
+        /// 用户是否在中途点击了「停止」，用于上层决定是否需要额外提示
+        public var userStopped: Bool = false
 
         public init() {}
     }
@@ -257,6 +301,272 @@ public enum FileOperationService {
                 result.failures.append((source, error.localizedDescription))
             }
         }
+        return result
+    }
+
+    // MARK: Safe Replace
+
+    /// 安全地将 `source` 替换到 `destination` 位置，保证失败时 `destination` 原状不丢失。
+    ///
+    /// 两阶段流程：
+    ///   1. 先把目标位置的旧文件 move 到同盘的备份临时目录（原子、快速）
+    ///   2. 再 copy/move source → destination
+    ///      - 成功：返回 ReplaceRecord（含备份路径，交给 Undo 栈管理生命周期）
+    ///      - 失败：把备份移回原位，清理临时目录，抛错
+    ///
+    /// 不追求跨盘真正原子，只保证任何异常路径都不会让用户丢失旧目标文件。
+    ///
+    /// - Parameters:
+    ///   - source: 新文件（或文件夹）URL
+    ///   - destination: 要被替换的旧目标 URL（此位置必须已存在文件）
+    ///   - move: true 表示「剪切」（source 在成功后会被移除），false 表示「复制」
+    ///   - fileManager: 注入用，测试时可替换
+    ///   - now: 注入时间戳，测试时可固定
+    /// - Returns: ReplaceRecord，包含 source / destination / 备份位置
+    public static func safeReplaceItem(
+        from source: URL,
+        to destination: URL,
+        move: Bool,
+        fileManager: FileManager = .default,
+        now: () -> Date = Date.init
+    ) throws -> ReplaceRecord {
+        // 前置断言：destination 必须存在（否则没有"替换"可言）
+        guard fileManager.fileExists(atPath: destination.path) else {
+            throw NSError(
+                domain: "mq-dir.safeReplace",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "目标位置不存在，无法执行替换"]
+            )
+        }
+
+        let destinationFolder = destination.deletingLastPathComponent()
+        let destinationName = destination.lastPathComponent
+        let stamp = Int(now().timeIntervalSince1970)
+        let unique = UUID().uuidString.prefix(6)
+
+        // 阶段 0：在目标目录下创建一个临时备份目录（同盘，后面的 move 都是原子的）
+        // 目录名格式：.mqdir_replace_backup_<timestamp>_<uuid6>
+        let backupDirName = ".mqdir_replace_backup_\(stamp)_\(unique)"
+        let backupDir = destinationFolder.appendingPathComponent(backupDirName, isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: backupDir, withIntermediateDirectories: true)
+        } catch {
+            // 备份目录都建不起来：直接抛错，不碰源和目标，安全
+            throw NSError(
+                domain: "mq-dir.safeReplace",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "创建备份目录失败：\(error.localizedDescription)"]
+            )
+        }
+
+        // 备份路径（放在 backupDir 内，保留原文件名以便人类识别）
+        let backupURL = backupDir.appendingPathComponent(destinationName)
+
+        // 阶段 1：把旧目标 move 到 backupURL
+        do {
+            try fileManager.moveItem(at: destination, to: backupURL)
+        } catch {
+            // 移动旧文件失败：尝试删 backupDir（大概率还是空的），然后抛错
+            // destination 没动，用户数据安全
+            try? fileManager.removeItem(at: backupDir)
+            throw NSError(
+                domain: "mq-dir.safeReplace",
+                code: -3,
+                userInfo: [NSLocalizedDescriptionKey: "备份旧文件失败：\(error.localizedDescription)"]
+            )
+        }
+
+        // 阶段 2：copy / move source → destination
+        do {
+            if move {
+                try fileManager.moveItem(at: source, to: destination)
+            } else {
+                try fileManager.copyItem(at: source, to: destination)
+            }
+        } catch {
+            // 写入新文件失败 → 关键：把 backupURL 里的旧文件移回原位，保证旧目标不丢失
+            do {
+                try fileManager.moveItem(at: backupURL, to: destination)
+            } catch let rollbackError {
+                // 极端：rollback 也失败（极少发生）→ 此时 backupURL 里的备份仍在，
+                // 但 destination 空了。把 backupDir 路径写入错误信息提示用户手动恢复。
+                throw NSError(
+                    domain: "mq-dir.safeReplace",
+                    code: -4,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "写入新文件失败，且回滚旧文件也失败：\(rollbackError.localizedDescription)。" +
+                            "旧文件备份仍保留在：\(backupURL.path)，请手动处理。"
+                    ]
+                )
+            }
+            // rollback 成功 → 清理空的 backupDir，然后把原始写入错误抛出
+            try? fileManager.removeItem(at: backupDir)
+            throw NSError(
+                domain: "mq-dir.safeReplace",
+                code: -5,
+                userInfo: [NSLocalizedDescriptionKey: "写入新文件失败：\(error.localizedDescription)"]
+            )
+        }
+
+        // 阶段 3：成功路径。backupURL 不删，交给 UndoManager 根据栈生命周期管理。
+        // 返回 ReplaceRecord，source = 源文件，destination = 写入后的目标，backup = 备份
+        return ReplaceRecord(
+            source: source,
+            destination: destination,
+            replacedOriginalBackup: backupURL
+        )
+    }
+
+    // MARK: Transfer with Collision Policy
+
+    /// 带冲突策略回调的复制/移动批量操作 — 纯同步，不做线程调度，异步由调用层（ViewModel）负责。
+    ///
+    /// 与旧 `transfer()` 区别：
+    ///   - 遇到同名冲突时**不自动 rename**，而是根据 `policy` 决定；
+    ///     `.ask` 时调用 `onCollision` 同步回调（由上层负责弹窗/返回决策）。
+    ///   - 决策 `.stop` 会立即终止整个 for 循环并把 `userStopped` 置为 true。
+    ///   - 决策 `.replace` 通过 `safeReplaceItem()` 走两阶段安全替换。
+    ///   - 决策 `.keepBoth` 复用旧的 `conflictRenamedDestination()`。
+    ///
+    /// 旧 `transfer()` 保持不变，供 duplicate / 压缩 / 解压 / 撤销 内部路径继续使用
+    /// （这些路径不需要弹用户冲突框）。
+    ///
+    /// - Parameters:
+    ///   - sources: 待复制/移动的源 URL 数组
+    ///   - destinationFolder: 目标目录
+    ///   - move: true=剪切，false=复制
+    ///   - initialPolicy: 初始策略，一般默认 `.ask`
+    ///   - onCollision: 策略为 .ask 时的同步回调；上层在本回调内同步弹 NSAlert 并返回
+    ///                  (决策, 是否应用到全部)。**本函数是同步的，回调也同步执行。**
+    ///   - normalizeHangul: 是否在写完后 NFC 归一化韩文文件名
+    ///   - fileManager: 注入 FileManager
+    ///   - now: 注入时间戳
+    /// - Returns: TransferResult，同旧版但包含 replaceRecords / userStopped 新字段
+    @discardableResult
+    public static func transfer(
+        _ sources: [URL],
+        into destinationFolder: URL,
+        move: Bool,
+        initialPolicy: CollisionPolicy = .ask,
+        onCollision: (
+            _ source: URL,
+            _ existingDestination: URL
+        ) -> (decision: CollisionDecision, applyToAll: Bool),
+        normalizeHangul: Bool = false,
+        fileManager: FileManager = .default,
+        now: () -> Date = Date.init
+    ) -> TransferResult {
+        var result = TransferResult()
+        // 初始策略；用户一旦勾选「应用到全部」后切换到 applyXxx 并一直复用
+        var policy: CollisionPolicy = initialPolicy
+
+        for source in sources {
+            // 目标路径 = 目标目录 / 源文件名
+            var dest = destinationFolder.appendingPathComponent(source.lastPathComponent)
+
+            // ----------------------------------------------------------
+            // Self-drop 检查：保持与旧 transfer() 完全一致
+            // - move 且放回自己所在目录 → no-op，直接跳过
+            // - copy 放回自己所在目录 → 不跳过（相当于同目录 Cmd+C/V，需要生成副本或走冲突策略）
+            // ----------------------------------------------------------
+            if move, source.standardizedFileURL == dest.standardizedFileURL { continue }
+
+            // ----------------------------------------------------------
+            // Descendant-drop 检查：文件夹不能放进自己的子孙目录
+            // ----------------------------------------------------------
+            let sourcePath = source.standardizedFileURL.path
+            if dest.path.hasPrefix(sourcePath + "/") { continue }
+
+            // ----------------------------------------------------------
+            // 无冲突路径 → 直接 copy/move
+            // ----------------------------------------------------------
+            if !fileManager.fileExists(atPath: dest.path) {
+                do {
+                    if move {
+                        try fileManager.moveItem(at: source, to: dest)
+                    } else {
+                        try fileManager.copyItem(at: source, to: dest)
+                    }
+                    normalizeIfRequested(dest, enabled: normalizeHangul)
+                    result.successes.append((source: source, destination: dest))
+                } catch {
+                    result.failures.append((source, error.localizedDescription))
+                }
+                continue // 下一个文件
+            }
+
+            // ----------------------------------------------------------
+            // 有冲突：根据当前 policy 决定下一步
+            // ----------------------------------------------------------
+            var decision: CollisionDecision
+            switch policy {
+            case .ask:
+                // 调用同步回调（上层负责弹 NSAlert，这里同步阻塞等待返回）
+                let (userDecision, applyToAll) = onCollision(source, dest)
+                decision = userDecision
+                // 「应用到全部」对 stop 无意义（stop 直接终止整个任务）
+                if applyToAll {
+                    switch decision {
+                    case .keepBoth: policy = .applyKeepBoth
+                    case .replace:  policy = .applyReplace
+                    case .stop:     break // stop 直接 break out，不设 policy
+                    }
+                }
+            case .applyKeepBoth:
+                decision = .keepBoth
+            case .applyReplace:
+                decision = .replace
+            }
+
+            // ----------------------------------------------------------
+            // 执行决策
+            // ----------------------------------------------------------
+            switch decision {
+            case .stop:
+                // 用户点了停止 → 终止整个 transfer，不再处理后续文件
+                result.userStopped = true
+                return result
+
+            case .keepBoth:
+                // 复用旧的 conflictRenamedDestination 生成 " 2"/" 3" 后缀
+                let renamed = conflictRenamedDestination(
+                    for: source,
+                    in: destinationFolder,
+                    fileExists: { fileManager.fileExists(atPath: $0) },
+                    now: now
+                )
+                do {
+                    if move {
+                        try fileManager.moveItem(at: source, to: renamed)
+                    } else {
+                        try fileManager.copyItem(at: source, to: renamed)
+                    }
+                    normalizeIfRequested(renamed, enabled: normalizeHangul)
+                    result.successes.append((source: source, destination: renamed))
+                } catch {
+                    result.failures.append((source, error.localizedDescription))
+                }
+
+            case .replace:
+                // 两阶段安全替换
+                do {
+                    let record = try safeReplaceItem(
+                        from: source,
+                        to: dest,
+                        move: move,
+                        fileManager: fileManager,
+                        now: now
+                    )
+                    normalizeIfRequested(dest, enabled: normalizeHangul)
+                    result.replaceRecords.append(record)
+                    result.successes.append((source: source, destination: dest))
+                } catch {
+                    result.failures.append((source, error.localizedDescription))
+                }
+            }
+        }
+
         return result
     }
 

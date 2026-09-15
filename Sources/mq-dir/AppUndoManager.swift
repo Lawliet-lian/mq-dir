@@ -24,19 +24,26 @@ public struct UndoableFileOperation: Sendable {
     /// 操作类型
     public let operationType: UndoOperationType
     /// 成功项映射：(source 原路径, destination 操作后路径)
+    /// 对 replace 的项：destination 就是目标位置（文件名未变，但内容已被换成新）
     public let successes: [(source: URL, destination: URL)]
     /// 操作时间戳
     public let timestamp: Date
+    /// 本操作中发生了「替换」的子项列表：每个 ReplaceRecord 携带了
+    /// 被替换掉的旧文件的备份路径；undo 时把这些备份移回 destination。
+    /// 非 replace 的 copy/move 场景此字段为空数组。
+    public let replaceRecords: [FileOperationService.ReplaceRecord]
 
     public init(
         id: UUID = UUID(),
         operationType: UndoOperationType,
         successes: [(source: URL, destination: URL)],
+        replaceRecords: [FileOperationService.ReplaceRecord] = [],
         timestamp: Date = Date()
     ) {
         self.id = id
         self.operationType = operationType
         self.successes = successes
+        self.replaceRecords = replaceRecords
         self.timestamp = timestamp
     }
 }
@@ -81,19 +88,20 @@ public final class AppUndoManager: ObservableObject {
     /// 注册一个可撤销的文件操作。
     /// - Parameters:
     ///   - operationType: 操作类型（move / copy / rename / trash）
-    ///   - result: FileOperationService 返回的结果（只取 successes 部分）
+    ///   - result: FileOperationService 返回的结果（successes + replaceRecords）
     ///
     /// 调用时机：ViewModel 层调用完 FileOperationService.* 成功后
     public func registerOperation(
         operationType: UndoOperationType,
         result: FileOperationService.TransferResult
     ) {
-        // 没有成功项就不记录
-        guard !result.successes.isEmpty else { return }
+        // 没有成功项 + 没有 replace 记录 → 不记录
+        guard !result.successes.isEmpty || !result.replaceRecords.isEmpty else { return }
 
         let op = UndoableFileOperation(
             operationType: operationType,
-            successes: result.successes
+            successes: result.successes,
+            replaceRecords: result.replaceRecords
         )
         pushUndo(op)
     }
@@ -113,9 +121,19 @@ public final class AppUndoManager: ObservableObject {
     private func pushUndo(_ op: UndoableFileOperation) {
         undoStack.append(op)
         if undoStack.count > maxStackDepth {
-            undoStack.removeFirst(undoStack.count - maxStackDepth)
+            // 栈溢出：把溢出的最旧操作的 replace 备份目录删掉，避免磁盘残留
+            let overflowCount = undoStack.count - maxStackDepth
+            let overflow = Array(undoStack.prefix(overflowCount))
+            for over in overflow {
+                cleanupReplaceBackupDirectories(in: over)
+            }
+            undoStack.removeFirst(overflowCount)
         }
         // 新操作清空 redo 栈（经典撤销语义）
+        // 清空 redo 前也得先把 redo 里的备份目录删掉
+        for red in redoStack {
+            cleanupReplaceBackupDirectories(in: red)
+        }
         redoStack.removeAll()
     }
 
@@ -123,8 +141,36 @@ public final class AppUndoManager: ObservableObject {
     private func pushRedo(_ op: UndoableFileOperation) {
         redoStack.append(op)
         if redoStack.count > maxStackDepth {
-            redoStack.removeFirst(redoStack.count - maxStackDepth)
+            let overflowCount = redoStack.count - maxStackDepth
+            let overflow = Array(redoStack.prefix(overflowCount))
+            for over in overflow {
+                cleanupReplaceBackupDirectories(in: over)
+            }
+            redoStack.removeFirst(overflowCount)
         }
+    }
+
+    // MARK: - 备份目录清理
+
+    /// 当一条 Undo/Redo 记录彻底出栈（溢出/clear）时，
+    /// 同步删除它携带的所有 replace 备份目录（.mqdir_replace_backup_*）。
+    private func cleanupReplaceBackupDirectories(in op: UndoableFileOperation) {
+        for record in op.replaceRecords {
+            let backupURL = record.replacedOriginalBackup
+            let backupDir = backupURL.deletingLastPathComponent()
+            // 备份目录名以 ".mqdir_replace_backup_" 开头才删，避免误删
+            if backupDir.lastPathComponent.hasPrefix(".mqdir_replace_backup_") {
+                try? FileManager.default.removeItem(at: backupDir)
+            }
+        }
+    }
+
+    /// 清空全部撤销/重做栈（同时清理所有备份目录）
+    public func clear() {
+        for op in undoStack { cleanupReplaceBackupDirectories(in: op) }
+        for op in redoStack { cleanupReplaceBackupDirectories(in: op) }
+        undoStack.removeAll()
+        redoStack.removeAll()
     }
 
     // MARK: - Undo / Redo 执行
@@ -151,13 +197,72 @@ public final class AppUndoManager: ObservableObject {
         NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
     }
 
-    /// 清空全部撤销/重做栈
-    public func clear() {
-        undoStack.removeAll()
-        redoStack.removeAll()
-    }
-
     // MARK: - 反向操作核心
+
+    /// 处理一条 Undo 中「replace 子项」的回滚：
+    /// 把 destination 中当前的「新内容」移到 redo-temp，
+    /// 再把 replacedOriginalBackup 中的「旧内容」移回 destination。
+    /// 返回的 ReplaceRecord 用于 redo（backup 指向新生成的 redo-temp）。
+    /// 本 helper 同步处理 move/copy 场景下 replace 的源文件状态（move 的 replace 需把 source 移回）。
+    private func executeReplaceInverse(
+        records: [FileOperationService.ReplaceRecord],
+        isUndo: Bool  // true = 撤销 replace（旧内容回 destination）；false = 重做 replace（新内容回 destination）
+    ) -> [FileOperationService.ReplaceRecord] {
+        var redoRecords: [FileOperationService.ReplaceRecord] = []
+        let fm = FileManager.default
+        let stamp = Int(Date().timeIntervalSince1970)
+
+        for record in records {
+            // isUndo=true:  currentDestination 是新内容，要换成旧内容（record.replacedOriginalBackup）
+            // isUndo=false: 则相反（把 destination 当前的旧内容换回去的过程）。
+            // 注意：redo 场景进来的 record 其 replacedOriginalBackup 存的是「undo 时的 redo-temp」，也就是新内容本身。
+            let currentDest = record.destination
+            guard fm.fileExists(atPath: currentDest.path) else { continue }
+
+            // 对端（另一侧）的备份内容
+            let oppositeBackup = record.replacedOriginalBackup
+            guard fm.fileExists(atPath: oppositeBackup.path) else { continue }
+
+            // 阶段 A：把当前 destination 移到一个新的临时备份目录（供对端栈使用）
+            let destFolder = currentDest.deletingLastPathComponent()
+            let tempDirName = ".mqdir_replace_backup_\(stamp)_\(UUID().uuidString.prefix(6))"
+            let tempDir = destFolder.appendingPathComponent(tempDirName, isDirectory: true)
+            do { try fm.createDirectory(at: tempDir, withIntermediateDirectories: true) } catch { continue }
+            let tempBackup = tempDir.appendingPathComponent(currentDest.lastPathComponent)
+            do {
+                try fm.moveItem(at: currentDest, to: tempBackup)
+            } catch {
+                try? fm.removeItem(at: tempDir)
+                continue
+            }
+
+            // 阶段 B：把 oppositeBackup 移回 destination
+            do {
+                try fm.moveItem(at: oppositeBackup, to: currentDest)
+            } catch {
+                // 失败：回滚阶段 A（把 tempBackup 移回 destination），丢弃 tempDir
+                try? fm.moveItem(at: tempBackup, to: currentDest)
+                try? fm.removeItem(at: tempDir)
+                continue
+            }
+
+            // 阶段 C：清理 oppositeBackup 的父目录（它里面已经空了）
+            let oppositeDir = oppositeBackup.deletingLastPathComponent()
+            if oppositeDir.lastPathComponent.hasPrefix(".mqdir_replace_backup_") {
+                try? fm.removeItem(at: oppositeDir)
+            }
+
+            // 构造对端栈使用的 ReplaceRecord：source 保持不变，backup 指向新的 tempBackup
+            redoRecords.append(
+                FileOperationService.ReplaceRecord(
+                    source: record.source,
+                    destination: record.destination,
+                    replacedOriginalBackup: tempBackup
+                )
+            )
+        }
+        return redoRecords
+    }
 
     /// 根据操作类型，构造并执行反向操作；返回需要推入对端栈的记录
     /// - Parameter op: 当前要撤销/重做的操作
@@ -210,21 +315,29 @@ public final class AppUndoManager: ObservableObject {
             return UndoableFileOperation(operationType: .rename, successes: inverseOps)
 
         case .move:
-            // move：跨目录转移，走 transfer(move:true)；注意如果是 rename 式的 move
-            // （父目录相同仅文件名不同）也会走这里，同样可能命中 self-drop，
-            // 所以先判断父目录是否相同，相同就按 rename 分支的逻辑直接 moveItem。
+            // move：跨目录转移，走 transfer(move:true)；含 replace 子项时做额外处理
+            // --------------------------------------------------
+            // 先把 successes 分成两类：
+            //   A. 普通 move 项（不在 replaceRecords 里）→ 按旧逻辑 move 回去
+            //   B. replace 项 → 内容回滚走 executeReplaceInverse，
+            //      另外：move 语义下 source 在正向操作中被删除了，undo 时要恢复一份
+            // --------------------------------------------------
+            let fm = FileManager.default
+            let replaceDestSet = Set(op.replaceRecords.map { $0.destination })
             var inverseOps: [(source: URL, destination: URL)] = []
+
             for pair in op.successes {
+                // 跳过 replace 的项，后面统一走 executeReplaceInverse
+                if replaceDestSet.contains(pair.destination) { continue }
                 let currentURL = pair.destination
                 let targetURL = pair.source
-                guard FileManager.default.fileExists(atPath: currentURL.path) else { continue }
+                guard fm.fileExists(atPath: currentURL.path) else { continue }
                 let currentFolder = currentURL.deletingLastPathComponent()
                 let targetFolder = targetURL.deletingLastPathComponent()
                 do {
                     if currentFolder == targetFolder {
-                        // 同目录 move = 纯 rename：按上面 rename 路径处理
                         var dest = targetURL
-                        if FileManager.default.fileExists(atPath: dest.path) {
+                        if fm.fileExists(atPath: dest.path) {
                             let stem = targetURL.deletingPathExtension().lastPathComponent
                             let ext = targetURL.pathExtension
                             if let resolved = FileOperationService.uniqueDestination(
@@ -232,21 +345,19 @@ public final class AppUndoManager: ObservableObject {
                                 stem: stem,
                                 extension: ext,
                                 includePrimary: false,
-                                fileExists: { FileManager.default.fileExists(atPath: $0) }
+                                fileExists: { fm.fileExists(atPath: $0) }
                             ) {
                                 dest = resolved
                             }
                         }
-                        try FileManager.default.moveItem(at: currentURL, to: dest)
+                        try fm.moveItem(at: currentURL, to: dest)
                         inverseOps.append((source: currentURL, destination: dest))
                     } else {
-                        // 跨目录 move：调用 transfer 自动处理冲突重命名
                         let transferResult = FileOperationService.transfer(
                             [currentURL],
                             into: targetFolder,
                             move: true
                         )
-                        // 如果期望的文件名被改了（冲突），也接受，不再额外 rename 回去
                         inverseOps.append(contentsOf: transferResult.successes)
                     }
                 } catch {
@@ -255,30 +366,71 @@ public final class AppUndoManager: ObservableObject {
                     )
                 }
             }
-            guard !inverseOps.isEmpty else { return nil }
-            return UndoableFileOperation(operationType: .move, successes: inverseOps)
 
-        case .copy:
-            // copy / duplicate 的反向：删除复制出的 destination 文件
-            // 注意：这是永久删除，但 Finder 对撤销复制也是永久删除
-            var inverseOps: [(source: URL, destination: URL)] = []
-            for pair in op.successes {
-                if FileManager.default.fileExists(atPath: pair.destination.path) {
-                    do {
-                        try FileManager.default.removeItem(at: pair.destination)
-                        inverseOps.append((source: pair.destination, destination: pair.source))
-                    } catch {
-                        FileHandle.standardError.write(
-                            Data("[mq-dir undo] delete copy \(pair.destination.lastPathComponent): \(error.localizedDescription)\n".utf8)
-                        )
-                    }
+            // 处理 replaceRecords 的内容回滚
+            let redoReplaceRecords = executeReplaceInverse(records: op.replaceRecords, isUndo: true)
+
+            // Move+Replace 额外：恢复正向操作中被删除的 source 文件
+            // （正向 move 把 source 搬到了 destination，现在 destination 的「新内容」刚被
+            //  executeReplaceInverse 搬到了 tempBackup，再从 tempBackup copy 一份回 source）
+            for (orig, redoRec) in zip(op.replaceRecords, redoReplaceRecords) {
+                let sourceURL = orig.source
+                guard !fm.fileExists(atPath: sourceURL.path) else { continue }
+                let sourceParent = sourceURL.deletingLastPathComponent()
+                let srcName = sourceURL.lastPathComponent
+                do {
+                    try fm.createDirectory(at: sourceParent, withIntermediateDirectories: true)
+                    // 从 tempBackup 复制一份回 source 位置（tempBackup 本身保留给 redo 栈）
+                    try fm.copyItem(at: redoRec.replacedOriginalBackup, to: sourceURL)
+                    // 如果 sourceParent 下已有同名，说明 copy 抛错上面已经被 catch；
+                    // 这里额外做一次 conflict rename 尽力恢复
+                } catch let createErr {
+                    // 恢复 source 失败：打印日志，但不影响整体 undo（destination 已经回滚）
+                    FileHandle.standardError.write(
+                        Data("[mq-dir undo] move+replace restore source \(srcName): \(createErr.localizedDescription)\n".utf8)
+                    )
                 }
             }
-            guard !inverseOps.isEmpty else { return nil }
-            // redo 时需要再次复制，所以记录为 copy 类型（但 sources/destinations 被换了含义，需要特殊处理）
-            // 实际上 redo copy 我们应该用 pair.source -> somewhere，所以这里存入 deleteDestination 类型
-            // 用于提示 executeInverse 走另一条路：重新做 copy
-            return UndoableFileOperation(operationType: .deleteDestination, successes: inverseOps.map { (source: $0.destination, destination: $0.source) })
+
+            guard !inverseOps.isEmpty || !redoReplaceRecords.isEmpty else { return nil }
+            return UndoableFileOperation(
+                operationType: .move,
+                successes: inverseOps,
+                replaceRecords: redoReplaceRecords
+            )
+
+        case .copy:
+            // copy / duplicate 的反向：
+            //   - 普通 copy：删除复制出的 destination（永久删除，同 Finder 语义）
+            //   - replace 子项：用 executeReplaceInverse 把 destination 内容换回旧文件
+            //                 （当前 destination 的「新内容」会被搬到 redo-temp，
+            //                  用作 redo 时的新内容备份）
+            let fm = FileManager.default
+            let replaceDestSet = Set(op.replaceRecords.map { $0.destination })
+            var inverseOps: [(source: URL, destination: URL)] = []
+
+            for pair in op.successes {
+                if replaceDestSet.contains(pair.destination) { continue } // replace 项跳过
+                guard fm.fileExists(atPath: pair.destination.path) else { continue }
+                do {
+                    try fm.removeItem(at: pair.destination)
+                    inverseOps.append((source: pair.destination, destination: pair.source))
+                } catch {
+                    FileHandle.standardError.write(
+                        Data("[mq-dir undo] delete copy \(pair.destination.lastPathComponent): \(error.localizedDescription)\n".utf8)
+                    )
+                }
+            }
+            // replace 子项走专用路径
+            let redoReplaceRecords = executeReplaceInverse(records: op.replaceRecords, isUndo: true)
+
+            guard !inverseOps.isEmpty || !redoReplaceRecords.isEmpty else { return nil }
+            // redo 时走 deleteDestination 分支重新做 copy / replace
+            return UndoableFileOperation(
+                operationType: .deleteDestination,
+                successes: inverseOps.map { (source: $0.destination, destination: $0.source) },
+                replaceRecords: redoReplaceRecords
+            )
 
         case .trash:
             // trash 的反向：把废纸篓中的 destination 移回 source
@@ -325,12 +477,21 @@ public final class AppUndoManager: ObservableObject {
             return UndoableFileOperation(operationType: .trash, successes: inverseOps)
 
         case .deleteDestination:
-            // 这是 redo copy 时进入的分支：重新把 source 复制到 destination 的文件夹
+            // 这是 redo copy 时进入的分支：重新把 source 复制到 destination 的文件夹。
+            // 普通项走旧 transfer 逻辑；replace 的 redo 走 executeReplaceInverse(isUndo=false)
+            // —— 注意：redo replace 的语义是「重新把内容换成新文件」，恰好是 undo 的反向：
+            //   undo 把备份（旧内容）换回 destination，当前内容（新）进 redo-temp；
+            //   redo 则把备份（新内容）换回 destination，当前内容（旧）进新的 undo-temp。
+            //   executeReplaceInverse 对正反方向做的动作相同，因此可以复用。
+            let fm = FileManager.default
+            let replaceDestSet = Set(op.replaceRecords.map { $0.destination })
             var inverseOps: [(source: URL, destination: URL)] = []
+
             for pair in op.successes {
-                // pair.source: 原文件（复制源），pair.destination: 被删除的副本的路径（用来推断目标文件夹）
+                // replace 项跳过，走下面统一的 redo
+                if replaceDestSet.contains(pair.destination) { continue }
                 let destFolder = pair.destination.deletingLastPathComponent()
-                if FileManager.default.fileExists(atPath: pair.source.path) {
+                if fm.fileExists(atPath: pair.source.path) {
                     let result = FileOperationService.transfer(
                         [pair.source],
                         into: destFolder,
@@ -339,8 +500,15 @@ public final class AppUndoManager: ObservableObject {
                     inverseOps.append(contentsOf: result.successes)
                 }
             }
-            guard !inverseOps.isEmpty else { return nil }
-            return UndoableFileOperation(operationType: .copy, successes: inverseOps)
+            // replace 子项走对称的内容替换（redo 方向）
+            let redoReplaceRecords = executeReplaceInverse(records: op.replaceRecords, isUndo: false)
+
+            guard !inverseOps.isEmpty || !redoReplaceRecords.isEmpty else { return nil }
+            return UndoableFileOperation(
+                operationType: .copy,
+                successes: inverseOps,
+                replaceRecords: redoReplaceRecords
+            )
         }
     }
 }

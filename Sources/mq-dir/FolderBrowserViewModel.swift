@@ -1169,6 +1169,136 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
     /// the type's presence matters.
     static let cutMarkerType = NSPasteboard.PasteboardType("com.mqdir.cut.urls")
 
+    // MARK: - 复制/移动 + 冲突弹窗
+
+    /// 同步弹出冲突确认对话框（Finder 风格）。
+    /// 必须在 MainActor 上调用，因为直接操作 NSApp.keyWindow。
+    /// - Parameters:
+    ///   - sourceName: 正在粘贴/拖入的文件名
+    ///   - destinationFolderName: 目标目录名（用于提示文案）
+    /// - Returns: (用户决策, 是否勾选「对后续所有冲突应用此选择」)
+    @MainActor
+    func runModalCollisionAlert(
+        sourceName: String,
+        destinationFolderName: String
+    ) -> (decision: FileOperationService.CollisionDecision, applyToAll: Bool) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+
+        // 主标题：与 Finder 截图保持一致的文案
+        alert.messageText = L(
+            "mqdir.dialog.collisionTitle",
+            sourceName, destinationFolderName
+        )
+        // 副说明：显示文件名+目标文件夹
+        alert.informativeText = L(
+            "mqdir.dialog.collisionInformative",
+            sourceName, destinationFolderName
+        )
+
+        // 三个按钮顺序（从左到右）：保留两者 / 停止 / 替换
+        //   NSAlert 第一个按钮 = 默认（Return 键触发）= 保留两者（非破坏性，最安全）
+        //   第三个按钮 = 替换（标记为 destructive，红色文字）
+        alert.addButton(withTitle: L("mqdir.dialog.collisionKeepBoth"))
+        alert.addButton(withTitle: L("mqdir.dialog.collisionStop"))
+        let replaceButton = alert.addButton(withTitle: L("mqdir.dialog.collisionReplace"))
+        replaceButton.hasDestructiveAction = true
+
+        // 「应用到全部」复选框作为 accessoryView
+        let applyCheckbox = NSButton(
+            checkboxWithTitle: L("mqdir.dialog.collisionApplyAll"),
+            target: nil,
+            action: nil
+        )
+        alert.accessoryView = applyCheckbox
+        alert.layout()
+
+        // ESC = .alertSecondButtonReturn? 实际 NSAlert 关闭窗口(ESC/CMD+.) 返回 .alertCancelButtonReturn
+        let response = alert.runModal()
+        let apply = applyCheckbox.state == .on
+
+        switch response {
+        case .alertFirstButtonReturn:
+            // 第一个按钮 = 保留两者
+            return (.keepBoth, apply)
+        case .alertSecondButtonReturn:
+            // 第二个按钮 = 停止；停止不需要「应用到全部」（立刻终止整批）
+            return (.stop, false)
+        case .alertThirdButtonReturn:
+            // 第三个按钮 = 替换
+            return (.replace, apply)
+        default:
+            // ESC、关闭窗口等其他情况 → 保守按「停止」处理，避免误覆盖
+            return (.stop, false)
+        }
+    }
+
+    /// 统一的「带冲突策略+UI弹窗」的传输封装，供 paste 和 acceptDrop 复用。
+    /// 负责：
+    ///   - Task.detached 后台线程跑 FileOperationService.transfer(同步)
+    ///   - onCollision 回调切回 MainActor 弹 NSAlert，同步阻塞后台线程等待结果
+    ///   - 失败项打印 stderr、注册 Undo、广播刷新
+    /// - Parameters:
+    ///   - sources: 待传 URL
+    ///   - destinationFolder: 目标目录
+    ///   - move: true=剪切 false=复制
+    ///   - normalizeHangul: 是否 NFC 归一化韩文
+    ///   - completionHandler: 传输完成后在 MainActor 执行的收尾（如清空剪切板 cut marker）
+    private func runTransferWithDialog(
+        _ sources: [URL],
+        into destinationFolder: URL,
+        move: Bool,
+        normalizeHangul: Bool,
+        completionHandler: @escaping @MainActor () -> Void = {}
+    ) {
+        // FolderBrowserViewModel 本身是 @MainActor，这里整个 Task 继承 main-actor 上下文，
+        // 但耗时磁盘操作放在 Task.detached 里，不阻塞 UI。
+        Task {
+            let result: FileOperationService.TransferResult = await Task.detached(priority: .userInitiated) {
+                // 后台线程：跑同步 transfer，onCollision 回调用 DispatchGroup 同步等主线程弹窗
+                FileOperationService.transfer(
+                    sources,
+                    into: destinationFolder,
+                    move: move,
+                    onCollision: { src, existingDest in
+                        // 在后台线程同步回调，切到 MainActor 弹 NSAlert
+                        // 并用 DispatchGroup 阻塞当前后台线程直到用户点击
+                        let group = DispatchGroup()
+                        group.enter()
+                        var decision: FileOperationService.CollisionDecision = .keepBoth
+                        var applyToAll = false
+                        Task { @MainActor in
+                            defer { group.leave() }
+                            let folderName = existingDest.deletingLastPathComponent().lastPathComponent
+                            (decision, applyToAll) = self.runModalCollisionAlert(
+                                sourceName: src.lastPathComponent,
+                                destinationFolderName: folderName
+                            )
+                        }
+                        group.wait()
+                        return (decision, applyToAll)
+                    },
+                    normalizeHangul: normalizeHangul
+                )
+            }.value
+
+            // --- 回到 MainActor（因为 Task 是在 @MainActor 类里启动的）---
+            for (src, errDesc) in result.failures {
+                FileHandle.standardError.write(
+                    Data("[mq-dir transfer] \(src.lastPathComponent): \(errDesc)\n".utf8)
+                )
+            }
+            // 注册撤销：一条 Undo 记录同时包含 copy 普通项 + replaceRecords
+            await AppUndoManager.shared.registerOperation(
+                operationType: move ? .move : .copy,
+                result: result
+            )
+            completionHandler()
+            // 广播刷新（同时刷新源/目标目录可能打开的其他面板）
+            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+        }
+    }
+
     /// Read file URLs off the system pasteboard and copy (or move,
     /// when the pasteboard carries our cut marker) them into the
     /// current folder. Mirrors Finder's ⌘V (copy) and Windows
@@ -1181,42 +1311,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
               !items.isEmpty
         else { return }
 
-        // Read the cut marker on the main actor *before* detaching — the
-        // pasteboard is main-actor state, and the detached loop only needs
-        // the resolved `isCut` flag plus the URLs.
+        // 先读 cut 标记（NSPasteboard 是 main-actor 状态）
         let isCut = pb.types?.contains(Self.cutMarkerType) == true
-        Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                // Same standardized self-drop + descendant guards drop
-                // uses, so paste-into-same-folder and paste-into-descendant
-                // behave identically to a drag-drop.
-                FileOperationService.transfer(items, into: folder, move: isCut, normalizeHangul: normalizeHangul)
-            }.value
-            for (source, errorDesc) in result.failures {
-                FileHandle.standardError.write(
-                    Data("[mq-dir paste] \(source.lastPathComponent): \(errorDesc)\n".utf8)
-                )
-            }
-            // 注册撤销操作
-            await AppUndoManager.shared.registerOperation(
-                operationType: isCut ? .move : .copy,
-                result: result
-            )
-            // After a cut+paste the source URLs are gone, so wipe the
-            // pasteboard to avoid a follow-up paste silently failing on
-            // missing files. Plain-copy paste leaves the clipboard alone
-            // so the user can paste the same set into multiple folders.
-            // Back on the main actor here (NSPasteboard is main-actor state).
-            if isCut {
-                pb.clearContents()
-            }
-            // Tell every other pane/tab to refresh — the source folder
-            // (potentially open in another pane after a cross-pane
-            // cut+paste) and any pane viewing the destination both need
-            // to drop the stale entries / pick up the new ones. The
-            // broadcast reloads this pane too, so we don't reload directly.
-            // Same pattern moveToTrash / acceptDrop / duplicate use.
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
+        runTransferWithDialog(
+            items,
+            into: folder,
+            move: isCut,
+            normalizeHangul: normalizeHangul
+        ) { @MainActor in
+            // cut+paste 完成后清空剪切板，避免后续 paste 因源文件已移走而失败
+            if isCut { pb.clearContents() }
         }
     }
 
@@ -1674,25 +1778,16 @@ final class FolderBrowserViewModel: ObservableObject, Identifiable {
 
     /// Move (or copy across volumes) a list of file URLs into a destination folder.
     /// `copy=true` forces copy (Option held). Default Finder semantics: same-volume = move,
-    /// cross-volume = copy. On name conflict, the destination gets " 2", " 3", ... suffix
-    /// (Finder convention). After completion, broadcasts a system-wide reload.
+    /// cross-volume = copy. On name conflict, a modal dialog asks the user whether to
+    /// keep both / stop / replace; an "apply to all" checkbox avoids repeated prompts.
+    /// After completion, broadcasts a system-wide reload.
     func acceptDrop(_ urls: [URL], into destinationFolder: URL, copy: Bool, normalizeHangul: Bool = false) {
-        Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                FileOperationService.transfer(urls, into: destinationFolder, move: !copy, normalizeHangul: normalizeHangul)
-            }.value
-            for (source, errorDesc) in result.failures {
-                FileHandle.standardError.write(
-                    Data("[mq-dir drop] \(source.lastPathComponent): \(errorDesc)\n".utf8)
-                )
-            }
-            // 注册撤销操作：move 或 copy
-            await AppUndoManager.shared.registerOperation(
-                operationType: copy ? .copy : .move,
-                result: result
-            )
-            NotificationCenter.default.post(name: .mqdirFileSystemChanged, object: nil)
-        }
+        runTransferWithDialog(
+            urls,
+            into: destinationFolder,
+            move: !copy,
+            normalizeHangul: normalizeHangul
+        )
     }
 }
 

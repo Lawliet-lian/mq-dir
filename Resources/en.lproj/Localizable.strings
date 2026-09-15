@@ -335,6 +335,15 @@
 "mqdir.dialog.compressCrossFolderHint" = "Select items from one folder to compress them together.";
 "mqdir.dialog.compressFailedOne" = "Couldn't compress “%@”";
 
+// New: file name conflict dialog (Finder-style 3 buttons for paste/drag copy/move)
+// Args: %1$@ = file name / %2$@ = destination folder name
+"mqdir.dialog.collisionTitle" = "An item named “%1$@” already exists in this location";
+"mqdir.dialog.collisionInformative" = "Do you want to replace the item in “%2$@” with the one you're copying?\n\nKeep Both: appends a numeric suffix (e.g. File 2.md).\nStop: aborts the remaining transfer; items already transferred stay in place.\nReplace: overwrites the destination (undoable via ⌘Z).";
+"mqdir.dialog.collisionKeepBoth" = "Keep Both";
+"mqdir.dialog.collisionStop" = "Stop";
+"mqdir.dialog.collisionReplace" = "Replace";
+"mqdir.dialog.collisionApplyAll" = "Apply this choice to all subsequent conflicts";
+
 // 新增：面包屑右键菜单
 "mqdir.breadcrumb.openInTerminal" = "Open in Terminal";
 "mqdir.breadcrumb.openInCmux" = "Open in cmux";

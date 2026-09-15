@@ -335,6 +335,15 @@
 "mqdir.dialog.compressCrossFolderHint" = "请选择同一文件夹中的项目一起压缩。";
 "mqdir.dialog.compressFailedOne" = "未能压缩「%@」";
 
+// 新增：文件同名冲突对话框（粘贴/拖拽复制或移动时触发，Finder 风格三按钮）
+// 参数顺序：%1$@ = 文件名 / %2$@ = 目标文件夹名
+"mqdir.dialog.collisionTitle" = "此位置已存在名为「%1$@」的项目";
+"mqdir.dialog.collisionInformative" = "你要使用正在拷贝的项目替换「%2$@」中的同名项目吗？\n\n「保留两者」将在文件名后追加序号（如 文件 2.md）；\n「停止」将终止本次复制/移动，已成功的项目保留；\n「替换」将覆盖目标位置的文件（可撤销恢复）。";
+"mqdir.dialog.collisionKeepBoth" = "保留两者";
+"mqdir.dialog.collisionStop" = "停止";
+"mqdir.dialog.collisionReplace" = "替换";
+"mqdir.dialog.collisionApplyAll" = "对后续所有冲突应用此选择";
+
 // 新增：面包屑右键菜单
 "mqdir.breadcrumb.openInTerminal" = "在终端中打开";
 "mqdir.breadcrumb.openInCmux" = "在 cmux 中打开";
