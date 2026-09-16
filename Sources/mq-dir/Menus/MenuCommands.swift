@@ -27,6 +27,11 @@ struct MenuCommands: Commands {
             Divider()
             Button(L("mqdir.menu.file.openFolder")) { post(.openFolder) }
                 .keyboardShortcut(binding(.openFolder))
+            // 文件 → 前往文件夹…(⇧⌘G)：参考 Finder 的「前往文件夹」，打开一个
+            // POSIX 路径输入面板；跳转仍走 focusedPane.openFolder(_:)，保持
+            // Back/Forward 历史栈一致，不直写 folderURL / 直调 navigate。
+            Button(L("mqdir.menu.file.goToFolder")) { post(.goToFolder) }
+                .keyboardShortcut("G", modifiers: [.command, .shift])
             Button(L("mqdir.menu.file.openSelected")) { post(.openSelected) }
                 .keyboardShortcut(.return, modifiers: [])
             Divider()

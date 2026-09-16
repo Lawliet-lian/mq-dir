@@ -73,6 +73,16 @@ struct MainWindowView: View {
     /// 这个值会被赋值，触发 sheet 弹出；sheet 关闭后会被置回 nil。
     @State private var folderComparison: FolderComparisonRequest?
 
+    /// 「文件 → 前往文件夹…(⇧⌘G)」面板的显隐状态。
+    /// 使用单独 sheet，避免与 folderComparison 或其他弹窗耦合。
+    @State private var showGoToFolder = false
+    /// 「前往文件夹」面板当前输入草稿。跨多次打开面板保留草稿，
+    /// 用户体验更贴近 Finder。
+    @State private var goToFolderInput = ""
+    /// 会话级「前往文件夹」最近成功路径记录：仅在内存中保留最近 10 条，
+    /// 不写入 UserDefaults，范围最小化。
+    @StateObject private var goToFolderHistory = GoToFolderHistory()
+
     init(
         workspace: WorkspaceManager,
         updateManager: UpdateManager,
@@ -116,6 +126,37 @@ struct MainWindowView: View {
             .sheet(item: $folderComparison) { request in
                 FolderComparisonView(request: request)
             }
+            // 「前往文件夹…」sheet：
+            // 成功跳转完全通过 focusedPane.openFolder(_:) 进入历史栈，
+            // 成功后再把绝对路径加入会话级最近使用记录；失败路径不记录。
+            .sheet(isPresented: $showGoToFolder) {
+                GoToFolderView(
+                    input: $goToFolderInput,
+                    history: goToFolderHistory,
+                    baseURLForRelativeResolution: focusedPane.folderURL,
+                    onCommit: { [weak folderBrowserViewModel = focusedPane, weak history = goToFolderHistory] targetURL in
+                        // 用局部弱引用持有，避免 sheet 闭包意外捕获 MainWindowView 长期对象。
+                        guard let vm = folderBrowserViewModel else { return }
+                        // 仅在目录实际变化时调用 openFolder，和 breadcrumb 段点击保持一致，
+                        // 避免 self-click 时无谓清空 forwardStack / 重复写 backStack。
+                        if let current = vm.folderURL,
+                           current.standardizedFileURL != targetURL.standardizedFileURL {
+                            vm.openFolder(targetURL)
+                        }
+                        // 成功即写入最近使用（即使目标 == 当前目录也可以保留最近使用记录，
+                        // 方便下次再来一次，不影响历史栈）。
+                        history?.record(absolutePath: targetURL.standardizedFileURL.path)
+                        // 跳转成功后关闭面板。这里关闭写在 onCommit 里，保证失败输入
+                        // （路径不存在）不会把面板关掉，便于继续修改。
+                        showGoToFolder = false
+                        goToFolderInput = ""
+                    },
+                    onCancel: {
+                        // 用户取消：不清空输入草稿，下次打开面板继续编辑。
+                        showGoToFolder = false
+                    }
+                )
+            }
             .modifier(SaveTriggers(
                 pane0: pane0, pane1: pane1, pane2: pane2, pane3: pane3,
                 sidebar: sidebar,
@@ -127,7 +168,11 @@ struct MainWindowView: View {
                 focusedPane: focusedPane,
                 searchActive: $searchActive,
                 searchFocused: $searchFocused,
-                sidebar: sidebar
+                sidebar: sidebar,
+                showGoToFolder: $showGoToFolder,
+                // 打开面板时若当前已有目录，预填当前目录路径，比空字符串更贴近 Finder 习惯。
+                initialGoToFolderText: focusedPane.folderURL?.standardizedFileURL.path ?? "",
+                goToFolderInputDraft: $goToFolderInput
             ))
             .modifier(EditMenuNotifications(
                 focusedPane: focusedPane,
@@ -1213,6 +1258,13 @@ private struct NavigationNotifications: ViewModifier {
     @Binding var searchActive: Bool
     var searchFocused: FocusState<Bool>.Binding
     @ObservedObject var sidebar: SidebarViewModel
+    /// 「前往文件夹…(⇧⌘G)」面板的显隐开关，与 MainWindowView 共享。
+    @Binding var showGoToFolder: Bool
+    /// 打开面板时填到输入框的初始文字。一般传入当前目录的绝对路径：
+    /// 仅当输入草稿当前为空时才会被写入，避免覆盖用户未提交的输入。
+    let initialGoToFolderText: String
+    /// 与 MainWindowView 共享的输入草稿引用，避免在 modifier 里重复持有状态。
+    @Binding var goToFolderInputDraft: String
 
     func body(content: Content) -> some View {
         content
@@ -1221,6 +1273,15 @@ private struct NavigationNotifications: ViewModifier {
                 switch command {
                 case .openFolder:
                     focusedPane.chooseFolder()
+                case .goToFolder:
+                    // 只在面板尚未开启时触发，避免重复覆盖用户正在键入的内容。
+                    guard !showGoToFolder else { break }
+                    showGoToFolder = true
+                    // 仅当输入草稿为空时预填当前目录路径，保留未提交草稿，
+                    // 与 Finder 打开「前往文件夹」时不破坏上次半输入的体验一致。
+                    if goToFolderInputDraft.isEmpty, !initialGoToFolderText.isEmpty {
+                        goToFolderInputDraft = initialGoToFolderText
+                    }
                 case .openSelected:
                     focusedPane.openSelected()
                 case .revealSelected:

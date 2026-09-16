@@ -23,6 +23,9 @@ enum AppCommand: Equatable {
     case goBack
     case goForward
     case focusSearch
+    /// 文件 → 前往文件夹…(⇧⌘G)：弹出 POSIX 路径输入面板，成功时仍然走
+    /// focusedPane.openFolder(_:) 进入历史栈，不直写 folderURL / 不直调 navigate。
+    case goToFolder
     /// Add the focused pane's current folder to the sidebar Favorites list.
     case addCurrentFolderToFavorites
     /// Toggle the right-side preview panel for the focused pane's active tab.

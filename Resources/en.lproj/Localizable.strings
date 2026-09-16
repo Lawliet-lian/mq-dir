@@ -39,6 +39,7 @@
 "mqdir.menu.file.newWindow" = "New Window";
 "mqdir.menu.file.newTab" = "New Tab";
 "mqdir.menu.file.openFolder" = "Open Folder…";
+"mqdir.menu.file.goToFolder" = "Go to Folder…";
 "mqdir.menu.file.openSelected" = "Open Selected";
 "mqdir.menu.file.closeWindow" = "Close Window";
 "mqdir.menu.file.closeTab" = "Close Tab";
@@ -353,6 +354,16 @@
 // 新增：面包屑分段按钮的无障碍标签
 "mqdir.breadcrumb.segmentAccessibility" = "Open folder “%@”";
 "mqdir.breadcrumb.currentSegmentAccessibility" = "Current folder: %@";
+
+// 新增：文件菜单 → 前往文件夹面板
+"mqdir.goToFolder.title" = "Go to Folder";
+"mqdir.goToFolder.placeholder" = "Enter a POSIX path, e.g. /Users/lawliet/Documents or ~/Documents";
+"mqdir.goToFolder.go" = "Go";
+"mqdir.goToFolder.cancel" = "Cancel";
+"mqdir.goToFolder.close" = "Close";
+"mqdir.goToFolder.recent" = "Recent";
+"mqdir.goToFolder.invalidPath" = "The path does not exist or is not a folder.";
+"mqdir.goToFolder.hint" = "Enter to go, Esc or × to cancel. Tilde (~) expands to your home directory.";
 
 // 新增：杂项（视图模式 tooltip / 展开折叠 / 侧边栏默认收藏夹 / 选择文件夹面板 / 空面板占位符）
 "mqdir.misc.listView" = "List View";

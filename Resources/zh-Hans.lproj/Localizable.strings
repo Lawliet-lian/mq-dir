@@ -39,6 +39,7 @@
 "mqdir.menu.file.newWindow" = "新建窗口";
 "mqdir.menu.file.newTab" = "新建标签页";
 "mqdir.menu.file.openFolder" = "打开文件夹…";
+"mqdir.menu.file.goToFolder" = "前往文件夹…";
 "mqdir.menu.file.openSelected" = "打开选中项";
 "mqdir.menu.file.closeWindow" = "关闭窗口";
 "mqdir.menu.file.closeTab" = "关闭标签页";
@@ -353,6 +354,16 @@
 // 新增：面包屑分段按钮的无障碍标签
 "mqdir.breadcrumb.segmentAccessibility" = "打开文件夹“%@”";
 "mqdir.breadcrumb.currentSegmentAccessibility" = "当前文件夹：%@";
+
+// 新增：文件菜单 → 前往文件夹面板
+"mqdir.goToFolder.title" = "前往文件夹";
+"mqdir.goToFolder.placeholder" = "输入 POSIX 路径，例如 /Users/lawliet/Documents 或 ~/Documents";
+"mqdir.goToFolder.go" = "前往";
+"mqdir.goToFolder.cancel" = "取消";
+"mqdir.goToFolder.close" = "关闭";
+"mqdir.goToFolder.recent" = "最近使用";
+"mqdir.goToFolder.invalidPath" = "路径不存在或不是文件夹，请修正后再试。";
+"mqdir.goToFolder.hint" = "提示：Enter 前往，Esc 或点击 × 取消；支持 ~ 主目录前缀。";
 
 // 新增：杂项（视图模式 tooltip / 展开折叠 / 侧边栏默认收藏夹 / 选择文件夹面板 / 空面板占位符）
 "mqdir.misc.listView" = "列表视图";
