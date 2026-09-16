@@ -8,20 +8,43 @@ private func L(_ key: String, _ args: CVarArg...) -> String {
     return String(format: format, arguments: args)
 }
 
-/// 会话级最近使用路径记录：只在内存中保存最近 N 条成功跳转结果，
-/// 失败路径不入库；重复路径移到最前。不持久化到 UserDefaults，
-/// 保持第一版范围最小、与 Replace backup 的“会话级 + 不跨重启”哲学一致。
+/// 会话级最近使用路径记录：
+/// - 成功跳转的标准绝对 POSIX 路径会写入 entries；
+/// - 失败路径不入库；重复路径移到最前；始终最多保留 maximumEntryCount 条；
+/// - entries 同时薄持久化到 UserDefaults，保证 App 重启后最近使用仍在。
+/// 这层持久化只影响「前往文件夹」的最近列表，不改动 Back / Forward 历史栈。
 final class GoToFolderHistory: ObservableObject {
-    /// 允许保留的最大条数，与 Finder 最近使用区的视觉大小相近。
+    /// UserDefaults 中存储最近路径列表的 key，集中定义，避免其他地方重复字符串。
+    /// 命名空间与本地化 key 保持一致：mqdir.goToFolder.*
+    static let defaultsKey = "mqdir.goToFolder.recentPaths"
+
+    /// 允许保留的最大条数，与 Finder 最近使用区的视觉大小相近，
+    /// 同时也是持久化回读时的上限夹取值。
     static let maximumEntryCount = 10
 
     @Published private(set) var entries: [String] = []
+
+    /// 初始化时从 UserDefaults 同步恢复一次最近使用列表：
+    /// - 读不到或读到空数组时，entries 保持空；
+    /// - 读到异常长数组（例如旧版本或手动改了 plist）时裁剪到上限，
+    ///   保证 UI 列表与 record 规则一致。
+    init() {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.stringArray(forKey: Self.defaultsKey) {
+            // 轻量防御：去空白 + 过滤空串 + 裁剪上限。
+            let cleaned = stored
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            entries = Array(cleaned.prefix(Self.maximumEntryCount))
+        }
+    }
 
     /// 追加一条最近使用路径：
     /// - 去除首尾空格和换行；
     /// - 空串不入库；
     /// - 已存在的重复项先移除，再插入到最前面；
-    /// - 超出 maximumEntryCount 时裁剪尾部。
+    /// - 超出 maximumEntryCount 时裁剪尾部；
+    /// - 内存更新完成后立即同步到 UserDefaults。
     func record(absolutePath path: String) {
         let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return }
@@ -30,10 +53,40 @@ final class GoToFolderHistory: ObservableObject {
             copy.remove(at: existingIndex)
         }
         copy.insert(normalized, at: 0)
-        if copy.count > GoToFolderHistory.maximumEntryCount {
-            copy.removeLast(copy.count - GoToFolderHistory.maximumEntryCount)
+        if copy.count > Self.maximumEntryCount {
+            copy.removeLast(copy.count - Self.maximumEntryCount)
         }
         entries = copy
+        persist()
+    }
+
+    /// 清空最近使用：
+    /// - 立即清空 entries 并刷新 UI；
+    /// - 同步删除 UserDefaults 中对应的 key；
+    /// - 只作用于「前往文件夹」的最近使用列表，不触碰 Back / Forward。
+    func clear() {
+        guard !entries.isEmpty else {
+            // entries 已经为空仍顺手删一次 key，保证极端场景（比如 plist
+            // 里残留了脏数据但 entries 被外部置空）不会留下孤儿数据。
+            UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
+            return
+        }
+        entries = []
+        UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
+    }
+
+    // MARK: - Privates
+
+    /// 把当前 entries 原样写入 UserDefaults：
+    /// 调用方保证 entries 已裁剪到 maximumEntryCount，这里不再重复过滤，
+    /// 保持 record/clear 与持久化写入路径唯一，减少条件分叉。
+    private func persist() {
+        let defaults = UserDefaults.standard
+        if entries.isEmpty {
+            defaults.removeObject(forKey: Self.defaultsKey)
+        } else {
+            defaults.set(entries, forKey: Self.defaultsKey)
+        }
     }
 }
 
@@ -214,18 +267,57 @@ struct GoToFolderView: View {
     }
 
     private var footer: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(showsInvalidInput
-                 ? L("mqdir.goToFolder.invalidPath")
-                 : L("mqdir.goToFolder.hint"))
-                .font(.system(size: 11))
-                .foregroundStyle(showsInvalidInput
-                                 ? Color.red
-                                 : Theme.Color.labelTertiary)
-            Spacer()
-            Button(L("mqdir.goToFolder.cancel")) { onCancel() }
-                .keyboardShortcut(.cancelAction)
-                .controlSize(.small)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(showsInvalidInput
+                     ? L("mqdir.goToFolder.invalidPath")
+                     : L("mqdir.goToFolder.hint"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(showsInvalidInput
+                                     ? Color.red
+                                     : Theme.Color.labelTertiary)
+                Spacer()
+                Button(L("mqdir.goToFolder.cancel")) { onCancel() }
+                    .keyboardShortcut(.cancelAction)
+                    .controlSize(.small)
+            }
+
+            // 「清空最近使用」只在存在历史时可点击：
+            // - 立即清空 entries 并删除 UserDefaults 中对应 key；
+            // - 不影响 Back / Forward 导航历史栈。
+            Button {
+                history.clear()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                    Text(L("mqdir.goToFolder.clearRecents"))
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(history.entries.isEmpty
+                                 ? Theme.Color.labelTertiary
+                                 : Theme.Color.labelSecondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(history.entries.isEmpty
+                              ? SwiftUI.Color.clear
+                              : Theme.Color.rowHover.opacity(0.8))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(history.entries.isEmpty
+                                      ? SwiftUI.Color.clear
+                                      : Theme.Color.separator.opacity(0.7),
+                                      lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(history.entries.isEmpty)
+            .help(L("mqdir.goToFolder.clearRecents"))
+            // 无历史时仍保持占位高度，避免清空瞬间面板高度跳变。
+            .frame(minHeight: 18)
         }
     }
 
