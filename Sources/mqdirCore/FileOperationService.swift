@@ -36,8 +36,8 @@ public enum FileOperationService {
     }
 
     /// 单次「替换」操作的详细记录，供 Undo 管理器恢复被替换的原文件。
-    /// `replacedOriginalBackup` 指向备份目录中的旧文件路径；
-    /// 当 Undo 栈溢出被移除时，调用方应负责清理该临时备份目录。
+    /// `replacedOriginalBackup` 指向缓存目录中的备份文件/文件夹路径；
+    /// 当 Undo 栈溢出被移除时，调用方应负责清理该备份所属的 UUID 目录。
     public struct ReplaceRecord: Sendable {
         /// 本次复制/移动的源文件路径
         public let source: URL
@@ -309,12 +309,13 @@ public enum FileOperationService {
     /// 安全地将 `source` 替换到 `destination` 位置，保证失败时 `destination` 原状不丢失。
     ///
     /// 两阶段流程：
-    ///   1. 先把目标位置的旧文件 move 到同盘的备份临时目录（原子、快速）
+    ///   1. 先把目标位置的旧文件 move 到缓存目录中的备份临时目录
     ///   2. 再 copy/move source → destination
     ///      - 成功：返回 ReplaceRecord（含备份路径，交给 Undo 栈管理生命周期）
     ///      - 失败：把备份移回原位，清理临时目录，抛错
     ///
     /// 不追求跨盘真正原子，只保证任何异常路径都不会让用户丢失旧目标文件。
+    /// Backup 的最终删除时机由 Undo/Redo 记录控制；本函数只负责创建并返回 backup。
     ///
     /// - Parameters:
     ///   - source: 新文件（或文件夹）URL
@@ -328,6 +329,7 @@ public enum FileOperationService {
         to destination: URL,
         move: Bool,
         fileManager: FileManager = .default,
+        cachesDirectory: URL? = nil,
         now: () -> Date = Date.init
     ) throws -> ReplaceRecord {
         // 前置断言：destination 必须存在（否则没有"替换"可言）
@@ -339,40 +341,23 @@ public enum FileOperationService {
             )
         }
 
-        let destinationFolder = destination.deletingLastPathComponent()
-        let destinationName = destination.lastPathComponent
-        let stamp = Int(now().timeIntervalSince1970)
-        let unique = UUID().uuidString.prefix(6)
-
-        // 阶段 0：在目标目录下创建一个临时备份目录（同盘，后面的 move 都是原子的）
-        // 目录名格式：.mqdir_replace_backup_<timestamp>_<uuid6>
-        let backupDirName = ".mqdir_replace_backup_\(stamp)_\(unique)"
-        let backupDir = destinationFolder.appendingPathComponent(backupDirName, isDirectory: true)
+        // 阶段 0：在统一的 caches replace-backups 根目录下创建一个 UUID 备份目录，
+        // 然后把旧 destination 移进去。这里故意不把 backup 放在用户当前操作目录旁边，
+        // 以避免污染真实文件列表，同时仍然保留 undo/redo 所需的旧内容。
+        let backupURL: URL
         do {
-            try fileManager.createDirectory(at: backupDir, withIntermediateDirectories: true)
+            backupURL = try ReplaceBackupManager.stageExistingDestinationForReplace(
+                destination,
+                fileManager: fileManager,
+                cachesDirectory: cachesDirectory
+            )
         } catch {
-            // 备份目录都建不起来：直接抛错，不碰源和目标，安全
+            // 连旧目标都无法安全转移到 backup：直接抛错，不碰 source，
+            // 且 destination 还在原位，安全语义不变。
             throw NSError(
                 domain: "mq-dir.safeReplace",
                 code: -2,
-                userInfo: [NSLocalizedDescriptionKey: "创建备份目录失败：\(error.localizedDescription)"]
-            )
-        }
-
-        // 备份路径（放在 backupDir 内，保留原文件名以便人类识别）
-        let backupURL = backupDir.appendingPathComponent(destinationName)
-
-        // 阶段 1：把旧目标 move 到 backupURL
-        do {
-            try fileManager.moveItem(at: destination, to: backupURL)
-        } catch {
-            // 移动旧文件失败：尝试删 backupDir（大概率还是空的），然后抛错
-            // destination 没动，用户数据安全
-            try? fileManager.removeItem(at: backupDir)
-            throw NSError(
-                domain: "mq-dir.safeReplace",
-                code: -3,
-                userInfo: [NSLocalizedDescriptionKey: "备份旧文件失败：\(error.localizedDescription)"]
+                userInfo: [NSLocalizedDescriptionKey: "创建 replace 备份失败：\(error.localizedDescription)"]
             )
         }
 
@@ -400,11 +385,16 @@ public enum FileOperationService {
                     ]
                 )
             }
-            // rollback 成功 → 清理空的 backupDir，然后把原始写入错误抛出
-            try? fileManager.removeItem(at: backupDir)
+            // rollback 成功 → 当前这次 replace 并没有形成有效的 undo 记录，
+            // 所以这份 backup 不应该继续保留，直接把所属 UUID 目录清理掉。
+            ReplaceBackupManager.removeBackup(
+                for: backupURL,
+                fileManager: fileManager,
+                cachesDirectory: cachesDirectory
+            )
             throw NSError(
                 domain: "mq-dir.safeReplace",
-                code: -5,
+                code: -3,
                 userInfo: [NSLocalizedDescriptionKey: "写入新文件失败：\(error.localizedDescription)"]
             )
         }
@@ -455,6 +445,7 @@ public enum FileOperationService {
         ) -> (decision: CollisionDecision, applyToAll: Bool),
         normalizeHangul: Bool = false,
         fileManager: FileManager = .default,
+        cachesDirectory: URL? = nil,
         now: () -> Date = Date.init
     ) -> TransferResult {
         var result = TransferResult()
@@ -463,7 +454,7 @@ public enum FileOperationService {
 
         for source in sources {
             // 目标路径 = 目标目录 / 源文件名
-            var dest = destinationFolder.appendingPathComponent(source.lastPathComponent)
+            let dest = destinationFolder.appendingPathComponent(source.lastPathComponent)
 
             // ----------------------------------------------------------
             // Self-drop 检查：保持与旧 transfer() 完全一致
@@ -556,6 +547,7 @@ public enum FileOperationService {
                         to: dest,
                         move: move,
                         fileManager: fileManager,
+                        cachesDirectory: cachesDirectory,
                         now: now
                     )
                     normalizeIfRequested(dest, enabled: normalizeHangul)

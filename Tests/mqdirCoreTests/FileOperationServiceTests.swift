@@ -184,13 +184,13 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst.appendingPathComponent("good.txt").path))
     }
 
-    func testTransfer_selfDropIsNoOp() throws {
+    func testTransfer_copyIntoSameFolderCreatesRenamedCopy() throws {
         try writeFile("file.txt", contents: "x")
         let src = tempDirectory.appendingPathComponent("file.txt")
-        // Dropping into its own parent folder: dest == source, skipped, no rename copy made.
+        // Copy 回到同目录并不是 no-op，而是 Finder 风格地生成一个 " 2" 副本。
         let result = FileOperationService.transfer([src], into: tempDirectory, move: false)
         XCTAssertTrue(result.failures.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("file 2.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempDirectory.appendingPathComponent("file 2.txt").path))
     }
 
     func testTransfer_folderIntoOwnDescendantRejected() throws {
@@ -472,6 +472,16 @@ final class FileOperationServiceTests: XCTestCase {
         return url
     }
 
+    /// 为测试注入一个独立的 caches 根目录，避免真实写入用户的
+    /// ~/Library/Caches。ReplaceBackupManager 会在其下继续创建
+    /// mq-dir/replace-backups/ 结构，和生产环境保持一致。
+    @discardableResult
+    private func makeCachesDirectory() throws -> URL {
+        let url = tempDirectory.appendingPathComponent("Caches", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
     /// Create a file whose on-disk name is exactly `name`'s UTF-8 bytes
     /// via POSIX `open`, so Foundation's URL machinery can't renormalise
     /// an NFD component to NFC before it hits the filesystem. Required to
@@ -500,8 +510,11 @@ final class FileOperationServiceTests: XCTestCase {
     // MARK: - safeReplaceItem Tests
 
     /// 场景：copy + replace 成功路径。
-    /// 验证：(1) 目标内容变成新文件内容 (2) 源文件保留 (3) backup 目录存在且含旧内容
+    /// 验证：(1) 目标内容变成新文件内容 (2) 源文件保留
+    ///      (3) backup 创建在 caches/mq-dir/replace-backups 下
+    ///      (4) 用户目标目录旁不会出现 .mqdir_replace_backup_* 目录
     func testSafeReplace_copySuccess_returnsRecordAndKeepsBackup() throws {
+        let cachesDirectory = try makeCachesDirectory()
         let dst = try makeDirectory("dst")
         let destFile = dst.appendingPathComponent("a.txt")
         try Data("old-content".utf8).write(to: destFile)
@@ -510,7 +523,8 @@ final class FileOperationServiceTests: XCTestCase {
         let record = try FileOperationService.safeReplaceItem(
             from: src,
             to: destFile,
-            move: false
+            move: false,
+            cachesDirectory: cachesDirectory
         )
 
         // 目标内容应为新内容
@@ -522,18 +536,29 @@ final class FileOperationServiceTests: XCTestCase {
         let backup = record.replacedOriginalBackup
         XCTAssertTrue(FileManager.default.fileExists(atPath: backup.path))
         XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), "old-content")
-        // backup 目录名是 .mqdir_replace_backup_ 开头（目标目录的隐藏子目录）
-        XCTAssertTrue(backup.deletingLastPathComponent().lastPathComponent.hasPrefix(".mqdir_replace_backup_"))
+        // backup 位于 caches/mq-dir/replace-backups/<UUID>/a.txt
+        let backupRoot = try ReplaceBackupManager.replaceBackupsRoot(cachesDirectory: cachesDirectory)
+        XCTAssertTrue(backup.path.hasPrefix(backupRoot.path + "/"))
+        XCTAssertEqual(backup.deletingLastPathComponent().deletingLastPathComponent(), backupRoot)
+        // 用户目标目录旁不应出现旧方案的隐藏 backup 目录
+        let userDirContents = try FileManager.default.contentsOfDirectory(atPath: dst.path)
+        XCTAssertFalse(userDirContents.contains { $0.hasPrefix(".mqdir_replace_backup_") })
     }
 
     /// 场景：move + replace。成功后 source 消失。
     func testSafeReplace_moveSuccess_sourceIsRemoved() throws {
+        let cachesDirectory = try makeCachesDirectory()
         let dst = try makeDirectory("dst")
         let destFile = dst.appendingPathComponent("a.txt")
         try Data("old".utf8).write(to: destFile)
         let src = try writeFile("a.txt", contents: "new")
 
-        _ = try FileOperationService.safeReplaceItem(from: src, to: destFile, move: true)
+        _ = try FileOperationService.safeReplaceItem(
+            from: src,
+            to: destFile,
+            move: true,
+            cachesDirectory: cachesDirectory
+        )
 
         XCTAssertEqual(try String(contentsOf: destFile, encoding: .utf8), "new")
         XCTAssertFalse(FileManager.default.fileExists(atPath: src.path), "move 语义下源应消失")
@@ -552,6 +577,7 @@ final class FileOperationServiceTests: XCTestCase {
     /// 场景：写入新文件失败（构造不可写的 source URL 模拟 copyItem 失败）。
     /// 验证：旧目标文件自动回滚，内容为原来的旧内容，备份目录被清理。
     func testSafeReplace_writeFailure_rollsBackOldDestination() throws {
+        let cachesDirectory = try makeCachesDirectory()
         let dstDir = try makeDirectory("dst")
         let destFile = dstDir.appendingPathComponent("a.txt")
         try Data("important-old".utf8).write(to: destFile)
@@ -559,7 +585,12 @@ final class FileOperationServiceTests: XCTestCase {
         let missingSrc = tempDirectory.appendingPathComponent("nonexistent-\(UUID().uuidString).txt")
 
         XCTAssertThrowsError(
-            try FileOperationService.safeReplaceItem(from: missingSrc, to: destFile, move: false)
+            try FileOperationService.safeReplaceItem(
+                from: missingSrc,
+                to: destFile,
+                move: false,
+                cachesDirectory: cachesDirectory
+            )
         )
 
         // 关键：旧目标没丢，内容还是 old
@@ -569,10 +600,14 @@ final class FileOperationServiceTests: XCTestCase {
         let contents = try FileManager.default.contentsOfDirectory(atPath: dstDir.path)
         XCTAssertFalse(contents.contains { $0.hasPrefix(".mqdir_replace_backup_") },
                        "回滚后不应残留备份目录")
+        let backupRoot = try ReplaceBackupManager.replaceBackupsRoot(cachesDirectory: cachesDirectory)
+        let cacheEntries = try FileManager.default.contentsOfDirectory(atPath: backupRoot.path)
+        XCTAssertTrue(cacheEntries.isEmpty, "失败且已回滚时，不应在 caches 下残留孤儿 backup")
     }
 
     /// 场景：替换整个文件夹（含内部多个子文件）。
     func testSafeReplace_folderReplace_worksRecursively() throws {
+        let cachesDirectory = try makeCachesDirectory()
         let dstDir = try makeDirectory("dst")
         // 旧目标文件夹
         let oldFolder = dstDir.appendingPathComponent("MyFolder", isDirectory: true)
@@ -588,7 +623,8 @@ final class FileOperationServiceTests: XCTestCase {
         let record = try FileOperationService.safeReplaceItem(
             from: newFolder,
             to: oldFolder,
-            move: false
+            move: false,
+            cachesDirectory: cachesDirectory
         )
 
         // 替换后的目标文件夹内容：有 a.txt(新) + c.txt；没有 old 的 b.txt
@@ -601,6 +637,81 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: backupFolder.appendingPathComponent("b.txt").path))
         let backupA = try String(contentsOf: backupFolder.appendingPathComponent("a.txt"), encoding: .utf8)
         XCTAssertEqual(backupA, "old-a")
+    }
+
+    /// 用 ReplaceBackupManager 模拟 Undo / Redo 的 backup 交换：
+    /// - 第一次 swap 相当于 Undo：旧内容回 destination，新内容进新的 backup
+    /// - 第二次 swap 相当于 Redo：新内容回 destination，旧内容进新的 backup
+    func testReplaceBackupManager_swapSupportsUndoAndRedo() throws {
+        let cachesDirectory = try makeCachesDirectory()
+        let dst = try makeDirectory("dst")
+        let destination = dst.appendingPathComponent("a.txt")
+        try Data("old".utf8).write(to: destination)
+        let src = try writeFile("a.txt", contents: "new")
+
+        let initialRecord = try FileOperationService.safeReplaceItem(
+            from: src,
+            to: destination,
+            move: false,
+            cachesDirectory: cachesDirectory
+        )
+        let originalBackup = initialRecord.replacedOriginalBackup
+
+        // Undo：目标恢复 old，新的 backup 持有 new
+        let redoBackup = try ReplaceBackupManager.swapDestinationWithBackup(
+            destination: destination,
+            backupItem: originalBackup,
+            cachesDirectory: cachesDirectory
+        )
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "old")
+        XCTAssertEqual(try String(contentsOf: redoBackup, encoding: .utf8), "new")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: originalBackup.path),
+                       "第一次 swap 后，旧 backup 已被消费，不应继续存在")
+
+        // Redo：目标恢复 new，新的 backup 再次持有 old
+        let undoBackup = try ReplaceBackupManager.swapDestinationWithBackup(
+            destination: destination,
+            backupItem: redoBackup,
+            cachesDirectory: cachesDirectory
+        )
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "new")
+        XCTAssertEqual(try String(contentsOf: undoBackup, encoding: .utf8), "old")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: redoBackup.path),
+                       "Redo 完成后，上一侧 record 的 backup 应已被消费")
+    }
+
+    /// record 永久失效时，owner 调用 cleanup 应能删除 backup。
+    func testReplaceBackupManager_removeBackupsDeletesOwnedBackup() throws {
+        let cachesDirectory = try makeCachesDirectory()
+        let dst = try makeDirectory("dst")
+        let destination = dst.appendingPathComponent("a.txt")
+        try Data("old".utf8).write(to: destination)
+        let src = try writeFile("a.txt", contents: "new")
+
+        let record = try FileOperationService.safeReplaceItem(
+            from: src,
+            to: destination,
+            move: false,
+            cachesDirectory: cachesDirectory
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: record.replacedOriginalBackup.path))
+        ReplaceBackupManager.removeBackups(for: [record], cachesDirectory: cachesDirectory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: record.replacedOriginalBackup.path))
+    }
+
+    /// 启动时清理上一 session 的遗留 backup。
+    func testReplaceBackupManager_cleanupLeftoversOnLaunchRemovesPreviousSessionBackups() throws {
+        let cachesDirectory = try makeCachesDirectory()
+        let backupRoot = try ReplaceBackupManager.replaceBackupsRoot(cachesDirectory: cachesDirectory)
+        let leftoverDir = backupRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: leftoverDir, withIntermediateDirectories: true)
+        try Data("leftover".utf8).write(to: leftoverDir.appendingPathComponent("orphan.txt"))
+
+        ReplaceBackupManager.cleanupLeftoverBackupsOnLaunch(cachesDirectory: cachesDirectory)
+
+        let entries = try FileManager.default.contentsOfDirectory(atPath: backupRoot.path)
+        XCTAssertTrue(entries.isEmpty, "启动清理后不应保留上一 session 的 backup")
     }
 
     // MARK: - transfer with CollisionPolicy Tests
@@ -660,6 +771,7 @@ final class FileOperationServiceTests: XCTestCase {
 
     /// .ask + 返回 replace → 内容替换，replaceRecords 有值，原旧文件备份存在。
     func testTransferPolicy_ask_replace() throws {
+        let cachesDirectory = try makeCachesDirectory()
         let dst = try makeDirectory("dst")
         let destFile = dst.appendingPathComponent("a.txt")
         try Data("old".utf8).write(to: destFile)
@@ -669,7 +781,8 @@ final class FileOperationServiceTests: XCTestCase {
             [src],
             into: dst,
             move: false,
-            onCollision: { _, _ in (.replace, false) }
+            onCollision: { _, _ in (.replace, false) },
+            cachesDirectory: cachesDirectory
         )
 
         XCTAssertEqual(result.replaceRecords.count, 1)
@@ -679,6 +792,9 @@ final class FileOperationServiceTests: XCTestCase {
         // 备份里是旧
         let backup = try XCTUnwrap(result.replaceRecords.first?.replacedOriginalBackup)
         XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), "old")
+        // 用户目标目录旁不应出现旧方案的隐藏 backup 目录
+        let userDirContents = try FileManager.default.contentsOfDirectory(atPath: dst.path)
+        XCTAssertFalse(userDirContents.contains { $0.hasPrefix(".mqdir_replace_backup_") })
     }
 
     /// .ask + 返回 stop → 终止整批，后续不处理，userStopped=true；前面已成功的保留。
@@ -759,6 +875,7 @@ final class FileOperationServiceTests: XCTestCase {
 
     /// 第一次 .ask 返回 replace + applyToAll=true → 后续冲突直接 replace。
     func testTransferPolicy_applyReplace() throws {
+        let cachesDirectory = try makeCachesDirectory()
         let dst = try makeDirectory("dst")
         let destPaths = (1...3).map { dst.appendingPathComponent("f\($0).txt") }
         try Data("old-1".utf8).write(to: destPaths[0])
@@ -779,7 +896,8 @@ final class FileOperationServiceTests: XCTestCase {
             onCollision: { _, _ in
                 callbackCount += 1
                 return (.replace, true)
-            }
+            },
+            cachesDirectory: cachesDirectory
         )
 
         XCTAssertEqual(callbackCount, 1)
@@ -793,6 +911,43 @@ final class FileOperationServiceTests: XCTestCase {
         }
     }
 
+    /// Stop 后不应留下无主 backup；当前若已有 replace 成功，则 caches 中的 backup 数量
+    /// 应与 result.replaceRecords 数量完全一致。
+    func testTransferPolicy_stopLeavesNoOrphanBackups() throws {
+        let cachesDirectory = try makeCachesDirectory()
+        let dst = try makeDirectory("dst")
+        try Data("old-r".utf8).write(to: dst.appendingPathComponent("replace.txt"))
+        try Data("old-s".utf8).write(to: dst.appendingPathComponent("stop.txt"))
+
+        let sources = [
+            try writeFile("replace.txt", contents: "new-r"),
+            try writeFile("stop.txt", contents: "new-s"),
+            try writeFile("never.txt", contents: "never")
+        ]
+
+        let result = FileOperationService.transfer(
+            sources,
+            into: dst,
+            move: false,
+            onCollision: { source, _ in
+                if source.lastPathComponent == "replace.txt" { return (.replace, false) }
+                return (.stop, false)
+            },
+            cachesDirectory: cachesDirectory
+        )
+
+        XCTAssertTrue(result.userStopped)
+        XCTAssertEqual(result.replaceRecords.count, 1)
+        let backupRoot = try ReplaceBackupManager.replaceBackupsRoot(cachesDirectory: cachesDirectory)
+        let cacheEntries = try FileManager.default.contentsOfDirectory(
+            at: backupRoot,
+            includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(cacheEntries.count, result.replaceRecords.count,
+                       "Stop 后 caches 中只应保留仍被 result.replaceRecords 持有的 backup")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dst.appendingPathComponent("never.txt").path))
+    }
+
     /// 一次 transfer：混合「无冲突 + keepBoth + replace」，确认 successes 包含全部条目，
     /// replaceRecords 只含 replace 的项，且二者数量匹配。
     func testTransferPolicy_mixedBatch_successesAndReplaceRecordsMatch() throws {
@@ -800,7 +955,7 @@ final class FileOperationServiceTests: XCTestCase {
         try Data("old".utf8).write(to: dst.appendingPathComponent("r.txt")) // replace 目标
         try Data("old".utf8).write(to: dst.appendingPathComponent("k.txt")) // keepBoth 目标
 
-        var decisions: [String: FileOperationService.CollisionDecision] = [
+        let decisions: [String: FileOperationService.CollisionDecision] = [
             "r.txt": .replace,
             "k.txt": .keepBoth,
         ]

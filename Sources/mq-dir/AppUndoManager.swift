@@ -153,16 +153,13 @@ public final class AppUndoManager: ObservableObject {
     // MARK: - 备份目录清理
 
     /// 当一条 Undo/Redo 记录彻底出栈（溢出/clear）时，
-    /// 同步删除它携带的所有 replace 备份目录（.mqdir_replace_backup_*）。
+    /// 同步删除它携带的所有 replace 备份目录。
+    ///
+    /// 这里不关心 backup 具体存在哪，只根据 ReplaceRecord 里持有的 backup URL
+    /// 交给 ReplaceBackupManager 清理。这样 Undo/Redo 数据模型保持不变，
+    /// 只替换了 backup 的物理存储位置和生命周期执行者。
     private func cleanupReplaceBackupDirectories(in op: UndoableFileOperation) {
-        for record in op.replaceRecords {
-            let backupURL = record.replacedOriginalBackup
-            let backupDir = backupURL.deletingLastPathComponent()
-            // 备份目录名以 ".mqdir_replace_backup_" 开头才删，避免误删
-            if backupDir.lastPathComponent.hasPrefix(".mqdir_replace_backup_") {
-                try? FileManager.default.removeItem(at: backupDir)
-            }
-        }
+        ReplaceBackupManager.removeBackups(for: op.replaceRecords)
     }
 
     /// 清空全部撤销/重做栈（同时清理所有备份目录）
@@ -210,7 +207,6 @@ public final class AppUndoManager: ObservableObject {
     ) -> [FileOperationService.ReplaceRecord] {
         var redoRecords: [FileOperationService.ReplaceRecord] = []
         let fm = FileManager.default
-        let stamp = Int(Date().timeIntervalSince1970)
 
         for record in records {
             // isUndo=true:  currentDestination 是新内容，要换成旧内容（record.replacedOriginalBackup）
@@ -223,33 +219,15 @@ public final class AppUndoManager: ObservableObject {
             let oppositeBackup = record.replacedOriginalBackup
             guard fm.fileExists(atPath: oppositeBackup.path) else { continue }
 
-            // 阶段 A：把当前 destination 移到一个新的临时备份目录（供对端栈使用）
-            let destFolder = currentDest.deletingLastPathComponent()
-            let tempDirName = ".mqdir_replace_backup_\(stamp)_\(UUID().uuidString.prefix(6))"
-            let tempDir = destFolder.appendingPathComponent(tempDirName, isDirectory: true)
-            do { try fm.createDirectory(at: tempDir, withIntermediateDirectories: true) } catch { continue }
-            let tempBackup = tempDir.appendingPathComponent(currentDest.lastPathComponent)
+            let tempBackup: URL
             do {
-                try fm.moveItem(at: currentDest, to: tempBackup)
+                tempBackup = try ReplaceBackupManager.swapDestinationWithBackup(
+                    destination: currentDest,
+                    backupItem: oppositeBackup,
+                    fileManager: fm
+                )
             } catch {
-                try? fm.removeItem(at: tempDir)
                 continue
-            }
-
-            // 阶段 B：把 oppositeBackup 移回 destination
-            do {
-                try fm.moveItem(at: oppositeBackup, to: currentDest)
-            } catch {
-                // 失败：回滚阶段 A（把 tempBackup 移回 destination），丢弃 tempDir
-                try? fm.moveItem(at: tempBackup, to: currentDest)
-                try? fm.removeItem(at: tempDir)
-                continue
-            }
-
-            // 阶段 C：清理 oppositeBackup 的父目录（它里面已经空了）
-            let oppositeDir = oppositeBackup.deletingLastPathComponent()
-            if oppositeDir.lastPathComponent.hasPrefix(".mqdir_replace_backup_") {
-                try? fm.removeItem(at: oppositeDir)
             }
 
             // 构造对端栈使用的 ReplaceRecord：source 保持不变，backup 指向新的 tempBackup

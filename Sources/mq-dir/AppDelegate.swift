@@ -17,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var mainWindowController: MainWindowController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Replace backup 的 Undo 明确只支持当前 mq-dir 会话，因此每次启动都先清理
+        // 上一会话残留在 ~/Library/Caches/mq-dir/replace-backups/ 下的全部 backup。
+        // 这样即使上次崩溃或被强制退出，也不会把旧 backup 永久遗留在磁盘上。
+        ReplaceBackupManager.cleanupLeftoverBackupsOnLaunch()
+
         // 1. 构造唯一主窗口控制器并注入三个依赖。
         mainWindowController = MainWindowController(
             workspace: workspace,
@@ -70,6 +75,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 原逻辑来自 mqdirApp.init() 里的 willTerminateNotification 监听，
     /// 挪到 AppDelegate 更符合 AppKit 的设计惯例。
     func applicationWillTerminate(_ notification: Notification) {
+        // 当前会话不支持跨重启 Undo，因此退出前直接清空 Undo/Redo 栈并释放仍被
+        // record 持有的 replace backup。随后再做一次全量扫尾，确保异常状态下没有
+        // 留下本会话的孤儿 backup。
+        AppUndoManager.shared.clear()
+        ReplaceBackupManager.cleanupAllBackups()
         NotificationCenter.default.post(name: .mqdirAppWillTerminate, object: nil)
     }
 }
