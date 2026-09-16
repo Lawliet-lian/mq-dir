@@ -350,6 +350,10 @@
 "mqdir.breadcrumb.openInFinder" = "在访达中打开";
 "mqdir.breadcrumb.openFolder" = "打开文件夹…";
 
+// 新增：面包屑分段按钮的无障碍标签
+"mqdir.breadcrumb.segmentAccessibility" = "打开文件夹“%@”";
+"mqdir.breadcrumb.currentSegmentAccessibility" = "当前文件夹：%@";
+
 // 新增：杂项（视图模式 tooltip / 展开折叠 / 侧边栏默认收藏夹 / 选择文件夹面板 / 空面板占位符）
 "mqdir.misc.listView" = "列表视图";
 "mqdir.misc.treeView" = "树形视图";

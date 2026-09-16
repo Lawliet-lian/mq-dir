@@ -361,25 +361,64 @@ struct MainWindowView: View {
         .background(Theme.Color.toolbarBg)
     }
 
+    /// Finder 风格的分段面包屑：
+    /// - 每一段路径渲染为独立的胶囊按钮（图标 + 显示名）
+    /// - 显示名使用 FileManager.displayName（如「资源库」而非 Library），
+    ///   真实跳转 URL 仍基于 pathComponents 从 folderURL 截断生成，避免本地化
+    ///   名称影响真实路径。
+    /// - 点击任一路径段统一调用 focusedPane.openFolder(_:)，确保 Back/Forward
+    ///   历史栈按既有机制工作；不直接写 folderURL，也不直调 navigate(to:)。
+    /// - Hover 时每段独立高亮背景；最后一段（当前目录）视觉上做强调。
+    /// - “打开文件夹…”入口保留在：左侧显式小按钮 + 右键菜单 + 菜单栏文件->打开文件夹，
+    ///   不再对整块面包屑使用 simultaneousGesture，避免点击分段时误触 NSOpenPanel。
     private var breadcrumb: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
+            // 显式 chooseFolder 入口：替代原先的“整块空白点击”，避免与分段按钮冲突。
+            // 右键菜单里仍保留“打开文件夹…”，并且菜单栏 File > Open Folder 走命令链，
+            // 所以“文件->打开文件夹”的可达性不退化。
+            Button {
+                focusedPane.chooseFolder()
+            } label: {
+                Image(systemName: "folder")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.Color.labelSecondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L("mqdir.breadcrumb.openFolder"))
+
             if let url = focusedPane.folderURL {
                 let components = url.pathComponents.filter { $0 != "/" }
                 if components.isEmpty {
-                    Text(L("mqdir.main.breadcrumbSep")).font(Theme.Font.breadcrumb).foregroundStyle(Theme.Color.label)
+                    Text(L("mqdir.main.breadcrumbSep"))
+                        .font(Theme.Font.breadcrumb)
+                        .foregroundStyle(Theme.Color.label)
                 } else {
-                    ForEach(Array(components.enumerated()), id: \.offset) { idx, name in
+                    // 预先为每一段计算真实跳转 URL，基于 pathComponents 前缀拼接，
+                    // 保证与显示名解耦。
+                    let segmentURLs = buildSegmentURLs(from: url, components: components)
+                    ForEach(Array(components.enumerated()), id: \.offset) { idx, _ in
+                        let isLast = idx == components.count - 1
+                        let segmentURL = segmentURLs[idx]
                         if idx > 0 {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 9))
                                 .foregroundStyle(Theme.Color.labelTertiary)
+                                .padding(.horizontal, 1)
                         }
-                        Text(name)
-                            .font(Theme.Font.breadcrumb)
-                            .foregroundStyle(idx == components.count - 1
-                                             ? Theme.Color.label
-                                             : Theme.Color.labelSecondary)
-                            .lineLimit(1)
+                        breadcrumbSegment(
+                            title: FileManager.default.displayName(atPath: segmentURL.path),
+                            icon: segmentSymbol(for: segmentURL, idx: idx),
+                            isCurrent: isLast
+                        ) {
+                            // 只在跳转到不同目录时才走 openFolder，
+                            // 避免在当前目录上 self-click 无谓清空 forwardStack。
+                            if segmentURL.standardizedFileURL != url.standardizedFileURL {
+                                focusedPane.openFolder(segmentURL)
+                            }
+                        }
+                        .layoutPriority(isLast ? 1 : 0)
                     }
                 }
             } else {
@@ -387,19 +426,80 @@ struct MainWindowView: View {
                     .font(Theme.Font.breadcrumb)
                     .foregroundStyle(Theme.Color.labelTertiary)
             }
-            Spacer(minLength: 0)
+
+            Spacer(minLength: 4)
             breadcrumbCopyButton
         }
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, minHeight: 22, maxHeight: 22)
-        .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 5))
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .strokeBorder(Theme.Color.separator, lineWidth: 0.5)
-        )
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, minHeight: 24, maxHeight: 24)
         .contentShape(Rectangle())
-        .onTapGesture { focusedPane.chooseFolder() }
         .contextMenu { breadcrumbContextMenu }
+    }
+
+    /// 将 folderURL 的 pathComponents 映射为每一段对应的绝对路径 URL。
+    ///
+    /// 之所以不直接用 displayName 去拼接路径：displayName 只用于 UI 展示，
+    /// 本地化后可能与磁盘实际路径不一致；真实跳转必须仍由原始 URL 推导。
+    private func buildSegmentURLs(from url: URL, components: [String]) -> [URL] {
+        var base = URL(fileURLWithPath: "/", isDirectory: true)
+        var results: [URL] = []
+        for component in components {
+            base = base.appendingPathComponent(component, isDirectory: true)
+            results.append(base)
+        }
+        // 兜底：若 components 非空但结果长度不匹配，直接返回原始 URL 的父级链，
+        // 防止极端路径（如 symlink root 或卷名路径）导致 segment 点击失准。
+        if results.count == components.count {
+            return results
+        }
+        var fallback: [URL] = []
+        var cursor = url
+        for _ in components {
+            fallback.insert(cursor, at: 0)
+            cursor = cursor.deletingLastPathComponent()
+        }
+        return fallback
+    }
+
+    /// 根据段索引和段 URL 决定面包屑图标：
+    /// - 首段若为卷根（或挂载在 / 下的顶层目录），使用磁盘图标；
+    /// - 其余段默认使用文件夹图标。
+    private func segmentSymbol(for url: URL, idx: Int) -> String {
+        if idx == 0 {
+            // 通过 FileManager 获取卷信息；若获取失败退回默认文件夹图标，保持展示不崩。
+            // 注意：URLResourceValues 没有 parentDirectoryURL 成员，父级路径
+            // 直接使用 URL.deletingLastPathComponent() 推导即可。
+            let values = try? url.resourceValues(forKeys: [.volumeIsRootFileSystemKey])
+            if let isRoot = values?.volumeIsRootFileSystem, isRoot {
+                return "internaldrive"
+            }
+            // 首段父级 == / 时视作挂载根卷，同样使用磁盘图标更贴近 Finder 视觉。
+            let parentPath = url.deletingLastPathComponent().standardizedFileURL.path
+            if parentPath == "/" {
+                return "internaldrive"
+            }
+        }
+        return "folder.fill"
+    }
+
+    /// 渲染单段面包屑按钮：
+    /// - 独立圆角胶囊背景 + hover 高亮；
+    /// - 当前目录段使用更重的背景色和更明显的前景色，匹配 Finder 的强调方式；
+    /// - 图标与文字紧凑对齐，避免占用过多横向空间。
+    @ViewBuilder
+    private func breadcrumbSegment(
+        title: String,
+        icon: String,
+        isCurrent: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        BreadcrumbSegmentButton(
+            title: title,
+            icon: icon,
+            isCurrent: isCurrent,
+            action: action
+        )
     }
 
     /// Trailing clipboard glyph that copies the current folder's POSIX
@@ -986,6 +1086,89 @@ private final class SidebarInitialWidthNSView: NSView {
             current = view.superview
         }
         return nil
+    }
+}
+
+// MARK: - Finder 风格面包屑分段按钮
+//
+// 每一段路径独立渲染为一个带 hover 的胶囊，点击时只触发业务传入的 action。
+// 注意：该子视图不直接触碰 folderURL，也不直调 navigate(to:)；
+// 历史栈写入由外部调用 focusedPane.openFolder(_:) 负责，确保 Back/Forward
+// 按既有 FolderBrowserViewModel 机制工作。
+private struct BreadcrumbSegmentButton: View {
+    let title: String
+    let icon: String
+    let isCurrent: Bool
+    let action: () -> Void
+
+    /// Hover 状态使用本地 @State 跟踪，避免每一小段都升级成 ObservableObject；
+    /// 在列表环境下这种 per-view 轻量状态不会与其他 segment 互相污染。
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(isCurrent
+                                     ? Theme.Color.label
+                                     : Theme.Color.labelSecondary)
+                Text(title)
+                    .font(Theme.Font.breadcrumb)
+                    .foregroundStyle(isCurrent
+                                     ? Theme.Color.label
+                                     : Theme.Color.labelSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(segmentBackgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .strokeBorder(segmentBorderColor, lineWidth: 0.5)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            // 即使最后一段不导航，也保留 hover 反馈，使视觉更贴近 Finder。
+            isHovering = hovering
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            isCurrent
+            ? L("mqdir.breadcrumb.currentSegmentAccessibility", title)
+            : L("mqdir.breadcrumb.segmentAccessibility", title)
+        )
+    }
+
+    /// 根据是否 hover / 是否当前段，返回背景色：
+    /// - 当前目录：略微更重的强调背景，用于让用户一眼看到当前所处位置；
+    /// - hover 中的非当前段：接近 rowHover 的浅色高亮；
+    /// - 默认：透明，避免未交互时面包屑显得“满屏都是胶囊”。
+    private var segmentBackgroundColor: SwiftUI.Color {
+        if isCurrent {
+            return Theme.Color.selectionInactive.opacity(0.55)
+        }
+        if isHovering {
+            return Theme.Color.rowHover.opacity(1.0)
+        }
+        return .clear
+    }
+
+    /// 边框色只在 hover 或当前段时轻微显现，保持未交互时简洁。
+    private var segmentBorderColor: SwiftUI.Color {
+        if isCurrent {
+            return Theme.Color.separator.opacity(0.8)
+        }
+        if isHovering {
+            return Theme.Color.separator.opacity(0.6)
+        }
+        return .clear
     }
 }
 
