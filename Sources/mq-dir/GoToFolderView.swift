@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 /// 本地化为 GoToFolderView 提供的小型帮助函数，与 MainWindowView 保持同一套格式。
 private func L(_ key: String, _ args: CVarArg...) -> String {
@@ -8,85 +9,48 @@ private func L(_ key: String, _ args: CVarArg...) -> String {
     return String(format: format, arguments: args)
 }
 
-/// 会话级最近使用路径记录：
-/// - 成功跳转的标准绝对 POSIX 路径会写入 entries；
-/// - 失败路径不入库；重复路径移到最前；始终最多保留 maximumEntryCount 条；
-/// - entries 同时薄持久化到 UserDefaults，保证 App 重启后最近使用仍在。
-/// 这层持久化只影响「前往文件夹」的最近列表，不改动 Back / Forward 历史栈。
+/// 「前往文件夹…」面板使用的最近使用历史薄封装：
+/// - 实际数据与持久化完全交由全局 `RecentFoldersStore.shared` 负责；
+/// - 通过 Combine 订阅 store 的 items 变化，投影到本对象的 `entries`；
+/// - 保持对外 API（record(absolutePath:) / clear() / entries）与旧版本一致，
+///   让 MainWindowView 与 GoToFolderView 几乎无需改动即可共用一份数据。
 final class GoToFolderHistory: ObservableObject {
-    /// UserDefaults 中存储最近路径列表的 key，集中定义，避免其他地方重复字符串。
-    /// 命名空间与本地化 key 保持一致：mqdir.goToFolder.*
-    static let defaultsKey = "mqdir.goToFolder.recentPaths"
+    /// 允许保留的最大条数，直接复用 store 的统一上限，避免重复魔法数字。
+    static let maximumEntryCount = RecentFoldersStore.maximumItemCount
 
-    /// 允许保留的最大条数，与 Finder 最近使用区的视觉大小相近，
-    /// 同时也是持久化回读时的上限夹取值。
-    static let maximumEntryCount = 10
-
+    /// 投影自 `RecentFoldersStore.shared.items`，始终保持同步。
     @Published private(set) var entries: [String] = []
 
-    /// 初始化时从 UserDefaults 同步恢复一次最近使用列表：
-    /// - 读不到或读到空数组时，entries 保持空；
-    /// - 读到异常长数组（例如旧版本或手动改了 plist）时裁剪到上限，
-    ///   保证 UI 列表与 record 规则一致。
-    init() {
-        let defaults = UserDefaults.standard
-        if let stored = defaults.stringArray(forKey: Self.defaultsKey) {
-            // 轻量防御：去空白 + 过滤空串 + 裁剪上限。
-            let cleaned = stored
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            entries = Array(cleaned.prefix(Self.maximumEntryCount))
-        }
+    private let store: RecentFoldersStore
+    private var cancellable: AnyCancellable?
+
+    /// 允许外部注入 store（默认使用单例），方便未来单元测试替换，
+    /// 但默认路径直接与菜单共享同一份全局最近文件夹数据。
+    init(store: RecentFoldersStore = .shared) {
+        self.store = store
+        // 首帧同步最新值，避免 SwiftUI 第一次渲染拿到空数组再抖一下。
+        entries = store.items
+        cancellable = store
+            .$items
+            .receive(on: RunLoop.main)
+            .sink { [weak self] newItems in
+                self?.entries = newItems
+            }
     }
 
-    /// 追加一条最近使用路径：
-    /// - 去除首尾空格和换行；
-    /// - 空串不入库；
-    /// - 已存在的重复项先移除，再插入到最前面；
-    /// - 超出 maximumEntryCount 时裁剪尾部；
-    /// - 内存更新完成后立即同步到 UserDefaults。
+    /// 成功提交绝对路径时调用：桥接到 store 的 recordFolder。
+    /// 入参仍然是绝对 POSIX 路径，和旧外部调用点保持一致。
     func record(absolutePath path: String) {
         let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return }
-        var copy = entries
-        if let existingIndex = copy.firstIndex(of: normalized) {
-            copy.remove(at: existingIndex)
-        }
-        copy.insert(normalized, at: 0)
-        if copy.count > Self.maximumEntryCount {
-            copy.removeLast(copy.count - Self.maximumEntryCount)
-        }
-        entries = copy
-        persist()
+        let url = URL(fileURLWithPath: normalized, isDirectory: true)
+        store.recordFolder(url)
     }
 
-    /// 清空最近使用：
-    /// - 立即清空 entries 并刷新 UI；
-    /// - 同步删除 UserDefaults 中对应的 key；
-    /// - 只作用于「前往文件夹」的最近使用列表，不触碰 Back / Forward。
+    /// 清空最近使用：直接调用 store.clear()，
+    /// 菜单与 ⇧⌘G 面板会同步清空（策略 A：共用同一份最近文件夹历史）。
     func clear() {
-        guard !entries.isEmpty else {
-            // entries 已经为空仍顺手删一次 key，保证极端场景（比如 plist
-            // 里残留了脏数据但 entries 被外部置空）不会留下孤儿数据。
-            UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
-            return
-        }
-        entries = []
-        UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
-    }
-
-    // MARK: - Privates
-
-    /// 把当前 entries 原样写入 UserDefaults：
-    /// 调用方保证 entries 已裁剪到 maximumEntryCount，这里不再重复过滤，
-    /// 保持 record/clear 与持久化写入路径唯一，减少条件分叉。
-    private func persist() {
-        let defaults = UserDefaults.standard
-        if entries.isEmpty {
-            defaults.removeObject(forKey: Self.defaultsKey)
-        } else {
-            defaults.set(entries, forKey: Self.defaultsKey)
-        }
+        store.clear()
     }
 }
 

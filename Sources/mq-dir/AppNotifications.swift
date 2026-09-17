@@ -26,6 +26,10 @@ enum AppCommand: Equatable {
     /// 文件 → 前往文件夹…(⇧⌘G)：弹出 POSIX 路径输入面板，成功时仍然走
     /// focusedPane.openFolder(_:) 进入历史栈，不直写 folderURL / 不直调 navigate。
     case goToFolder
+    /// 菜单栏「最近使用的文件夹 ▸」用户点击某条记录：由 MainWindowView 接收
+    /// 后调用 focusedPane.openFolder(_:)，保证仍进入 Back/Forward 历史栈；
+    /// 不直写 folderURL，不直调 navigate，不动 backStack/forwardStack。
+    case openRecentFolder(url: URL)
     /// Add the focused pane's current folder to the sidebar Favorites list.
     case addCurrentFolderToFavorites
     /// Toggle the right-side preview panel for the focused pane's active tab.

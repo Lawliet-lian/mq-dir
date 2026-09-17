@@ -11,6 +11,9 @@ private func L(_ key: String, _ args: CVarArg...) -> String {
 struct MenuCommands: Commands {
     @ObservedObject var workspace: WorkspaceManager
     @ObservedObject private var undoManager = AppUndoManager.shared
+    /// 与 MainWindowView / GoToFolderView 共用同一份最近使用的文件夹：
+    /// - 共享 store 意味着菜单与 ⇧⌘G 面板展示的最近列表、clear 行为完全一致。
+    @ObservedObject private var recentFolders = RecentFoldersStore.shared
 
     /// Resolved binding for a customisable action — user override
     /// from `WorkspaceSettings`, falling back to the default. Used
@@ -32,6 +35,53 @@ struct MenuCommands: Commands {
             // Back/Forward 历史栈一致，不直写 folderURL / 直调 navigate。
             Button(L("mqdir.menu.file.goToFolder")) { post(.goToFolder) }
                 .keyboardShortcut("G", modifiers: [.command, .shift])
+            // 文件 → 最近使用的文件夹 ▸：与 ⇧⌘G 面板共用同一份最近文件夹列表。
+            // - 每一项显示文件夹图标 + 本地化显示名，tooltip 显示真实绝对路径；
+            // - 目录不存在时禁用该项；
+            // - 子菜单底部提供「清除菜单」，同步清内存与 UserDefaults，
+            //   且不影响 Back/Forward（只作用于最近使用的文件夹这份列表）；
+            // - 点击某一项时，发 AppCommand.openRecentFolder(url)，由 MainWindowView
+            //   的 NavigationNotifications 路由到当前 focusedPane，最终仍调用
+            //   focusedPane.openFolder(url)，保持历史栈机制不重写。
+            Menu {
+                if recentFolders.items.isEmpty {
+                    Button(L("mqdir.menu.file.recentFolders.none")) { }
+                        .disabled(true)
+                } else {
+                    ForEach(Array(recentFolders.items.enumerated()), id: \.offset) { _, path in
+                        let displayName = recentFolders.displayName(forPath: path)
+                        let isEnabled = recentFolders.isDirectoryExisting(path)
+                        Button {
+                            Task { @MainActor in
+                                let url = URL(fileURLWithPath: path, isDirectory: true)
+                                // 菜单点击属于“用户主动导航”：先记录最近（recordFolder 自带幂等，移到最前）
+                                RecentFoldersStore.shared.recordFolder(url)
+                                // 通过 AppCommand 单通道发给 MainWindowView，
+                                // 最终会在 focusedPane.openFolder(url) 上执行，
+                                // 历史栈机制与面包屑/⇧⌘G 完全一致。
+                                AppCommand.openRecentFolder(url: url).post()
+                            }
+                        } label: {
+                            Label {
+                                Text(displayName)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            } icon: {
+                                Image(systemName: "folder.fill")
+                            }
+                        }
+                        .disabled(!isEnabled)
+                        .help(path)
+                    }
+                    Divider()
+                    Button(L("mqdir.menu.file.recentFolders.clear")) {
+                        // 只清最近使用的文件夹这份记录，不动 Back/Forward 栈。
+                        recentFolders.clear()
+                    }
+                }
+            } label: {
+                Label(L("mqdir.menu.file.recentFolders"), systemImage: "clock.arrow.circlepath")
+            }
             Button(L("mqdir.menu.file.openSelected")) { post(.openSelected) }
                 .keyboardShortcut(.return, modifiers: [])
             Divider()

@@ -195,6 +195,12 @@ struct BrowserPaneView: View {
     @EnvironmentObject private var workspace: WorkspaceManager
     let isFocused: Bool
     let onFocus: () -> Void
+    /// 可选回调：当用户点击空态按钮「打开文件夹…」时优先调用此闭包，
+    /// 让外层 MainWindowView 有机会先写 expectedNavigationFrame，
+    /// 再触发 viewModel.chooseFolder()，从而把 NSOpenPanel 成功的目录
+    /// 纳入最近使用的文件夹记录（不用改 FolderBrowserViewModel）。
+    /// 传 nil 时退化为直接调 viewModel.chooseFolder()。
+    var onChooseFolder: (() -> Void)? = nil
 
     /// Live "normalise Hangul filenames to NFC on drag out" preference,
     /// read off the workspace settings and handed to the drag-source
@@ -1165,7 +1171,13 @@ struct BrowserPaneView: View {
             Text(L("mqdir.browser.empty.openFolder"))
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.Color.labelSecondary)
-            Button(L("mqdir.browser.empty.openFolderButton")) { viewModel.chooseFolder() }
+            Button(L("mqdir.browser.empty.openFolderButton")) {
+                if let handler = onChooseFolder {
+                    handler()
+                } else {
+                    viewModel.chooseFolder()
+                }
+            }
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1389,6 +1401,12 @@ struct BrowserPaneView: View {
             if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
                 AppCommand.openURLInNewTab(url: entry.url).post()
             } else {
+                // 双击目录进入属于「用户主动导航」，记录到最近使用的文件夹。
+                // recordFolder 自带幂等（重复条目只移到最前），即使外层
+                // $folderURL 观察器也触发一次 record 也不会产生重复。
+                if entry.isDirectory {
+                    RecentFoldersStore.shared.recordFolder(entry.url)
+                }
                 viewModel.open(entry)
             }
         }
@@ -1451,6 +1469,10 @@ struct BrowserPaneView: View {
                 }
             },
             onDoubleClick: { _ in
+                // 窗口未激活状态下双击某行：如果是目录，也同样记录到最近文件夹。
+                if entry.isDirectory {
+                    RecentFoldersStore.shared.recordFolder(entry.url)
+                }
                 viewModel.open(entry)
             }
         )

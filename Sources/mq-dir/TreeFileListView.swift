@@ -242,6 +242,8 @@ struct TreeFileListView: View {
             if NSEvent.modifierFlags.contains(.command), entry.isDirectory {
                 AppCommand.openURLInNewTab(url: entry.url).post()
             } else if entry.isDirectory {
+                // 双击进入子目录属于「用户主动导航」，写入最近使用的文件夹。
+                RecentFoldersStore.shared.recordFolder(entry.url)
                 viewModel.openFolder(entry.url)
             } else {
                 viewModel.open(entry)
@@ -283,6 +285,8 @@ struct TreeFileListView: View {
             },
             onDoubleClick: { _ in
                 if entry.isDirectory {
+                    // 窗口未激活时双击目录：同样记录到最近文件夹。
+                    RecentFoldersStore.shared.recordFolder(entry.url)
                     viewModel.openFolder(entry.url)
                 } else {
                     viewModel.open(entry)

@@ -11,12 +11,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let updateManager = UpdateManager()
     let repoCallout = RepoCalloutController()
 
+    /// 与 Settings Scene / MenuCommands（Commands）共享的 AppDelegate 单例。
+    /// MenuCommands 在 SwiftUI Commands 上下文中拿不到显式注入，
+    /// 因此提供一个共享指针，保证 menu 最近使用的文件夹条目与
+    /// MainWindowController 使用的 focusedPane / 最近使用的文件夹 store 一致。
+    static private(set) weak var shared: AppDelegate!
+
     // MARK: - 主窗口控制器
     // ⚠️ 强引用，保证 App 生命周期内 MainWindowController 与 NSWindow 不被释放。
     // 产品语义上整个 App 只有这一个 MainWindowController 实例。
     var mainWindowController: MainWindowController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 设置共享指针，供 Settings Scene / MenuCommands 使用。
+        // 放在 applicationDidFinishLaunching 的最前面，保证后续代码
+        // （构造主窗口、显示、打开项目等）触发的菜单刷新都能拿到 delegate。
+        Self.shared = self
+
         // Replace backup 的 Undo 明确只支持当前 mq-dir 会话，因此每次启动都先清理
         // 上一会话残留在 ~/Library/Caches/mq-dir/replace-backups/ 下的全部 backup。
         // 这样即使上次崩溃或被强制退出，也不会把旧 backup 永久遗留在磁盘上。

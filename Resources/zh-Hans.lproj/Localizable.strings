@@ -385,3 +385,8 @@
 "mqdir.favorites.pictures" = "图片";
 "mqdir.favorites.movies" = "影片";
 "mqdir.favorites.music" = "音乐";
+
+// 新增：文件菜单 → 最近使用的文件夹 ▸（与 ⇧⌘G 前往文件夹面板共用同一份最近历史数据）
+"mqdir.menu.file.recentFolders" = "最近使用的文件夹";
+"mqdir.menu.file.recentFolders.none" = "（无）";
+"mqdir.menu.file.recentFolders.clear" = "清除菜单";

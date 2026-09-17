@@ -385,3 +385,8 @@
 "mqdir.favorites.pictures" = "Pictures";
 "mqdir.favorites.movies" = "Movies";
 "mqdir.favorites.music" = "Music";
+
+// 新增：File menu → Recent Folders submenu (shares data with ⇧⌘G Go to Folder panel recents)
+"mqdir.menu.file.recentFolders" = "Recent Folders";
+"mqdir.menu.file.recentFolders.none" = "(None)";
+"mqdir.menu.file.recentFolders.clear" = "Clear Menu";

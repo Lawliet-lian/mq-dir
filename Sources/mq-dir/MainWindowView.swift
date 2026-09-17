@@ -233,6 +233,8 @@ struct MainWindowView: View {
                 }
             ) { url in
                 guard FileManager.default.fileExists(atPath: url.path) else { return }
+                // 侧边栏收藏夹/位置点击属于主动导航，记录到最近使用的文件夹。
+                RecentFoldersStore.shared.recordFolder(url)
                 focusedPane.openFolder(url)
             }
             .frame(minWidth: 0, idealWidth: configuredSidebarDefaultWidth, maxWidth: 280)
@@ -253,6 +255,56 @@ struct MainWindowView: View {
             }
             .background(Theme.Color.windowBg)
         }
+        // 监听 focusedPane 当前目录的变化，做两件“完全在 UI 层”的事情：
+        // 1) 覆盖所有用户主动导航路径（chooseFolder 成功选目录、双击目录进入、
+        //    ⌘O 打开面板等）写入最近使用的文件夹，无需改 FolderBrowserViewModel；
+        // 2) 严格过滤掉 Back / Forward / 启动恢复 / 内部 restore / 切换 tab 等
+        //    非主动导航，避免污染最近使用。
+        // 注意：MainWindowView 是值类型 struct，闭包里不能用 [weak self]；
+        // SwiftUI 的 View 都是轻量值结构，直接捕获 self 不会形成引用环。
+        .onReceive(focusedPane.$folderURL) { newURL in
+            handleFocusedPaneFolderDidChange(newURL)
+        }
+    }
+
+    // MARK: - 最近文件夹记录（UI 层，不进 FolderBrowserViewModel）
+
+    /// `focusedPane.$folderURL` 的去重与“主动导航”识别：
+    /// - 面包屑点击、⌘↑、侧边栏点击、⇧⌘G 已经在调用 openFolder 之前手动 record，
+    ///   这里作为兜底再 record 一次（recordFolder 自带幂等，只是把条目移到最前）；
+    /// - chooseFolder / 双击目录进入 / ⌘O 打开面板 等入口，外层拿不到成功回调，
+    ///   全部靠 `RecentFoldersStore.expectOpenFolderNavigation(to:tabID:)` 与
+    ///   两栈计数共同判定是否属于「用户主动新导航」；
+    /// - Back / Forward / 切换 Tab / 启动恢复 会被命中为回访导航或无期望，
+    ///   不会写入最近使用。
+    ///
+    /// 注意：所有 tab 独立维护自己的 backStack/forwardStack，所以这里的计数 key 使用
+    /// `ObjectIdentifier(focusedPane)`（即每个 FolderBrowserViewModel 的身份），
+    /// 而不是 pane 或 tab group 的 id，避免切 tab 时把历史栈计数错套到另一个 tab。
+    @MainActor
+    private func handleFocusedPaneFolderDidChange(_ newURL: URL?) {
+        let tabID = ObjectIdentifier(focusedPane)
+        let (back, forward) = RecentFoldersStore.shared.consumeExpectedAndRecordIfNeeded(
+            folderURL: newURL,
+            tabID: tabID,
+            currentBackCount: focusedPane.backStack.count,
+            currentForwardCount: focusedPane.forwardStack.count
+        )
+        RecentFoldersStore.shared.lastBackStackCountByTab[tabID] = back
+        RecentFoldersStore.shared.lastForwardStackCountByTab[tabID] = forward
+    }
+
+    /// 在调用 `focusedPane.openFolder(_:)` 之前，把“期望下一次主动导航会到达的 URL”
+    /// 先记下来。只有随后 `$folderURL` 正好等于这个期望值，才会被视为“用户主动新导航”
+    /// 并记录最近使用；chooseFolder() 这种“外层拿不到成功 URL”的场景，传入
+    /// `RecentFoldersStore.chooseFolderPlaceholderURL` 表示「接受下一次 folderURL
+    /// 变更为任何真实目录」，无需改 FolderBrowserViewModel。
+    @MainActor
+    private func expectOpenFolderNavigation(to targetURL: URL) {
+        RecentFoldersStore.shared.expectOpenFolderNavigation(
+            to: targetURL,
+            tabID: ObjectIdentifier(focusedPane)
+        )
     }
 
     // MARK: Persistence wiring
@@ -332,8 +384,18 @@ struct MainWindowView: View {
                 .disabled(!focusedPane.canGoBack)
             ToolbarIconButton(symbol: "chevron.right", help: "Forward (⌘])") { focusedPane.goForward() }
                 .disabled(!focusedPane.canGoForward)
-            ToolbarIconButton(symbol: "chevron.up", help: "Parent Folder (⌘↑)") { focusedPane.openParentFolder() }
-                .disabled(focusedPane.folderURL == nil)
+            ToolbarIconButton(symbol: "chevron.up", help: "Parent Folder (⌘↑)") {
+                if let current = focusedPane.folderURL {
+                    let parentURL = current.deletingLastPathComponent()
+                    guard parentURL != current else { return }
+                    // 先记录最近文件夹（等同于“用户主动发起了一次上级目录导航”），
+                    // 再走 focusedPane.openParentFolder()，后者内部仍只调 openFolder，
+                    // 保持 Back/Forward 实现不改。
+                    RecentFoldersStore.shared.recordFolder(parentURL)
+                    focusedPane.openParentFolder()
+                }
+            }
+            .disabled(focusedPane.folderURL == nil)
             ToolbarIconButton(symbol: "arrow.clockwise", help: "Reload (⌘R)") { focusedPane.reload() }
                 .disabled(focusedPane.folderURL == nil)
 
@@ -422,6 +484,8 @@ struct MainWindowView: View {
             // 右键菜单里仍保留“打开文件夹…”，并且菜单栏 File > Open Folder 走命令链，
             // 所以“文件->打开文件夹”的可达性不退化。
             Button {
+                // 先写 placeholder 期望：接受下一次 folderURL 变更（不管真实路径是什么）为主动导航。
+                expectOpenFolderNavigation(to: RecentFoldersStore.chooseFolderPlaceholderURL)
                 focusedPane.chooseFolder()
             } label: {
                 Image(systemName: "folder")
@@ -460,6 +524,8 @@ struct MainWindowView: View {
                             // 只在跳转到不同目录时才走 openFolder，
                             // 避免在当前目录上 self-click 无谓清空 forwardStack。
                             if segmentURL.standardizedFileURL != url.standardizedFileURL {
+                                // 用户主动点击面包屑段属于“主动导航”，记录最近文件夹。
+                                RecentFoldersStore.shared.recordFolder(segmentURL)
                                 focusedPane.openFolder(segmentURL)
                             }
                         }
@@ -587,7 +653,11 @@ struct MainWindowView: View {
             .disabled(focusedPane.folderURL == nil)
         Divider()
         // 弹出 NSOpenPanel 让用户选择新文件夹打开
-        Button(L("mqdir.breadcrumb.openFolder")) { focusedPane.chooseFolder() }
+        Button(L("mqdir.breadcrumb.openFolder")) {
+            // 先写 placeholder 期望：接受下一次 folderURL 变更为任意真实目录。
+            expectOpenFolderNavigation(to: RecentFoldersStore.chooseFolderPlaceholderURL)
+            focusedPane.chooseFolder()
+        }
     }
 
     private var searchField: some View {
@@ -886,8 +956,16 @@ struct MainWindowView: View {
             index: index,
             paneVM: paneVM(at: index),
             isFocused: focusedPaneIndex == index
-        ) {
+        ) { [self] in
             focusedPaneIndex = index
+        } onChooseFolder: { [self] in
+            // 空态按钮「打开文件夹…」：先用 placeholder 做白名单占位，再调 chooseFolder。
+            // 这样 NSOpenPanel 成功选目录后，$folderURL 变更会被 handleFocusedPaneFolderDidChange
+            // 正确识别为「用户主动导航」并写入最近文件夹。
+            Task { @MainActor in
+                expectOpenFolderNavigation(to: RecentFoldersStore.chooseFolderPlaceholderURL)
+                paneVM(at: index).activeTab.chooseFolder()
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1272,7 +1350,23 @@ private struct NavigationNotifications: ViewModifier {
                 guard let command = AppCommand.from(note) else { return }
                 switch command {
                 case .openFolder:
+                    // 菜单栏「打开文件夹…」：用户即将打开 NSOpenPanel 选择任意目录。
+                    // 使用 placeholder 哨兵接受下一次 folderURL 变更为任意真实目录。
+                    RecentFoldersStore.shared.expectOpenFolderNavigation(
+                        to: RecentFoldersStore.chooseFolderPlaceholderURL,
+                        tabID: ObjectIdentifier(focusedPane)
+                    )
                     focusedPane.chooseFolder()
+                case let .openRecentFolder(url):
+                    // 菜单栏「最近使用的文件夹 ▸」用户点中一条。
+                    // 要求：最终仍调用 focusedPane.openFolder(url)，不直写 folderURL，
+                    // 不直调 navigate，从而进入历史栈机制，保证 Back/Forward 正确。
+                    // 只在目标 URL 与当前目录不同时调用，避免 self-click 无谓清空 forwardStack。
+                    if let current = focusedPane.folderURL,
+                       current.standardizedFileURL == url.standardizedFileURL {
+                        break
+                    }
+                    focusedPane.openFolder(url)
                 case .goToFolder:
                     // 只在面板尚未开启时触发，避免重复覆盖用户正在键入的内容。
                     guard !showGoToFolder else { break }
@@ -1289,6 +1383,14 @@ private struct NavigationNotifications: ViewModifier {
                 case .reload:
                     focusedPane.reload()
                 case .parentFolder:
+                    // 「视图 → 上层文件夹」⌘↑：与工具栏 parent 按钮保持同套路，
+                    // 先记录上级目录，再调用 openParentFolder，不改 FolderBrowserViewModel。
+                    if let current = focusedPane.folderURL {
+                        let parentURL = current.deletingLastPathComponent()
+                        if parentURL != current {
+                            RecentFoldersStore.shared.recordFolder(parentURL)
+                        }
+                    }
                     focusedPane.openParentFolder()
                 case .toggleHiddenFiles:
                     focusedPane.toggleHiddenFiles()
