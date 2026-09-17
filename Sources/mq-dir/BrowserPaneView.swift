@@ -881,6 +881,46 @@ struct BrowserPaneView: View {
         return stripped.isEmpty ? nil : stripped
     }
 
+    // MARK: 树形展开的扁平可见行（List 模式带 Chevron/缩进用）
+
+    /// 列表模式下，每一行的扁平化视图模型：
+    /// - entry：实际文件条目
+    /// - depth：缩进层级（0 为根级目录下的直接子项，每展开一级 +1）
+    private struct FlatTreeRow: Identifiable {
+        let entry: FileEntry
+        let depth: Int
+        var id: FileEntry.ID { entry.id }
+    }
+
+    /// 列表模式当前"真正渲染"的所有可见行（带缩进层级）。
+    /// 规则：
+    /// - 搜索 / 标签过滤时：退化为 viewModel.visibleEntries（depth=0，不展开子目录、不加 Chevron，保持现有搜索结果行为不变）
+    /// - 普通浏览时：按 viewModel.expandedPaths + treeChildren 做 DFS 展开，用于显示 Chevron 和缩进
+    private var flatVisibleRows: [FlatTreeRow] {
+        if viewModel.isFiltering || viewModel.isTagFiltering {
+            return viewModel.visibleEntries.map { FlatTreeRow(entry: $0, depth: 0) }
+        }
+        guard let root = viewModel.folderURL else { return [] }
+        let rootEntries = viewModel.treeChildren[root.path] ?? viewModel.entries
+        return flattenWithDepth(FileEntry.treeOrdered(rootEntries), depth: 0)
+    }
+
+    /// 递归 DFS：把给定的 entries 按「当前展开状态」拍扁，附加 depth 信息。
+    /// 只对 entry.isDirectory && viewModel.isExpanded(url) && treeChildren 非空的目录递归下钻。
+    private func flattenWithDepth(_ entries: [FileEntry], depth: Int) -> [FlatTreeRow] {
+        var result: [FlatTreeRow] = []
+        result.reserveCapacity(entries.count)
+        for entry in entries {
+            result.append(FlatTreeRow(entry: entry, depth: depth))
+            if entry.isDirectory,
+               viewModel.isExpanded(entry.url),
+               let children = viewModel.treeChildren[entry.url.path] {
+                result.append(contentsOf: flattenWithDepth(FileEntry.treeOrdered(children), depth: depth + 1))
+            }
+        }
+        return result
+    }
+
     /// Resolve the Size-column string for a row. Files use their own
     /// `size`; directories (which enumerate with `size == nil`) show "…"
     /// while an on-demand size walk runs, the formatted total once it lands
@@ -1211,9 +1251,9 @@ struct BrowserPaneView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(viewModel.visibleEntries) { entry in
-                                rowView(for: entry, nameColumnWidth: nameColumnWidth)
-                                    .id(entry.id)
+                            ForEach(flatVisibleRows) { row in
+                                rowView(for: row, nameColumnWidth: nameColumnWidth)
+                                    .id(row.id)
                             }
                         }
                         .padding(.vertical, 2)
@@ -1324,12 +1364,44 @@ struct BrowserPaneView: View {
     /// Shared body for ↑/↓ key presses on the file list. `extending`
     /// comes from the `KeyPress.modifiers` captured by `onKeyPress` so
     /// Shift+arrow walks reliably without polling `NSEvent` post hoc.
+    ///
+    /// 注意：不再调用 viewModel.moveSelection(by:)，因为后者在 list 模式下使用
+    /// 根级平展数组 cachedVisibleEntries，不符合我们「DFS 展开后按可见顺序导航」
+    /// 的需求；此处直接基于当前 flatVisibleRows 计算偏移和选区，和用户看到的
+    /// 视觉顺序 100% 一致。
     private func handleArrowKey(by offset: Int, extending: Bool, proxy: ScrollViewProxy) {
         if !isFocused { onFocus() }
-        viewModel.moveSelection(by: offset, extending: extending)
-        if let anchor = viewModel.selectionAnchor {
-            proxy.scrollTo(anchor, anchor: .center)
+        let visibleIDs = flatVisibleRows.map(\.id)
+        guard !visibleIDs.isEmpty else { return }
+
+        // 1) 找到当前光标的 index：优先用 selectionAnchor；如果没锚点就找第一个选中项；
+        //    都没有就按 offset>0 选 -1（下一步到 0）或 offset<0 选 0（下一步到末尾前一格）
+        var cursorIdx: Int?
+        if let anchor = viewModel.selectionAnchor, let idx = visibleIDs.firstIndex(of: anchor) {
+            cursorIdx = idx
+        } else {
+            let selected = viewModel.selection
+            for id in visibleIDs where selected.contains(id) {
+                cursorIdx = visibleIDs.firstIndex(of: id)
+                break
+            }
         }
+        let baseIdx = cursorIdx ?? (offset > 0 ? -1 : visibleIDs.count)
+
+        // 2) 偏移 + clamp 到合法范围 [0, visibleIDs.count-1]
+        let rawNext = baseIdx + offset
+        let nextIdx = min(max(rawNext, 0), visibleIDs.count - 1)
+        let nextID = visibleIDs[nextIdx]
+
+        // 3) 应用选区：Shift 按下则 extend，否则 replace
+        if extending {
+            viewModel.extendSelection(to: nextID)
+        } else {
+            viewModel.replaceSelection(nextID)
+        }
+
+        // 4) 滚动：让目标行出现在可视区中央（对齐 Finder 手感）
+        proxy.scrollTo(nextID, anchor: .center)
     }
 
     /// Resolve the right-click target list. If the clicked row is part of
@@ -1349,16 +1421,29 @@ struct BrowserPaneView: View {
     }
 
     @ViewBuilder
-    private func rowView(for entry: FileEntry, nameColumnWidth: CGFloat) -> some View {
+    private func rowView(for row: FlatTreeRow, nameColumnWidth: CGFloat) -> some View {
+        let entry = row.entry
         let isSelected = viewModel.selection.contains(entry.id)
         let isRowDropTarget = entry.isDirectory && rowDropTargeted == entry.id
 
-        let row = FileEntryRow(
+        // Chevron 显示规则：非过滤/非标签浏览模式 + 目录行 → 显示；否则隐藏。
+        // 搜索/标签过滤时保持原有「扁平搜索结果」体验，不展开子目录。
+        let showChevron = !viewModel.isFiltering && !viewModel.isTagFiltering && entry.isDirectory
+        let chevronToggle: (() -> Void)? = showChevron
+            ? { viewModel.toggleExpanded(entry.url) }
+            : nil
+
+        let rowContent = FileEntryRow(
             entry: entry,
             isSelected: isSelected,
             paneIsFocused: isFocused,
             isDropTarget: isRowDropTarget,
             isColumnResizing: isColumnResizing,
+            // 缩进层级：过滤模式下强制 0（不缩进），普通模式下用 row.depth
+            indentLevel: (viewModel.isFiltering || viewModel.isTagFiltering) ? 0 : row.depth,
+            // 目录展开态：过滤模式恒 false（不显示 Chevron），否则读 VM 状态
+            isExpanded: showChevron && viewModel.isExpanded(entry.url),
+            onChevronToggle: chevronToggle,
             nameColumnWidth: max(Self.nameColumnMinWidth, nameColumnWidth),
             columnWidths: viewModel.columnWidths,
             sizeText: sizeText(for: entry),
@@ -1370,14 +1455,6 @@ struct BrowserPaneView: View {
             ),
             commitRename: {
                 viewModel.commitRename()
-                // `commitRename()` reloads `entries`, which makes
-                // SwiftUI unmount the rename TextField in the same
-                // turn — assigning `listFocused = true` synchronously
-                // races that teardown and leaves the focus chain
-                // orphaned (arrow keys silently no-op until the user
-                // clicks). Hop one runloop turn so the unmount + list
-                // re-render settles first; mirrors the same trick
-                // search focus uses in MainWindowView.
                 DispatchQueue.main.async { listFocused = true }
             },
             cancelRename: {
@@ -1386,8 +1463,6 @@ struct BrowserPaneView: View {
             },
             tabRename: { forward in
                 viewModel.beginRenameAdjacent(forward: forward)
-                // If the walk ran off the ends, no row is renaming now —
-                // restore list focus so keyboard nav keeps working.
                 if viewModel.renamingEntryID == nil {
                     DispatchQueue.main.async { listFocused = true }
                 }
@@ -1507,7 +1582,7 @@ struct BrowserPaneView: View {
         if entry.isDirectory {
             // Folder rows are drop TARGETS — drop INTO the subfolder, with
             // a per-row isTargeted state for the highlight.
-            row.onDrop(
+            rowContent.onDrop(
                 of: DragDropSupport.acceptedDropTypes,
                 isTargeted: Binding(
                     get: { rowDropTargeted == entry.id },
@@ -1530,7 +1605,7 @@ struct BrowserPaneView: View {
                 return true
             }
         } else {
-            row
+            rowContent
         }
     }
 }
@@ -1543,6 +1618,12 @@ private struct FileEntryRow: View {
     let paneIsFocused: Bool
     let isDropTarget: Bool
     let isColumnResizing: Bool
+    /// 缩进层级（0 = 根级）。每一级 depth 增加一个缩进垫片。
+    let indentLevel: Int
+    /// 目录是否展开：控制 Chevron 的朝向；文件行恒为 false 且不显示 Chevron。
+    let isExpanded: Bool
+    /// Chevron 点击回调。nil 表示「当前不显示 Chevron」（例如搜索/标签过滤模式或文件行）。
+    let onChevronToggle: (() -> Void)?
     let nameColumnWidth: CGFloat
     let columnWidths: PaneColumnWidths
     /// Pre-resolved string for the Size column. Files render their formatted
@@ -1565,9 +1646,42 @@ private struct FileEntryRow: View {
     /// next / previous visible row's rename (Finder-style).
     let tabRename: (_ forward: Bool) -> Void
 
+    /// 每一级缩进占用的水平宽度（Finder 同款视觉间距）。
+    private static let indentPerLevel: CGFloat = 14
+    /// Chevron 图标自身的固定命中框宽度（比图标稍大，便于点击）。
+    private static let chevronHitWidth: CGFloat = 14
+
     var body: some View {
         HStack(spacing: 0) {
+            // —— Name 列容器：左 → 右：缩进垫片 × N → Chevron（目录才显示） → 图标+名字 VStack
             HStack(spacing: 7) {
+                // 缩进垫片：depth 级，每级固定 indentPerLevel 宽。
+                // 用 Color.clear + frame 实现，不参与命中测试，只负责占位。
+                ForEach(0..<indentLevel, id: \.self) { _ in
+                    Color.clear
+                        .frame(width: Self.indentPerLevel)
+                        .allowsHitTesting(false)
+                }
+
+                // Chevron：仅当 onChevronToggle 非 nil 时渲染（= 目录行 + 非过滤模式）。
+                // 单击/双击用 exclusively(before:) 互斥：双击优先被空回调消费，
+                // 单击失败时才走 toggle 展开，从而避免双击 Chevron 误触发行的双击打开。
+                if let onChevronToggle {
+                    ChevronView(
+                        isExpanded: isExpanded,
+                        textColor: textColor,
+                        secondaryColor: secondaryColor,
+                        onToggle: onChevronToggle
+                    )
+                    .frame(width: Self.chevronHitWidth)
+                } else {
+                    // 非目录或过滤模式：用同宽的透明垫片占位，保证图标和文字的
+                    // 垂直对齐基线与显示 Chevron 时完全一致，避免切换搜索时跳动。
+                    Color.clear
+                        .frame(width: Self.chevronHitWidth)
+                        .allowsHitTesting(false)
+                }
+
                 FileRowIcon(
                     entry: entry,
                     isSelected: isSelected,
@@ -1691,6 +1805,41 @@ private struct FileEntryRow: View {
     // 这里直接复用 ModifiedDateFormatter 再实例化一份，保证 UI 格式一致且 nil 兜底都显示 "—"
     private static let modifiedDateFormatter = ModifiedDateFormatter()
     private static let createdDateFormatter  = ModifiedDateFormatter()
+}
+
+// MARK: Chevron 图标（单独组件，手势与行严格隔离）
+
+/// 独立的 Chevron 展开/收起按钮。
+/// 核心设计：
+/// - 单击：切换展开状态（调用 onToggle）
+/// - 双击：空操作，但**优先消费**双击事件，避免冒泡到外层 row 的 .onTapGesture(count:2)
+/// - 通过 `exclusively(before:)` 保证单击/双击互斥：双击识别成功 → 事件被消费，
+///   单击识别失败 → 不影响外层；双击识别失败 → 单击触发 onToggle。
+private struct ChevronView: View {
+    let isExpanded: Bool
+    let textColor: Color
+    let secondaryColor: Color
+    let onToggle: () -> Void
+
+    var body: some View {
+        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(secondaryColor.opacity(0.85))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            // —— 核心手势隔离：双击先抢事件（空实现），失败再放行给单击 ——
+            .gesture(
+                TapGesture(count: 2)
+                    .onEnded {
+                        // 空操作：双击 Chevron 不展开/收起，也不打开文件夹，
+                        // 唯一的作用是「吃掉」这两次点击，不让外层行的
+                        // double-click 手势误触发 open(entry)。
+                    }
+                    .exclusively(before: TapGesture().onEnded {
+                        onToggle()
+                    })
+            )
+    }
 }
 
 private struct ModifiedDateFormatter {
