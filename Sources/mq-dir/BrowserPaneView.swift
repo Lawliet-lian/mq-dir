@@ -228,6 +228,17 @@ struct BrowserPaneView: View {
     /// 用它让内容区文件名在拖拽阶段切换到更稳定的截断策略，避免长文件名因为中间截断
     /// 每一帧都重算省略位置，造成肉眼可见的闪烁。
     @State private var isColumnResizing = false
+    // MARK: Chevron 命中追踪（用于手势隔离 A1）
+    /// 最近一次点击 Chevron 的 (entry.id, 时间戳)。
+    /// 配合 chevronHitWindow 使用：凡是 row 的单击/双击手势触发时，
+    /// 若该 row 的 id 与 lastChevronHit.id 相同且时间差 < chevronHitWindow，
+    /// 则视为「点击发生在 Chevron 上」，跳过 selection 改变和目录打开。
+    /// 这是纯 SwiftUI 方案，消除 exclusively(before:) 带来的 300ms 延迟。
+    @State private var lastChevronHit: (id: FileEntry.ID, time: Date)?
+    /// Chevron 点击命中判断的时间窗口（秒）。
+    /// 300ms 覆盖 macOS 双击系统阈值（默认 ~270ms），保证双击 Chevron 的
+    /// 第二次点击也会被正确识别为「命中 Chevron」，不误触发行 open。
+    private let chevronHitWindow: TimeInterval = 0.3
     /// 当前正在拖拽预览的列。
     @State private var previewResizeColumn: FileColumnID?
     /// 当前正在预览中的目标宽度。拖拽过程中只用它画竖线，不立即改内容区布局。
@@ -893,32 +904,36 @@ struct BrowserPaneView: View {
     }
 
     /// 列表模式当前"真正渲染"的所有可见行（带缩进层级）。
-    /// 规则：
-    /// - 搜索 / 标签过滤时：退化为 viewModel.visibleEntries（depth=0，不展开子目录、不加 Chevron，保持现有搜索结果行为不变）
-    /// - 普通浏览时：按 viewModel.expandedPaths + treeChildren 做 DFS 展开，用于显示 Chevron 和缩进
+    ///
+    /// 实现要点（性能优化 B：复用 VM 已有缓存的 DFS 结果，避免重复递归）：
+    /// - 普通浏览时：直接使用 viewModel.visibleTreeEntries（它内部已经 cachedTreeRows 缓存，
+    ///   仅在 expandedPaths / treeChildren 变化时失效重算 1 次），然后用
+    ///   `pathComponents` 差值 O(N) 单次遍历算 depth，不再自写递归 DFS。
+    ///   展开顺序与 TreeFileListView 完全一致（因为数据来源完全相同）。
+    /// - 搜索 / 标签过滤时：退化为 viewModel.visibleEntries（depth=0，不加 Chevron/缩进，
+    ///   完全保持现有搜索结果的扁平体验）。
     private var flatVisibleRows: [FlatTreeRow] {
         if viewModel.isFiltering || viewModel.isTagFiltering {
             return viewModel.visibleEntries.map { FlatTreeRow(entry: $0, depth: 0) }
         }
         guard let root = viewModel.folderURL else { return [] }
-        let rootEntries = viewModel.treeChildren[root.path] ?? viewModel.entries
-        return flattenWithDepth(FileEntry.treeOrdered(rootEntries), depth: 0)
+        // 当前目录的 pathComponents 数量作为 depth 基准。
+        // 例：root = /A/B -> pathComponents.count = 3
+        //   直接 child(/A/B/file.txt) -> count=4 -> depth = 4 - 3 - 1 = 0 ✅
+        //   展开子目录后的孙级(/A/B/D1/c.txt) -> count=5 -> depth = 1 ✅
+        let rootPathCount = root.pathComponents.count
+        return viewModel.visibleTreeEntries.map { entry in
+            let rawDepth = entry.url.pathComponents.count - rootPathCount - 1
+            return FlatTreeRow(entry: entry, depth: max(0, rawDepth))
+        }
     }
 
-    /// 递归 DFS：把给定的 entries 按「当前展开状态」拍扁，附加 depth 信息。
-    /// 只对 entry.isDirectory && viewModel.isExpanded(url) && treeChildren 非空的目录递归下钻。
-    private func flattenWithDepth(_ entries: [FileEntry], depth: Int) -> [FlatTreeRow] {
-        var result: [FlatTreeRow] = []
-        result.reserveCapacity(entries.count)
-        for entry in entries {
-            result.append(FlatTreeRow(entry: entry, depth: depth))
-            if entry.isDirectory,
-               viewModel.isExpanded(entry.url),
-               let children = viewModel.treeChildren[entry.url.path] {
-                result.append(contentsOf: flattenWithDepth(FileEntry.treeOrdered(children), depth: depth + 1))
-            }
-        }
-        return result
+    /// Chevron 命中判断：给定 entry.id，判断「最近一次点击 Chevron」是否发生在
+    /// 该 row 上，且在 chevronHitWindow 时间窗口内。
+    /// 用于 rowView 的单击/双击手势开头判断，命中即跳过 selection/open，实现手势隔离。
+    private func isHitChevron(for id: FileEntry.ID) -> Bool {
+        guard let hit = lastChevronHit else { return false }
+        return hit.id == id && Date().timeIntervalSince(hit.time) < chevronHitWindow
     }
 
     /// Resolve the Size-column string for a row. Files use their own
@@ -1429,8 +1444,15 @@ struct BrowserPaneView: View {
         // Chevron 显示规则：非过滤/非标签浏览模式 + 目录行 → 显示；否则隐藏。
         // 搜索/标签过滤时保持原有「扁平搜索结果」体验，不展开子目录。
         let showChevron = !viewModel.isFiltering && !viewModel.isTagFiltering && entry.isDirectory
+        // A1: onChevronToggle 点击时，瞬间写命中标记 → 再调 toggleExpanded，
+        // 保证外层 row 级手势读到的命中窗口覆盖这次点击的后续手势回调。
         let chevronToggle: (() -> Void)? = showChevron
-            ? { viewModel.toggleExpanded(entry.url) }
+            ? {
+                // 顺序重要：先写 lastChevronHit，保证外层 simultaneousGesture(TapGesture)
+                // 在 Chevron.onTapGesture 之后触发时，isHitChevron 已为 true。
+                lastChevronHit = (entry.id, Date())
+                viewModel.toggleExpanded(entry.url)
+              }
             : nil
 
         let rowContent = FileEntryRow(
@@ -1470,6 +1492,8 @@ struct BrowserPaneView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
+            // A1: 点击 Chevron → 命中窗口内，跳过双击打开，不误触发行 open。
+            guard !isHitChevron(for: entry.id) else { return }
             // ⌘+double-click on a folder opens it in a new tab —
             // mirrors Finder. Plain double-click stays the
             // "navigate into / launch file" path.
@@ -1486,6 +1510,8 @@ struct BrowserPaneView: View {
             }
         }
         .simultaneousGesture(TapGesture().onEnded {
+            // A1: 点击 Chevron → 命中窗口内，跳过单击选中，保持 selection 不变。
+            guard !isHitChevron(for: entry.id) else { return }
             if !isFocused { onFocus() }
             let mods = NSEvent.modifierFlags
             if mods.contains(.shift) {
@@ -1533,6 +1559,8 @@ struct BrowserPaneView: View {
             },
             normalizeHangul: normalizeHangulOnDragOut,
             onClick: { event in
+                // A1: 点击 Chevron → 未激活窗口路径下同样跳过 selection 改变。
+                guard !isHitChevron(for: entry.id) else { return }
                 if !isFocused { onFocus() }
                 let mods = event.modifierFlags
                 if mods.contains(.shift) {
@@ -1544,6 +1572,8 @@ struct BrowserPaneView: View {
                 }
             },
             onDoubleClick: { _ in
+                // A1: 点击 Chevron → 未激活窗口路径下同样跳过双击打开。
+                guard !isHitChevron(for: entry.id) else { return }
                 // 窗口未激活状态下双击某行：如果是目录，也同样记录到最近文件夹。
                 if entry.isDirectory {
                     RecentFoldersStore.shared.recordFolder(entry.url)
@@ -1810,11 +1840,18 @@ private struct FileEntryRow: View {
 // MARK: Chevron 图标（单独组件，手势与行严格隔离）
 
 /// 独立的 Chevron 展开/收起按钮。
-/// 核心设计：
-/// - 单击：切换展开状态（调用 onToggle）
-/// - 双击：空操作，但**优先消费**双击事件，避免冒泡到外层 row 的 .onTapGesture(count:2)
-/// - 通过 `exclusively(before:)` 保证单击/双击互斥：双击识别成功 → 事件被消费，
-///   单击识别失败 → 不影响外层；双击识别失败 → 单击触发 onToggle。
+///
+/// A1 优化：消除 ~300ms 固有延迟
+/// — 旧方案用 `TapGesture(count:2).exclusively(before: TapGesture())`，
+///   单击手势必须等双击「识别失败」后才触发，带来约 300ms 等待。
+/// — 新方案改为「纯单击手势 + 外层时间戳窗口命中判断」：
+///   1) 此处仅一个普通 onTapGesture，点下去立即调用 onToggle，**零延迟**。
+///   2) onToggle 闭包（由 rowView 构造）会同时写 BrowserPaneView 的
+///      `lastChevronHit = (entry.id, Date())`，命中窗口 300ms。
+///   3) 外层 row 的单击(selection)和双击(open)手势开头读 `isHitChevron(for:)`，
+///      命中即跳过，从而实现：
+///        • 单击 Chevron → 立即 toggle，不选行
+///        • 双击 Chevron → 两次点击都写命中标记 → open 被跳过，不误打开目录
 private struct ChevronView: View {
     let isExpanded: Bool
     let textColor: Color
@@ -1827,18 +1864,10 @@ private struct ChevronView: View {
             .foregroundStyle(secondaryColor.opacity(0.85))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
-            // —— 核心手势隔离：双击先抢事件（空实现），失败再放行给单击 ——
-            .gesture(
-                TapGesture(count: 2)
-                    .onEnded {
-                        // 空操作：双击 Chevron 不展开/收起，也不打开文件夹，
-                        // 唯一的作用是「吃掉」这两次点击，不让外层行的
-                        // double-click 手势误触发 open(entry)。
-                    }
-                    .exclusively(before: TapGesture().onEnded {
-                        onToggle()
-                    })
-            )
+            // 仅单击识别，瞬间触发，无任何互斥等待
+            .onTapGesture {
+                onToggle()
+            }
     }
 }
 
