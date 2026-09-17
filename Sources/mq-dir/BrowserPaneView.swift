@@ -185,6 +185,88 @@ private struct TabReorderDropDelegate: DropDelegate {
     }
 }
 
+/// 顶部三区（Tab 栏 / Pane Header / Column Header）的导航 Drop Delegate。
+/// 接受从 Finder（或任何提供 public.file-url 的应用）拖进来的文件或文件夹：
+/// - 拖文件夹 → 直接在目标 Pane 打开该目录
+/// - 拖文件 → 打开该文件所在的父目录
+/// - 拖多个 → 只处理第 1 个
+///
+/// 设计要点（严格对齐项目约束）：
+/// 1. 用 `DragDropSupport.resolveURLs`（项目已有管道）解析，不重新实现
+/// 2. 走 `RecentFoldersStore.expectOpenFolderNavigation` + `viewModel.openFolder`，
+///    保证和面包屑 / ⇧⌘G / 双击 等「主动导航」共享同一套最近记录 + Back/Forward 机制
+/// 3. 仅在 performDrop 真正解析成功并决定导航后，才调 `onFocus()` 激活目标 Pane
+///    避免无效 Drop 也抢焦点
+/// 4. 使用 `.link` 操作语义，光标和 Finder 里「拖入打开」的视觉一致
+private struct NavigateDropDelegate: DropDelegate {
+    let paneVM: PaneTabsViewModel
+    let onFocus: () -> Void
+    @Binding var headerZoneIsDropTargeted: Bool
+
+    func dropEntered(info: DropInfo) {
+        headerZoneIsDropTargeted = true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        headerZoneIsDropTargeted = false
+    }
+
+    @MainActor
+    func performDrop(info: DropInfo) -> Bool {
+        let viewModel = paneVM.activeTab
+        // 异步解析 URL（NSItemProvider 的 load 回调不保证在主队列）
+        Task {
+            let providers = info.itemProviders(for: [UTType.fileURL.identifier])
+            let urls = await DragDropSupport.resolveURLs(from: providers)
+            guard let firstURL = urls.first else {
+                // 解析不到任何有效 URL → 不清高亮？这里先清，避免 hover 态残留
+                await MainActor.run { headerZoneIsDropTargeted = false }
+                return
+            }
+            await MainActor.run {
+                // 清掉 hover 高亮，视觉上立即响应
+                headerZoneIsDropTargeted = false
+
+                // 计算目标目录：文件夹直接用，文件取父级
+                let isDirectory = (try? firstURL.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                let targetFolderURL: URL
+                if isDirectory {
+                    targetFolderURL = firstURL.standardizedFileURL
+                } else {
+                    targetFolderURL = firstURL.deletingLastPathComponent().standardizedFileURL
+                }
+
+                // 与当前目录相同 → 不导航（避免无谓清空 forwardStack），但仍可以激活焦点
+                var willChangeFolder = true
+                if let current = viewModel.folderURL,
+                   current.standardizedFileURL == targetFolderURL {
+                    willChangeFolder = false
+                }
+
+                // 只有实际要发生目录切换时，才写「期望导航」白名单，
+                // 保证后续 $folderURL 变更会被最近文件夹管道识别为主动导航。
+                if willChangeFolder {
+                    let tabID = ObjectIdentifier(viewModel)
+                    RecentFoldersStore.shared.expectOpenFolderNavigation(
+                        to: targetFolderURL,
+                        tabID: tabID
+                    )
+                    viewModel.openFolder(targetFolderURL)
+                }
+
+                // 导航成功（或命中当前目录也可以激活）后，把焦点切到目标 Pane，
+                // 便于用户立即继续操作（双击、⌘↑、搜索等）。
+                onFocus()
+            }
+        }
+        return true
+    }
+}
+
 struct BrowserPaneView: View {
     let index: Int
     @ObservedObject var paneVM: PaneTabsViewModel
@@ -212,6 +294,10 @@ struct BrowserPaneView: View {
 
     @State private var paneIsDropTargeted = false
     @State private var rowDropTargeted: FileEntry.ID?
+    /// 顶部三区（Tab 栏 / Pane Header / Column Header）作为导航 Drop 目标时，
+    /// 是否处于 hover 态。用于给整个 Pane 画高亮边框，明确用户松手后
+    /// 会在哪个 Pane 打开目录。
+    @State private var headerZoneIsDropTargeted = false
     /// Where the blue insertion-line indicator should render in this
     /// pane's tab bar while a tab is being dragged over it. `nil` =
     /// no preview (no drag in this pane). `0` = before the first tab,
@@ -303,6 +389,9 @@ struct BrowserPaneView: View {
     }
 
     private var paneBorderColor: Color {
+        // 顶部三区（Tab/Header/Column）作为导航 Drop 目标时，优先显示高亮边框，
+        // 让用户一眼就知道松手后会在哪个 Pane 打开目录。
+        if headerZoneIsDropTargeted { return Theme.Color.accent }
         if paneIsDropTargeted && rowDropTargeted == nil { return Theme.Color.accent }
         if isFocused { return Theme.Color.accent }
         return .clear
@@ -515,6 +604,17 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
         }
+        // 顶部第一区导航 Drop：Tab 栏空白区域接受从 Finder 拖来的文件/文件夹，
+        // 用 fileURL 类型匹配，不会干扰现有 TabReorderDropDelegate（它只收 plainText）。
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [UTType.fileURL.identifier],
+            delegate: NavigateDropDelegate(
+                paneVM: paneVM,
+                onFocus: onFocus,
+                headerZoneIsDropTargeted: $headerZoneIsDropTargeted
+            )
+        )
     }
 
     /// Blue 2pt vertical bar — the Chrome-style "this is where the tab
@@ -709,6 +809,17 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separatorFaint).frame(height: 0.5)
         }
+        // 顶部第二区导航 Drop：Pane Header 整条接受从 Finder 拖来的文件/文件夹，
+        // 不影响现有：paneHeaderTitle 的拖拽源（appKitFileDrag）、viewModeToggle 的按钮点击。
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [UTType.fileURL.identifier],
+            delegate: NavigateDropDelegate(
+                paneVM: paneVM,
+                onFocus: onFocus,
+                headerZoneIsDropTargeted: $headerZoneIsDropTargeted
+            )
+        )
     }
 
     /// Active tag-filter affordance, mounted in the pane header next to the
@@ -1105,6 +1216,17 @@ struct BrowserPaneView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.Color.separator).frame(height: 0.5)
         }
+        // 顶部第三区导航 Drop：Column Header 整条接受从 Finder 拖来的文件/文件夹，
+        // 不影响现有：sortHeader 的点击排序、ColumnResizeHandle 的拖拽改列宽。
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [UTType.fileURL.identifier],
+            delegate: NavigateDropDelegate(
+                paneVM: paneVM,
+                onFocus: onFocus,
+                headerZoneIsDropTargeted: $headerZoneIsDropTargeted
+            )
+        )
     }
 
     /// 构造 FileColumnID → columnWidths 属性的 Binding（集中在一处避免重复手写）
