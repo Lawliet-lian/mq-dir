@@ -19,8 +19,8 @@ final class RecentFoldersStore: ObservableObject {
     /// 命名空间与 goToFolder / menu 的本地化 key 保持一致：mqdir.*
     static let defaultsKey = "mqdir.recentFolders.items"
 
-    /// 最多保留的条目数（与 Finder / 旧 GoToFolder 最近使用上限保持一致）。
-    static let maximumItemCount = 10
+    /// 最多保留的条目数（菜单「最近使用的文件夹」+ ⇧⌘G 面板共用同一份上限）。
+    static let maximumItemCount = 20
 
     /// 最近文件夹的绝对 POSIX 路径列表。
     /// index 0 = 最近一次成功跳转的目录；UI 直接按数组顺序渲染即可。
